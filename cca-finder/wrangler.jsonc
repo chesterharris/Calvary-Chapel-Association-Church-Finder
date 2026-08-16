@@ -1,0 +1,10 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/static-assets/config.json",
+  "name": "cca-map-site",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-14",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  }
+}
