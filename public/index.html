@@ -521,6 +521,14 @@
     padding: 0 12px;
     z-index: 2;
     border-right: 1px solid rgba(166,138,74,0.4);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    height: 100%;
+  }
+  .ticker-label:hover {
+    color: #f2c76e;
+    text-decoration: underline;
   }
   .ticker-track-wrap {
     flex: 1;
@@ -534,11 +542,14 @@
     display: inline-flex;
     align-items: center;
     white-space: nowrap;
-    animation: ticker-scroll 60s linear infinite;
+    /* --ticker-duration is set from JS once we know the content width, so the
+       reading speed (px/sec) stays roughly constant no matter how many
+       conferences are listed. This fallback only applies before that runs. */
+    animation: ticker-scroll var(--ticker-duration, 45s) linear infinite;
     padding-left: 100%;
   }
   .ticker-bar.ticker-loading .ticker-track {
-    animation-duration: 20s;
+    animation-duration: 18s;
   }
   .ticker-track-wrap:hover .ticker-track {
     animation-play-state: paused;
@@ -602,7 +613,7 @@
     </div>
   </header>
   <div id="conferenceTicker" class="ticker-bar ticker-loading">
-    <span class="ticker-label">CCA Conferences</span>
+    <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">CCA Conferences</a>
     <div class="ticker-track-wrap">
       <div id="tickerTrack" class="ticker-track">
         <span class="ticker-item">Loading upcoming CCA conferences…</span>
@@ -1331,6 +1342,9 @@
   const tickerTrack = document.getElementById('tickerTrack');
   const tickerDismissBtn = document.getElementById('tickerDismissBtn');
 
+  // Reading speed in pixels/second - tune this to taste. Lower = slower/easier to read.
+  const TICKER_PX_PER_SEC = 55;
+
   function renderTicker(items) {
     tickerBar.classList.remove('ticker-loading');
     if (!items || !items.length) {
@@ -1338,14 +1352,28 @@
       return;
     }
     const pieces = items.map(function(c) {
-      const label = escapeHtml(c.title) + (c.detail ? ': ' + escapeHtml(c.detail) : '');
-      return c.link
-        ? '<a class="ticker-item ticker-link" href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>'
-        : '<span class="ticker-item">' + label + '</span>';
+      // Plain text for the title/detail. Only the source's own link text (if
+      // any) becomes clickable - e.g. "register now" - not the whole entry.
+      let html = '<span class="ticker-item">' + escapeHtml(c.title);
+      if (c.detail) html += ': ' + escapeHtml(c.detail);
+      html += '</span>';
+      if (c.link) {
+        const linkLabel = c.linkText && c.linkText.trim() ? c.linkText.trim() : 'more info';
+        html += ' <a class="ticker-item ticker-link" href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(linkLabel) + '</a>';
+      }
+      return html;
     });
     const row = pieces.join('<span class="ticker-sep">&bull;</span>');
     // Duplicated once so the marquee loop is seamless (see -50% keyframe).
     tickerTrack.innerHTML = row + '<span class="ticker-sep">&bull;</span>' + row;
+
+    // Set scroll duration based on actual content width so speed (px/sec)
+    // stays roughly constant whether there are 3 conferences or 30.
+    requestAnimationFrame(function() {
+      const fullWidth = tickerTrack.scrollWidth / 2; // track is duplicated 2x
+      const duration = Math.max(fullWidth / TICKER_PX_PER_SEC, 15); // floor so it's never too fast
+      tickerBar.style.setProperty('--ticker-duration', duration + 's');
+    });
   }
 
   async function loadTicker() {
