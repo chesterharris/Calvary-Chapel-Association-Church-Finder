@@ -2,3 +2,6 @@ node_modules/
 .wrangler/
 .dev.vars
 src/index0old.js
+public/No_Dupes.txt
+.gitignore
+public/Removed_Dupes.txt
