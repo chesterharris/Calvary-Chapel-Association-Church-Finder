@@ -1,3 +1,4 @@
 node_modules/
 .wrangler/
 .dev.vars
+src/index0old.js
