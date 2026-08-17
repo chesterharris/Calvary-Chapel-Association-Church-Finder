@@ -12,6 +12,12 @@
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
 
+// Bump this any time parseConferences() (or anything it depends on) changes.
+// The cache key includes this version, so a fix is never masked by an old
+// cached response sitting around from before the fix - it's a brand new
+// cache key, not a hit against the stale one.
+const CACHE_VERSION = 2;
+
 const ENTITY_MAP = {
   '&amp;': '&', '&nbsp;': ' ', '&quot;': '"', '&#039;': "'", '&apos;': "'",
   '&#8211;': '\u2013', '&#8212;': '\u2014', '&#8216;': '\u2018', '&#8217;': '\u2019',
@@ -167,7 +173,9 @@ function parseConferences(rawHtml) {
 
 async function handleConferences(request, ctx) {
   const cache = caches.default;
-  const cacheKey = new Request(request.url, request);
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set('cacheVersion', String(CACHE_VERSION));
+  const cacheKey = new Request(cacheUrl.toString(), request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
