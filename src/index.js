@@ -43,6 +43,40 @@ function stripScriptsAndStyles(html) {
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
 }
 
+// Narrows the search down to just the actual conference-list region of the
+// page, using nearby heading/footer text as landmarks. This means a stray
+// <strong> tag in the site's nav, header, or a leftover script fragment
+// elsewhere on the page can never get matched as a "conference" in the first
+// place - it's simply outside the slice we search. Falls back to the full
+// (script/style-stripped) page if the landmarks aren't found, so a wording
+// change on the source site degrades gracefully rather than breaking.
+function extractContentRegion(html) {
+  const startPatterns = [/Regional Conferences/i, /Upcoming Conferences/i, /<h1[^>]*>\s*Conferences/i];
+  const endPatterns = [/Scroll to top/i, /©\s*\d{4}/i, /<footer\b/i];
+
+  let startIdx = -1;
+  for (const p of startPatterns) {
+    const m = html.match(p);
+    if (m && m.index !== undefined) { startIdx = m.index; break; }
+  }
+  let endIdx = -1;
+  for (const p of endPatterns) {
+    const m = html.match(p);
+    if (m && m.index !== undefined && (endIdx === -1 || m.index < endIdx)) endIdx = m.index;
+  }
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    return html.slice(startIdx, endIdx);
+  }
+  return html; // couldn't find landmarks - fall back to searching the whole page
+}
+
+// Detail text should read like a date/location line, never like code. If it
+// contains obvious programming tokens, something went wrong upstream (a
+// mismatched tag boundary, an unstripped script fragment, etc.) - better to
+// drop that one entry than show junk in the ticker.
+const CODE_SMELL = /function\s*\(|=>|\bwindow\.|\bdocument\.|\bvar\s+\w+\s*=|\bconst\s+\w+\s*=|sessionStorage|querySelector|getElementById/i;
+
 const MAX_DETAIL_LENGTH = 220; // safety net in case a match runs long
 
 // Pulls out each "<strong>2026 Some Conference:</strong> details... <a href=...>link text</a>"
@@ -52,7 +86,7 @@ const MAX_DETAIL_LENGTH = 220; // safety net in case a match runs long
 // kept separately (href + its own visible text) so the front end can make just
 // that link text clickable, rather than the whole entry.
 function parseConferences(rawHtml) {
-  const html = stripScriptsAndStyles(rawHtml);
+  const html = extractContentRegion(stripScriptsAndStyles(rawHtml));
   const results = [];
   // Stop the detail capture at the next <strong>, a closing </p>, or the start
   // of another script/style tag (belt-and-suspenders alongside the stripping above).
@@ -62,6 +96,7 @@ function parseConferences(rawHtml) {
     const rawTitle = decodeEntities(match[1]).trim();
     if (!/^\d{4}\b/.test(rawTitle)) continue; // keep only entries that start with a year
     if (rawTitle.length > 120) continue; // real titles are short; long ones are mismatches
+    if (CODE_SMELL.test(rawTitle)) continue;
 
     const rawDetail = (match[2] || '').slice(0, 4000); // cap input size before processing
     const linkMatch = rawDetail.match(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
@@ -74,6 +109,8 @@ function parseConferences(rawHtml) {
     let detail = stripTags(detailWithoutLink)
       .replace(/\s*\|\s*$/, '')
       .trim();
+
+    if (CODE_SMELL.test(detail)) continue; // discard the whole entry rather than show junk
 
     if (detail.length > MAX_DETAIL_LENGTH) detail = detail.slice(0, MAX_DETAIL_LENGTH).trim() + '\u2026';
 

@@ -19,6 +19,10 @@
     margin: 0;
     padding: 0;
     height: 100%;
+    overflow: hidden; /* the page itself never scrolls - the map handles all panning */
+    overscroll-behavior: none; /* stop iOS rubber-band scroll from tugging the whole page */
+    position: fixed;
+    width: 100%;
     font-family: 'Georgia', 'Iowan Old Style', serif;
     background: var(--paper);
     color: var(--ink);
@@ -27,6 +31,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh; /* adapts to the visible viewport as Safari's address bar hides/shows */
   }
   header {
     background: var(--evergreen);
