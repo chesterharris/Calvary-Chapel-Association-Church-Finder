@@ -43,14 +43,49 @@ function stripScriptsAndStyles(html) {
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
 }
 
-// Narrows the search down to just the actual conference-list region of the
-// page, using nearby heading/footer text as landmarks. This means a stray
-// <strong> tag in the site's nav, header, or a leftover script fragment
-// elsewhere on the page can never get matched as a "conference" in the first
-// place - it's simply outside the slice we search. Falls back to the full
-// (script/style-stripped) page if the landmarks aren't found, so a wording
-// change on the source site degrades gracefully rather than breaking.
-function extractContentRegion(html) {
+// Finds the exact <div> that holds the conference listings (identified by two
+// stable class tokens seen in its opening tag) and returns only what's inside
+// it - by scanning matching <div>/</div> pairs rather than just searching for
+// nearby text. This means content sitting after the last conference but still
+// inside the page (leftover scripts, footer nav, etc.) can never be included,
+// because it's structurally outside this div, not just "far from a landmark."
+function extractConferenceListDiv(html) {
+  const openTagRe = /<div\b[^>]*class="([^"]*)"[^>]*>/gi;
+  let m;
+  let startIdx = -1;
+  let afterOpenTag = -1;
+  while ((m = openTagRe.exec(html)) !== null) {
+    const classAttr = m[1];
+    if (classAttr.includes('flex_column_div') && classAttr.includes('avia-builder-el-2')) {
+      startIdx = m.index;
+      afterOpenTag = openTagRe.lastIndex;
+      break;
+    }
+  }
+  if (startIdx === -1) return null; // marker div not found - caller will fall back
+
+  const tagRe = /<div\b[^>]*>|<\/div>/gi;
+  tagRe.lastIndex = afterOpenTag;
+  let depth = 1;
+  let match;
+  while ((match = tagRe.exec(html)) !== null) {
+    if (match[0].toLowerCase() === '</div>') {
+      depth--;
+      if (depth === 0) {
+        return html.slice(startIdx, tagRe.lastIndex);
+      }
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(startIdx); // unbalanced markup - take everything from the start point onward
+}
+
+// Fallback used only if the specific div above can't be found (e.g. the site's
+// markup changes). Bounds the search using nearby heading/footer text instead -
+// looser than the div-scan above, but still much safer than searching the
+// whole page.
+function extractByLandmarks(html) {
   const startPatterns = [/Regional Conferences/i, /Upcoming Conferences/i, /<h1[^>]*>\s*Conferences/i];
   const endPatterns = [/Scroll to top/i, /©\s*\d{4}/i, /<footer\b/i];
 
@@ -68,7 +103,11 @@ function extractContentRegion(html) {
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
     return html.slice(startIdx, endIdx);
   }
-  return html; // couldn't find landmarks - fall back to searching the whole page
+  return html; // couldn't find landmarks either - fall back to searching the whole page
+}
+
+function extractContentRegion(html) {
+  return extractConferenceListDiv(html) || extractByLandmarks(html);
 }
 
 // Detail text should read like a date/location line, never like code. If it
@@ -88,9 +127,10 @@ const MAX_DETAIL_LENGTH = 220; // safety net in case a match runs long
 function parseConferences(rawHtml) {
   const html = extractContentRegion(stripScriptsAndStyles(rawHtml));
   const results = [];
-  // Stop the detail capture at the next <strong>, a closing </p>, or the start
-  // of another script/style tag (belt-and-suspenders alongside the stripping above).
-  const re = /<strong>\s*([^<]+?)\s*<\/strong>\s*:?\s*([\s\S]*?)(?=<strong>|<\/p>|<script|<style|$)/gi;
+  // Stop the detail capture at the next <strong>, a closing </p> or </div>, or
+  // the start of another script/style tag (belt-and-suspenders alongside the
+  // stripping and div-scoping above).
+  const re = /<strong>\s*([^<]+?)\s*<\/strong>\s*:?\s*([\s\S]*?)(?=<strong>|<\/p>|<\/div>|<script|<style|$)/gi;
   let match;
   while ((match = re.exec(html)) !== null) {
     const rawTitle = decodeEntities(match[1]).trim();
@@ -108,6 +148,7 @@ function parseConferences(rawHtml) {
     const detailWithoutLink = linkMatch ? rawDetail.replace(linkMatch[0], '') : rawDetail;
     let detail = stripTags(detailWithoutLink)
       .replace(/\s*\|\s*$/, '')
+      .replace(/^:\s*/, '') // some entries have the colon in a nested <span> rather than right after </strong>
       .trim();
 
     if (CODE_SMELL.test(detail)) continue; // discard the whole entry rather than show junk

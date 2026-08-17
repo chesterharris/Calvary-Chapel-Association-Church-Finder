@@ -1302,6 +1302,17 @@
     try {
       const updatedHtml = bakeChurchesIntoHtml(snapshot);
       downloadTextFile(updatedHtml, 'CCA_USA_map_updated.html', 'text/html');
+      // Everything currently in localStorage (added/deleted/edited) is now
+      // permanently baked into the churches array of the file we just
+      // downloaded. If we don't clear it here, opening that new file later
+      // and adding anything else would stack these same entries on top of
+      // themselves again - each add+export+reopen cycle duplicating the
+      // previously-added locations.
+      localStorage.removeItem(LS_ADDED);
+      localStorage.removeItem(LS_DELETED);
+      localStorage.removeItem(LS_EDITS);
+      renderMarkers();
+      renderManageList();
     } catch (err) {
       alert(
         'Something went wrong building the updated file (' + err.message + '). ' +
