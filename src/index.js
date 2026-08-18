@@ -325,6 +325,145 @@ function parseConferences(rawHtml) {
   return results;
 }
 
+// ---- Church data (Workers KV) ----
+//
+// All church records live in KV under a single key, "churches", as one JSON
+// array. The public map reads this via GET /api/churches. The admin panel
+// writes to it via POST (add/edit) and DELETE, both gated behind the same
+// isAdminRequest() check used elsewhere in this file.
+//
+// IDs are permanent and never reused, even after a delete - see
+// getNextChurchId() below. This matters because Edit/Delete/Save all target
+// a record by its id, and a reused id could silently operate on the wrong
+// church later.
+
+const CHURCHES_KV_KEY = 'churches';
+
+async function loadChurches(env) {
+  const raw = await env.CHURCHES_KV.get(CHURCHES_KV_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+async function saveChurches(env, churches) {
+  await env.CHURCHES_KV.put(CHURCHES_KV_KEY, JSON.stringify(churches));
+}
+
+// Next id is always one past the highest id currently in use - ids only ever
+// go forward, so a deleted church's old id is retired permanently rather
+// than being handed out again.
+function getNextChurchId(churches) {
+  let maxId = 0;
+  for (const c of churches) {
+    if (typeof c.id === 'number' && c.id > maxId) maxId = c.id;
+  }
+  return maxId + 1;
+}
+
+async function handleGetChurches(request, env) {
+  const churches = await loadChurches(env);
+  return new Response(JSON.stringify(churches), {
+    headers: {
+      'Content-Type': 'application/json',
+      // Data changes any time the admin saves, so don't let browsers or CDNs
+      // cache this - always ask KV fresh.
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function handleSaveChurch(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!incoming || typeof incoming !== 'object' || !incoming.name) {
+    return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const churches = await loadChurches(env);
+
+  if (incoming.id != null) {
+    // Editing an existing record - id must already exist.
+    const index = churches.findIndex(c => c.id === incoming.id);
+    if (index === -1) {
+      return new Response(JSON.stringify({ error: 'Church id not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    churches[index] = { ...churches[index], ...incoming };
+  } else {
+    // Adding a new record - assign the next permanent id ourselves; never
+    // trust an id the client might have sent for a "new" record.
+    const newChurch = { ...incoming, id: getNextChurchId(churches) };
+    churches.push(newChurch);
+  }
+
+  await saveChurches(env, churches);
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+async function handleDeleteChurch(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!body || typeof body.id !== 'number') {
+    return new Response(JSON.stringify({ error: 'Missing id' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const churches = await loadChurches(env);
+  const filtered = churches.filter(c => c.id !== body.id);
+
+  if (filtered.length === churches.length) {
+    return new Response(JSON.stringify({ error: 'Church id not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  await saveChurches(env, filtered);
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
 async function handleConferences(request, ctx) {
   const cache = caches.default;
   const cacheUrl = new URL(request.url);
@@ -382,6 +521,15 @@ export default {
     }
     if (url.pathname === '/api/logout' && request.method === 'POST') {
       return handleLogout();
+    }
+    if (url.pathname === '/api/churches' && request.method === 'GET') {
+      return handleGetChurches(request, env);
+    }
+    if (url.pathname === '/api/churches' && request.method === 'POST') {
+      return handleSaveChurch(request, env);
+    }
+    if (url.pathname === '/api/churches' && request.method === 'DELETE') {
+      return handleDeleteChurch(request, env);
     }
     return env.ASSETS.fetch(request);
   }
