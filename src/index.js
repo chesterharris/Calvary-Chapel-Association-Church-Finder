@@ -9,8 +9,172 @@
 //
 // Edge-cached for 6 hours so we're not re-scraping calvarycca.org on every load.
 
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
+
+// ---- Admin login (Google Sign-In) ----
+//
+// Flow: the browser gets a signed ID token from Google, POSTs it to
+// /api/verify-admin. We verify the token's signature against Google's public
+// keys (so it can't be forged), then check the email inside it against
+// env.ADMIN_EMAIL (a Worker secret - never hardcoded, never logged). If it
+// matches, we hand back our own short-lived signed session cookie so the
+// browser doesn't have to re-run the Google flow on every request.
+//
+// This is deliberately NOT tied to hiding any features yet - right now it
+// only lets the frontend know "yes, this visitor is the admin" so it can
+// show a badge. Real feature-gating (hiding Add/Manage/Delete from non-admins)
+// is a separate future step, and when that happens it should also check
+// this same session server-side rather than trusting the browser.
+
+const SESSION_COOKIE = 'cca_admin_session';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+
+function base64UrlEncode(bytes) {
+  let str = '';
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecodeToBytes(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function hmacKey(secret) {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+// Builds "<payload>.<signature>", both base64url. Payload is just
+// { email, exp } - no secrets live in the cookie itself, only the signature
+// proves we issued it.
+async function signSession(payload, secret) {
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
+  const payloadB64 = base64UrlEncode(payloadBytes);
+  const key = await hmacKey(secret);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadB64));
+  const sigB64 = base64UrlEncode(new Uint8Array(sig));
+  return payloadB64 + '.' + sigB64;
+}
+
+// Returns the parsed payload if the signature is valid and it hasn't
+// expired, otherwise null. Never throws.
+async function verifySession(token, secret) {
+  if (!token || !token.includes('.')) return null;
+  const [payloadB64, sigB64] = token.split('.');
+  try {
+    const key = await hmacKey(secret);
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      base64UrlDecodeToBytes(sigB64),
+      new TextEncoder().encode(payloadB64)
+    );
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(payloadB64)));
+    if (!payload.exp || Date.now() / 1000 > payload.exp) return null;
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get('Cookie') || '';
+  const match = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function isAdminRequest(request, env) {
+  const token = getCookie(request, SESSION_COOKIE);
+  const payload = await verifySession(token, env.SESSION_SECRET);
+  return !!(payload && payload.email && env.ADMIN_EMAIL && payload.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase());
+}
+
+async function handleVerifyAdmin(request, env) {
+  const cors = { 'Content-Type': 'application/json' };
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Bad request body' }), { status: 400, headers: cors });
+  }
+
+  const idToken = body && body.token;
+  if (!idToken) {
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Missing token' }), { status: 400, headers: cors });
+  }
+
+  if (!env.GOOGLE_CLIENT_ID || !env.ADMIN_EMAIL || !env.SESSION_SECRET) {
+    // Misconfigured Worker - fail closed, never treat this as "admin".
+    // TEMPORARY DIAGNOSTIC: reports which vars are missing (true/false only,
+    // never the actual values) so we can pinpoint the issue. Remove once fixed.
+    return new Response(JSON.stringify({
+      isAdmin: false,
+      error: 'Server not configured',
+      debug: {
+        hasGoogleClientId: !!env.GOOGLE_CLIENT_ID,
+        hasAdminEmail: !!env.ADMIN_EMAIL,
+        hasSessionSecret: !!env.SESSION_SECRET
+      }
+    }), { status: 500, headers: cors });
+  }
+
+  let payload;
+  try {
+    const result = await jwtVerify(idToken, GOOGLE_JWKS, {
+      issuer: ['https://accounts.google.com', 'accounts.google.com'],
+      audience: env.GOOGLE_CLIENT_ID
+    });
+    payload = result.payload;
+  } catch (err) {
+    // Token didn't verify (forged, expired, wrong audience, etc.) - not admin.
+    return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
+  }
+
+  const email = (payload.email || '').toLowerCase();
+  const isAdmin = !!(payload.email_verified && email === env.ADMIN_EMAIL.toLowerCase());
+
+  if (!isAdmin) {
+    return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  const session = await signSession({ email, exp }, env.SESSION_SECRET);
+
+  const setCookie = `${SESSION_COOKIE}=${encodeURIComponent(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
+  return new Response(JSON.stringify({ isAdmin: true }), {
+    status: 200,
+    headers: { ...cors, 'Set-Cookie': setCookie }
+  });
+}
+
+async function handleWhoAmI(request, env) {
+  const admin = await isAdminRequest(request, env);
+  return new Response(JSON.stringify({ isAdmin: admin }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+function handleLogout() {
+  const clearCookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie }
+  });
+}
 
 // Bump this any time parseConferences() (or anything it depends on) changes.
 // The cache key includes this version, so a fix is never masked by an old
@@ -219,6 +383,15 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/conferences') {
       return handleConferences(request, ctx);
+    }
+    if (url.pathname === '/api/verify-admin' && request.method === 'POST') {
+      return handleVerifyAdmin(request, env);
+    }
+    if (url.pathname === '/api/whoami') {
+      return handleWhoAmI(request, env);
+    }
+    if (url.pathname === '/api/logout' && request.method === 'POST') {
+      return handleLogout();
     }
     return env.ASSETS.fetch(request);
   }

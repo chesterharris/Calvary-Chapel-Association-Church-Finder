@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
     --ink: #1c2b24;
@@ -43,6 +44,28 @@
     column-gap: 16px;
     row-gap: 8px;
     border-bottom: 3px solid var(--brass);
+  }
+  .admin-area {
+    margin-left: 8px;
+    font-size: 0.85em;
+    opacity: 0.85;
+  }
+  .admin-link {
+    color: var(--paper);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .admin-badge {
+    color: var(--paper);
+  }
+  .admin-signout {
+    margin-left: 6px;
+    font-size: 0.9em;
+    opacity: 0.8;
+  }
+  .admin-modal-copy {
+    margin: 8px 0 16px;
+    font-size: 0.95em;
   }
   header .header-title {
     display: flex;
@@ -615,8 +638,23 @@
     <div class="header-actions">
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
+      <span id="adminArea" class="admin-area">
+        <a href="#" id="adminSignInLink" class="admin-link">Admin</a>
+        <span id="adminBadge" class="admin-badge" style="display:none;">Admin ✓ <a href="#" id="adminSignOutLink" class="admin-link admin-signout">Sign out</a></span>
+      </span>
     </div>
   </header>
+
+  <div id="adminSignInOverlay" class="modal-overlay" style="display:none;">
+    <div class="modal admin-modal">
+      <h2>Admin Sign In</h2>
+      <p class="admin-modal-copy">Sign in with the Google account authorized for admin access.</p>
+      <div id="googleSignInButton"></div>
+      <div class="form-actions">
+        <button type="button" id="cancelAdminSignInBtn" class="btn btn-outline">Cancel</button>
+      </div>
+    </div>
+  </div>
   <div id="conferenceTicker" class="ticker-bar ticker-loading">
     <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">CCA Conferences</a>
     <div class="ticker-track-wrap">
@@ -1414,6 +1452,89 @@
   });
 
   loadTicker();
+
+  // ---- Admin sign-in (Google) ----
+  //
+  // This only tells the page "yes/no, is this visitor the admin" - it does
+  // not currently hide or show any features. All the Add/Manage/Delete
+  // buttons above remain visible to everyone, same as before. This is step
+  // one of two: once this is confirmed working, a later update will make
+  // specific features check window.isAdmin before rendering.
+  window.isAdmin = false;
+
+  const adminSignInLink = document.getElementById('adminSignInLink');
+  const adminSignOutLink = document.getElementById('adminSignOutLink');
+  const adminBadge = document.getElementById('adminBadge');
+  const adminSignInOverlay = document.getElementById('adminSignInOverlay');
+  const cancelAdminSignInBtn = document.getElementById('cancelAdminSignInBtn');
+
+  function setAdminUiState(isAdmin) {
+    window.isAdmin = isAdmin;
+    adminSignInLink.style.display = isAdmin ? 'none' : 'inline';
+    adminBadge.style.display = isAdmin ? 'inline' : 'none';
+  }
+
+  async function refreshAdminState() {
+    try {
+      const res = await fetch('/api/whoami', { credentials: 'include', cache: 'no-store' });
+      const data = await res.json();
+      setAdminUiState(!!(data && data.isAdmin));
+    } catch (err) {
+      setAdminUiState(false);
+    }
+  }
+
+  async function handleGoogleCredential(response) {
+    try {
+      const res = await fetch('/api/verify-admin', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: response.credential })
+      });
+      const data = await res.json();
+      setAdminUiState(!!(data && data.isAdmin));
+    } catch (err) {
+      setAdminUiState(false);
+    }
+    adminSignInOverlay.style.display = 'none';
+  }
+
+  function openAdminSignIn() {
+    adminSignInOverlay.style.display = 'flex';
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+      // 1003710296122-u00oj969vb0e402a9smp37uo4mo9ciha.apps.googleusercontent.com is swapped for your real Client ID at
+      // deploy time - see the setup notes for where that happens.
+      google.accounts.id.initialize({
+        client_id: '1003710296122-u00oj969vb0e402a9smp37uo4mo9ciha.apps.googleusercontent.com',
+        callback: handleGoogleCredential
+      });
+      const target = document.getElementById('googleSignInButton');
+      target.innerHTML = '';
+      google.accounts.id.renderButton(target, { theme: 'outline', size: 'large' });
+    }
+  }
+
+  adminSignInLink.addEventListener('click', function(e) {
+    e.preventDefault();
+    openAdminSignIn();
+  });
+
+  cancelAdminSignInBtn.addEventListener('click', function() {
+    adminSignInOverlay.style.display = 'none';
+  });
+
+  adminSignOutLink.addEventListener('click', async function(e) {
+    e.preventDefault();
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    } catch (err) {
+      // Even if the request fails, drop the local UI state.
+    }
+    setAdminUiState(false);
+  });
+
+  refreshAdminState();
 </script>
 
 

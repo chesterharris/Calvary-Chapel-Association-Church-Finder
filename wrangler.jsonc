@@ -1,10 +1,13 @@
 {
   "$schema": "https://developers.cloudflare.com/workers/static-assets/config.json",
-  "name": "cca-map-site",
+  "name": "cca-finder",
   "main": "src/index.js",
   "compatibility_date": "2026-08-14",
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
+  },
+  "vars": {
+    "GOOGLE_CLIENT_ID": "1003710296122-u00oj969vb0e402a9smp37uo4mo9ciha.apps.googleusercontent.com"
   }
 }
