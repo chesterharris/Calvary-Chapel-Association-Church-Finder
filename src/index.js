@@ -120,17 +120,7 @@ async function handleVerifyAdmin(request, env) {
 
   if (!env.GOOGLE_CLIENT_ID || !env.ADMIN_EMAIL || !env.SESSION_SECRET) {
     // Misconfigured Worker - fail closed, never treat this as "admin".
-    // TEMPORARY DIAGNOSTIC: reports which vars are missing (true/false only,
-    // never the actual values) so we can pinpoint the issue. Remove once fixed.
-    return new Response(JSON.stringify({
-      isAdmin: false,
-      error: 'Server not configured',
-      debug: {
-        hasGoogleClientId: !!env.GOOGLE_CLIENT_ID,
-        hasAdminEmail: !!env.ADMIN_EMAIL,
-        hasSessionSecret: !!env.SESSION_SECRET
-      }
-    }), { status: 500, headers: cors });
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Server not configured' }), { status: 500, headers: cors });
   }
 
   let payload;
