@@ -3,6 +3,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Calvary Chapel Association - Church Map</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
@@ -68,6 +70,16 @@
     font-size: 0.95em;
   }
   header .header-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .header-logo {
+    flex-shrink: 0;
+    border-radius: 6px;
+  }
+  .header-title-text {
     display: flex;
     align-items: baseline;
     gap: 10px;
@@ -642,8 +654,11 @@
 <div id="app">
   <header>
     <div class="header-title">
-      <h1>Calvary Chapel Association</h1>
-      <div class="sub">Church Locations</div>
+      <img src="/android-chrome-192x192.png" alt="" class="header-logo" width="40" height="40">
+      <div class="header-title-text">
+        <h1>Calvary Chapel Association</h1>
+        <div class="sub">Church Locations</div>
+      </div>
     </div>
     <div class="search-column">
       <div class="search-wrap">
