@@ -904,9 +904,13 @@
     const roleClass = role === 'hq' ? ' role-hq' : (role === 'team' ? ' role-team' : '');
     const size = role === 'hq' ? 32 : (role === 'team' ? 24 : 22);
     const anchorY = role === 'hq' ? 30 : (role === 'team' ? 22 : 20);
+    // Public visitors see every regular (non-leadership) pin as uniform red,
+    // regardless of actual score. Regional HQ / Regional Team Member pins
+    // keep their real styling and color for everyone, admin or not.
+    const color = (!window.isAdmin && !role) ? '#B91C1C' : scoreColor(c.score);
     return L.divIcon({
       className: '',
-      html: '<div class="score-pin' + roleClass + '" style="background:' + scoreColor(c.score) + ';"></div>',
+      html: '<div class="score-pin' + roleClass + '" style="background:' + color + ';"></div>',
       iconSize: [size, size],
       iconAnchor: [size / 2, anchorY],
       popupAnchor: [0, -anchorY]
@@ -922,7 +926,7 @@
       popup += '<div class="popup-row popup-role-team">Regional Team Member' + (c.region ? ' &mdash; ' + escapeHtml(c.region) : '') + '</div>';
     }
 
-    if (c.score !== undefined && c.score !== null && c.score !== '') {
+    if (window.isAdmin && c.score !== undefined && c.score !== null && c.score !== '') {
       popup += '<div class="popup-row"><span class="label">Score</span>' + escapeHtml(String(c.score)) + '</div>';
     }
 
@@ -945,7 +949,9 @@
       if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url;
       popup += '<div class="popup-row"><span class="label">Website</span><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(c.website) + '</a></div>';
     }
-    popup += '<button type="button" class="popup-delete-btn" data-delete-id="' + escapeHtml(c.id) + '">Delete Location</button>';
+    if (window.isAdmin) {
+      popup += '<button type="button" class="popup-delete-btn" data-delete-id="' + escapeHtml(c.id) + '">Delete Location</button>';
+    }
     return popup;
   }
 
@@ -1018,8 +1024,8 @@
     });
   });
 
-  renderMarkers();
   map.addLayer(markers);
+  initAdminGate();
 
   // ---- Search bar ----
   const searchInput = document.getElementById('searchInput');
@@ -1455,11 +1461,14 @@
 
   // ---- Admin sign-in (Google) ----
   //
-  // This only tells the page "yes/no, is this visitor the admin" - it does
-  // not currently hide or show any features. All the Add/Manage/Delete
-  // buttons above remain visible to everyone, same as before. This is step
-  // one of two: once this is confirmed working, a later update will make
-  // specific features check window.isAdmin before rendering.
+  // On page load, initAdminGate() checks server-side whether this visitor is
+  // signed in as the admin BEFORE the map renders. That single check decides:
+  //   - real score colors + score in popups + delete button + filter bar +
+  //     Add/Manage buttons (admin), or
+  //   - uniform red pins for regular churches, no score, no delete button,
+  //     and those buttons/filter bar hidden (public)
+  // Regional HQ / Regional Team Member pins always keep their real styling,
+  // for every visitor - only "regular" church pins change based on isAdmin.
   window.isAdmin = false;
 
   const adminSignInLink = document.getElementById('adminSignInLink');
@@ -1469,35 +1478,51 @@
   const cancelAdminSignInBtn = document.getElementById('cancelAdminSignInBtn');
 
   function setAdminUiState(isAdmin) {
-    window.isAdmin = isAdmin;
     adminSignInLink.style.display = isAdmin ? 'none' : 'inline';
     adminBadge.style.display = isAdmin ? 'inline' : 'none';
   }
 
-  async function refreshAdminState() {
+  // Hides the score filter bar and the Add/Manage Locations buttons from
+  // public (non-admin) visitors. Admin visitors see everything exactly as
+  // before - nothing changes for you.
+  function applyContentGating(isAdmin) {
+    if (isAdmin) return;
+    const filterBarEl = document.getElementById('filterBar');
+    if (filterBarEl) filterBarEl.style.display = 'none';
+    const addBtn = document.getElementById('btnAddLocation');
+    if (addBtn) addBtn.style.display = 'none';
+    const manageBtn = document.getElementById('btnManageLocations');
+    if (manageBtn) manageBtn.style.display = 'none';
+  }
+
+  async function initAdminGate() {
+    window.isAdmin = false;
     try {
       const res = await fetch('/api/whoami', { credentials: 'include', cache: 'no-store' });
       const data = await res.json();
-      setAdminUiState(!!(data && data.isAdmin));
+      window.isAdmin = !!(data && data.isAdmin);
     } catch (err) {
-      setAdminUiState(false);
+      window.isAdmin = false;
     }
+    applyContentGating(window.isAdmin);
+    setAdminUiState(window.isAdmin);
+    renderMarkers();
   }
 
   async function handleGoogleCredential(response) {
     try {
-      const res = await fetch('/api/verify-admin', {
+      await fetch('/api/verify-admin', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: response.credential })
       });
-      const data = await res.json();
-      setAdminUiState(!!(data && data.isAdmin));
     } catch (err) {
-      setAdminUiState(false);
+      // Ignore - the reload below re-checks status either way.
     }
-    adminSignInOverlay.style.display = 'none';
+    // A full reload re-runs initAdminGate with the fresh session cookie,
+    // so every pin, popup, and button reflects the correct state at once.
+    location.reload();
   }
 
   function openAdminSignIn() {
@@ -1529,12 +1554,10 @@
     try {
       await fetch('/api/logout', { method: 'POST', credentials: 'include' });
     } catch (err) {
-      // Even if the request fails, drop the local UI state.
+      // Ignore - the reload below re-checks status either way.
     }
-    setAdminUiState(false);
+    location.reload();
   });
-
-  refreshAdminState();
 </script>
 
 
