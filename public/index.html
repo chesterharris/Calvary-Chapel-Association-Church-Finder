@@ -733,7 +733,7 @@
           <label for="f_role">Leadership Role</label>
           <select id="f_role">
             <option value="">None</option>
-            <option value="hq">Regional HQ</option>
+            <option value="hq">Regional Leader</option>
             <option value="team">Regional Team Member</option>
           </select>
         </div>
@@ -905,7 +905,7 @@
     const size = role === 'hq' ? 32 : (role === 'team' ? 24 : 22);
     const anchorY = role === 'hq' ? 30 : (role === 'team' ? 22 : 20);
     // Public visitors see every regular (non-leadership) pin as uniform red,
-    // regardless of actual score. Regional HQ / Regional Team Member pins
+    // regardless of actual score. Regional Leader / Regional Team Member pins
     // keep their real styling and color for everyone, admin or not.
     const color = (!window.isAdmin && !role) ? '#B91C1C' : scoreColor(c.score);
     return L.divIcon({
@@ -921,7 +921,7 @@
     let popup = '<div class="popup-name">' + escapeHtml(c.name) + '</div>';
 
     if (c.role === 'hq') {
-      popup += '<div class="popup-row popup-role-hq">&#9733; Regional HQ' + (c.region ? ' &mdash; ' + escapeHtml(c.region) : '') + '</div>';
+      popup += '<div class="popup-row popup-role-hq">&#9733; Regional Leader' + (c.region ? ' &mdash; ' + escapeHtml(c.region) : '') + '</div>';
     } else if (c.role === 'team') {
       popup += '<div class="popup-row popup-role-team">Regional Team Member' + (c.region ? ' &mdash; ' + escapeHtml(c.region) : '') + '</div>';
     }
@@ -1467,7 +1467,7 @@
   //     Add/Manage buttons (admin), or
   //   - uniform red pins for regular churches, no score, no delete button,
   //     and those buttons/filter bar hidden (public)
-  // Regional HQ / Regional Team Member pins always keep their real styling,
+  // Regional Leader / Regional Team Member pins always keep their real styling,
   // for every visitor - only "regular" church pins change based on isAdmin.
   window.isAdmin = false;
 
