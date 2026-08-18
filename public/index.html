@@ -390,6 +390,28 @@
     gap: 8px;
   }
   .form-row-split .form-row { flex: 1; }
+  .form-row-checkbox {
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 8px;
+  }
+  .form-row-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--brass);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .form-row-checkbox input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    cursor: pointer;
+  }
   .form-actions {
     display: flex;
     align-items: center;
@@ -398,11 +420,6 @@
     justify-content: flex-end;
   }
   .form-actions.left-align { justify-content: space-between; }
-  .pick-hint {
-    font-size: 11.5px;
-    color: var(--ember);
-    font-style: italic;
-  }
   .modal .btn-outline, .modal .btn-danger {
     color: var(--evergreen);
     border-color: var(--line);
@@ -705,9 +722,17 @@
           <input id="f_lng" required="" inputmode="decimal">
         </div>
       </div>
-      <div class="form-actions left-align">
-        <button type="button" id="pickOnMapBtn" class="btn btn-outline">Pick on Map</button>
-        <span id="pickHint" class="pick-hint" style="display:none;">Click the map to set coordinates…</span>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="f_youtube">YouTube</label>
+          <input id="f_youtube" placeholder="https://www.youtube.com/@ChurchName" inputmode="url">
+        </div>
+        <div class="form-row form-row-checkbox">
+          <label for="f_livestreams">
+            <input id="f_livestreams" type="checkbox">
+            Streams Live
+          </label>
+        </div>
       </div>
       <div class="form-row">
         <label for="f_phone">Phone</label>
@@ -1085,9 +1110,6 @@
   const modalTitle = document.getElementById('modalTitle');
   const saveLocationBtn = document.getElementById('saveLocationBtn');
   const form = document.getElementById('locationForm');
-  const pickBtn = document.getElementById('pickOnMapBtn');
-  const pickHint = document.getElementById('pickHint');
-  let picking = false;
   let editingId = null;
 
   function openModal() {
@@ -1108,6 +1130,8 @@
     document.getElementById('f_citystatezip').value = c.citystatezip || '';
     document.getElementById('f_lat').value = c.lat || '';
     document.getElementById('f_lng').value = c.lng || '';
+    document.getElementById('f_youtube').value = c.youtubeUrl || '';
+    document.getElementById('f_livestreams').checked = !!c.livestreamsEnabled;
     document.getElementById('f_phone').value = c.phone || '';
     document.getElementById('f_email').value = c.email || '';
     document.getElementById('f_website').value = c.website || '';
@@ -1121,36 +1145,18 @@
   function closeModal() {
     modal.style.display = 'none';
     editingId = null;
-    stopPicking();
   }
-  function stopPicking() {
-    picking = false;
-    pickHint.style.display = 'none';
-  }
+
 
   document.getElementById('btnAddLocation').addEventListener('click', openModal);
   document.getElementById('cancelModalBtn').addEventListener('click', closeModal);
-
-  pickBtn.addEventListener('click', function() {
-    picking = true;
-    pickHint.style.display = 'inline';
-    modal.style.display = 'none';
-  });
-
-  map.on('click', function(e) {
-    if (!picking) return;
-    document.getElementById('f_lat').value = e.latlng.lat.toFixed(6);
-    document.getElementById('f_lng').value = e.latlng.lng.toFixed(6);
-    stopPicking();
-    modal.style.display = 'flex';
-  });
 
   form.addEventListener('submit', async function(e) {
     e.preventDefault();
     const lat = parseFloat(document.getElementById('f_lat').value);
     const lng = parseFloat(document.getElementById('f_lng').value);
     if (isNaN(lat) || isNaN(lng)) {
-      alert('Please enter valid latitude and longitude, or use "Pick on Map".');
+      alert('Please enter valid latitude and longitude.');
       return;
     }
     const scoreVal = document.getElementById('f_score').value;
@@ -1166,7 +1172,9 @@
       lng: String(lng),
       score: scoreVal === '' ? '' : Number(scoreVal),
       role: document.getElementById('f_role').value,
-      region: document.getElementById('f_region').value.trim()
+      region: document.getElementById('f_region').value.trim(),
+      youtubeUrl: document.getElementById('f_youtube').value.trim(),
+      livestreamsEnabled: document.getElementById('f_livestreams').checked
     };
     if (editingId) entry.id = editingId;
 
