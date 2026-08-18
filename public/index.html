@@ -392,8 +392,7 @@
   .form-row-split .form-row { flex: 1; }
   .form-row-checkbox {
     display: flex;
-    align-items: flex-end;
-    padding-bottom: 8px;
+    align-items: center;
   }
   .form-row-checkbox label {
     display: flex;
@@ -722,17 +721,15 @@
           <input id="f_lng" required="" inputmode="decimal">
         </div>
       </div>
-      <div class="form-row-split">
-        <div class="form-row">
-          <label for="f_youtube">YouTube</label>
-          <input id="f_youtube" placeholder="https://www.youtube.com/@ChurchName" inputmode="url">
-        </div>
-        <div class="form-row form-row-checkbox">
-          <label for="f_livestreams">
-            <input id="f_livestreams" type="checkbox">
-            Streams Live
-          </label>
-        </div>
+      <div class="form-row">
+        <label for="f_youtube">YouTube</label>
+        <input id="f_youtube" placeholder="https://www.youtube.com/@ChurchName" inputmode="url">
+      </div>
+      <div class="form-row form-row-checkbox">
+        <label for="f_livestreams">
+          <input id="f_livestreams" type="checkbox">
+          Streams Live
+        </label>
       </div>
       <div class="form-row">
         <label for="f_phone">Phone</label>
