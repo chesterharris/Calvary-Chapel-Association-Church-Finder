@@ -956,7 +956,7 @@
     if (c.youtubeUrl) {
       let ytUrl = c.youtubeUrl.trim();
       if (ytUrl && !/^https?:\/\//i.test(ytUrl)) ytUrl = 'https://' + ytUrl;
-      popup += '<div class="popup-row"><span class="label">YouTube</span><a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + escapeHtml(c.youtubeUrl) + '</a></div>';
+      popup += '<div class="popup-row"><span class="label">YouTube</span><a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">Watch on YouTube</a></div>';
     }
     if (window.isAdmin) {
       popup += '<button type="button" class="popup-delete-btn" data-delete-id="' + escapeHtml(c.id) + '">Delete Location</button>';
