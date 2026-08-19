@@ -543,16 +543,28 @@
   .side-panel-footer .btn-danger { color: var(--ember); border-color: var(--ember); }
   .side-panel-sync-status { font-size: 12px; color: var(--muted, #888); text-align: center; }
 
-  .popup-delete-btn {
+  .popup-admin-actions {
     margin-top: 8px;
+    display: flex;
+    gap: 6px;
+  }
+  .popup-edit-btn, .popup-delete-btn {
     font-size: 11px;
     padding: 4px 9px;
     border-radius: 3px;
+    cursor: pointer;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .popup-edit-btn {
+    border: 1px solid var(--evergreen);
+    background: transparent;
+    color: var(--evergreen);
+  }
+  .popup-edit-btn:hover { background: var(--evergreen); color: var(--paper); }
+  .popup-delete-btn {
     border: 1px solid var(--ember);
     background: transparent;
     color: var(--ember);
-    cursor: pointer;
-    font-family: 'Helvetica Neue', Arial, sans-serif;
   }
   .popup-delete-btn:hover { background: var(--ember); color: var(--paper); }
 
@@ -974,7 +986,10 @@
       popup += '<div class="popup-row"><span class="label">YouTube</span><a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">Watch on YouTube</a></div>';
     }
     if (window.isAdmin) {
-      popup += '<button type="button" class="popup-delete-btn" data-delete-id="' + escapeHtml(c.id) + '">Delete Location</button>';
+      popup += '<div class="popup-admin-actions">' +
+        '<button type="button" class="popup-edit-btn" data-edit-id="' + escapeHtml(c.id) + '">Edit Location</button>' +
+        '<button type="button" class="popup-delete-btn" data-delete-id="' + escapeHtml(c.id) + '">Delete Location</button>' +
+        '</div>';
     }
     return popup;
   }
@@ -1034,15 +1049,27 @@
     badge.textContent = plotted + (term ? ' match' + (plotted === 1 ? '' : 'es') : ' churches mapped');
   }
 
-  // Handle clicks on the "Delete Location" button inside any open popup.
+  // Handle clicks on the "Edit Location" / "Delete Location" buttons inside
+  // any open popup - lets an admin jump straight into editing a pin without
+  // first having to search for it again in the Manage Locations panel.
   map.on('popupopen', function(e) {
     const el = e.popup.getElement();
     if (!el) return;
-    const btn = el.querySelector('[data-delete-id]');
-    if (!btn) return;
-    btn.addEventListener('click', function() {
+    const editBtn = el.querySelector('[data-edit-id]');
+    if (editBtn) {
+      editBtn.addEventListener('click', function() {
+        const c = findChurchById(editBtn.getAttribute('data-edit-id'));
+        if (c) {
+          map.closePopup();
+          openEditModal(c);
+        }
+      });
+    }
+    const deleteBtn = el.querySelector('[data-delete-id]');
+    if (!deleteBtn) return;
+    deleteBtn.addEventListener('click', function() {
       if (confirm('Remove this location from the map?')) {
-        deleteChurch(btn.getAttribute('data-delete-id'));
+        deleteChurch(deleteBtn.getAttribute('data-delete-id'));
         map.closePopup();
       }
     });
@@ -1105,15 +1132,22 @@
     renderMarkers();
   });
 
-  // Clears any active search/score filters, then centers the map on the given
-  // location. Used after Add/Edit so a saved pin is never hidden by a filter
-  // the person forgot was on, or left off-screen.
+  // Centers the map on the given location after Add/Edit. Score filters are
+  // left exactly as the admin had them - previously this reset every filter
+  // back to "show all," which was frustrating when someone had deliberately
+  // filtered down before editing a single pin. Instead, if the saved entry's
+  // own score band isn't currently visible, that one band gets switched on
+  // (without touching any other active filters) so the save is confirmed
+  // visually without losing the rest of the filter state.
   function focusChurchOnMap(entry) {
     searchTerm = '';
     searchInput.value = '';
     searchClearBtn.style.display = 'none';
-    scoreFilterCbs.forEach(function(cb) { cb.checked = true; });
-    activeScores = new Set(['0', '1', '2', '3', '4', '5']);
+    const scoreKey = (entry.score === undefined || entry.score === null || entry.score === '') ? '0' : String(entry.score);
+    if (!activeScores.has(scoreKey)) {
+      activeScores.add(scoreKey);
+      scoreFilterCbs.forEach(function(cb) { if (cb.value === scoreKey) cb.checked = true; });
+    }
     renderMarkers();
     const lat = parseFloat(entry.lat);
     const lng = parseFloat(entry.lng);
