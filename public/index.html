@@ -124,8 +124,11 @@
   .popup-row {
     font-family: 'Helvetica Neue', Arial, sans-serif;
     font-size: 12.5px;
-    margin: 3px 0;
+    margin: 6px 0;
     line-height: 1.4;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
   .popup-role-hq {
     font-weight: 700;
@@ -137,14 +140,26 @@
     color: #8a6d0f;
     font-size: 11.5px;
   }
-  .popup-row .label {
-    color: var(--brass);
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.04em;
+  .popup-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    color: var(--ember);
+    display: inline-flex;
+  }
+  .popup-icon svg {
+    width: 16px;
+    height: 16px;
     display: block;
-    margin-bottom: 1px;
+  }
+  .popup-score-dot {
+    flex-shrink: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-top: 3px;
+    border: 1px solid rgba(0,0,0,0.15);
   }
   .popup-row a {
     color: var(--ember);
@@ -414,6 +429,19 @@
     color: var(--brass);
     font-weight: 600;
     margin-bottom: 3px;
+  }
+  .form-icon {
+    display: inline-flex;
+    width: 12px;
+    height: 12px;
+    color: var(--ember);
+    vertical-align: -1px;
+    margin-right: 5px;
+  }
+  .form-icon svg {
+    width: 12px;
+    height: 12px;
+    display: block;
   }
   .form-row input {
     width: 100%;
@@ -1139,6 +1167,54 @@
     return '#B91C1C';
   }
 
+  // ---- Popup row icons ----
+  //
+  // Line-style, single-color (ember) icons replacing the old uppercase text
+  // labels. Each is wrapped with role="img" + aria-label so screen readers
+  // announce the field name exactly as before - nothing is lost for
+  // accessibility, it's just visually a symbol instead of text. The SVGs
+  // themselves are aria-hidden since the wrapping span already carries the
+  // accessible name.
+  const POPUP_ICON_PATHS = {
+    address: '<path d="M12 21s7-7.2 7-12a7 7 0 1 0-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    pastor: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/>',
+    phone: '<path d="M6.5 3.5h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.5 5.7 2 2 0 0 1 6.5 3.5z"/>',
+    email: '<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M4 6.5l8 6.5 8-6.5"/>',
+    website: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.2 2.3 3.4 5.3 3.4 8.5s-1.2 6.2-3.4 8.5c-2.2-2.3-3.4-5.3-3.4-8.5S9.8 5.8 12 3.5z"/>',
+    youtube: '<circle cx="12" cy="12" r="8.5"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/>'
+  };
+
+  function popupIcon(name, ariaLabel) {
+    const path = POPUP_ICON_PATHS[name];
+    return '<span class="popup-icon" role="img" aria-label="' + ariaLabel + '">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + path + '</svg>' +
+      '</span>';
+  }
+
+  // Purely decorative version for the Add/Edit form - the visible <label>
+  // text is still the accessible name for each input, so this icon just
+  // gets aria-hidden rather than its own aria-label (avoiding a screen
+  // reader announcing the field name twice).
+  function formIcon(name) {
+    const path = POPUP_ICON_PATHS[name];
+    return '<span class="form-icon" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>' +
+      '</span>';
+  }
+
+  [
+    ['label[for="f_address"]', 'address'],
+    ['label[for="f_phone"]', 'phone'],
+    ['label[for="f_email"]', 'email'],
+    ['label[for="f_website"]', 'website'],
+    ['label[for="f_pastor"]', 'pastor']
+  ].forEach(function(pair) {
+    const el = document.querySelector(pair[0]);
+    if (el) el.insertAdjacentHTML('afterbegin', formIcon(pair[1]));
+  });
+
   function scoreIcon(c) {
     const role = c.role || '';
     const roleClass = role === 'hq' ? ' role-hq' : (role === 'team' ? ' role-team' : '');
@@ -1168,32 +1244,32 @@
     }
 
     if (window.isAdmin && c.score !== undefined && c.score !== null && c.score !== '') {
-      popup += '<div class="popup-row"><span class="label">Score</span>' + escapeHtml(String(c.score)) + '</div>';
+      popup += '<div class="popup-row"><span class="popup-score-dot" role="img" aria-label="Score: ' + escapeHtml(String(c.score)) + '" style="background:' + scoreColor(c.score) + ';"></span>' + escapeHtml(String(c.score)) + '</div>';
     }
 
     if (c.address || c.citystatezip) {
-      popup += '<div class="popup-row"><span class="label">Address</span>' +
+      popup += '<div class="popup-row">' + popupIcon('address', 'Address') + '<span>' +
         escapeHtml(c.address) + (c.address && c.citystatezip ? '<br>' : '') +
-        escapeHtml(c.citystatezip) + '</div>';
+        escapeHtml(c.citystatezip) + '</span></div>';
     }
     if (c.pastor) {
-      popup += '<div class="popup-row"><span class="label">Pastor</span>' + escapeHtml(c.pastor) + '</div>';
+      popup += '<div class="popup-row">' + popupIcon('pastor', 'Pastor') + '<span>' + escapeHtml(c.pastor) + '</span></div>';
     }
     if (c.phone) {
-      popup += '<div class="popup-row"><span class="label">Phone</span>' + escapeHtml(c.phone) + '</div>';
+      popup += '<div class="popup-row">' + popupIcon('phone', 'Phone') + '<span>' + escapeHtml(c.phone) + '</span></div>';
     }
     if (c.email) {
-      popup += '<div class="popup-row"><span class="label">Email</span><a href="mailto:' + escapeHtml(c.email) + '">' + escapeHtml(c.email) + '</a></div>';
+      popup += '<div class="popup-row">' + popupIcon('email', 'Email') + '<a href="mailto:' + escapeHtml(c.email) + '">' + escapeHtml(c.email) + '</a></div>';
     }
     if (c.website) {
       let url = c.website.trim();
       if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url;
-      popup += '<div class="popup-row"><span class="label">Website</span><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(c.website) + '</a></div>';
+      popup += '<div class="popup-row">' + popupIcon('website', 'Website') + '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(c.website) + '</a></div>';
     }
     if (c.youtubeUrl) {
       let ytUrl = c.youtubeUrl.trim();
       if (ytUrl && !/^https?:\/\//i.test(ytUrl)) ytUrl = 'https://' + ytUrl;
-      popup += '<div class="popup-row"><span class="label">YouTube</span><a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">Watch on YouTube</a></div>';
+      popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">Watch on YouTube</a></div>';
     }
     if (window.isAdmin) {
       popup += '<div class="popup-admin-actions">' +
