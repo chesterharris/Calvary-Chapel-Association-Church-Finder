@@ -499,7 +499,16 @@ async function checkChurchLive(youtubeUrl) {
   });
   const html = await response.text();
 
-  const isLive = html.includes('itemprop="isLiveBroadcast" content="True"');
+  // IMPORTANT: itemprop="isLiveBroadcast" (schema.org) turned out to mark
+  // "this video is a livestream-type broadcast" as a category - true for
+  // scheduled/upcoming streams and old past broadcasts too, NOT just
+  // ones airing right now. Confirmed via real production false positives
+  // (churches with startDate days in the future, and years-old test
+  // videos, both showing isLiveBroadcast=True). The stricter, real-time
+  // signal is the internal videoDetails JSON field below, which was
+  // verified via actual diffed LIVE vs NOT-LIVE test files to be
+  // completely ABSENT (not just false) on a genuinely not-live page.
+  const isLive = html.includes('"isLive":true');
   if (!isLive) return { isLive: false };
 
   const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)">/);
@@ -508,6 +517,16 @@ async function checkChurchLive(youtubeUrl) {
   const descriptionMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
   const authorMatch = html.match(/"author":"([^"]*)"/);
   const viewCountMatch = html.match(/"viewCount":"(\d+)"/);
+
+  // Belt-and-suspenders: if a startDate is present and is still in the
+  // future, this is a scheduled/upcoming stream, not a live one, whatever
+  // the isLive field said.
+  if (startDateMatch) {
+    const startTime = new Date(startDateMatch[1]).getTime();
+    if (!isNaN(startTime) && startTime > Date.now()) {
+      return { isLive: false };
+    }
+  }
 
   return {
     isLive: true,

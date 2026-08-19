@@ -1,48 +1,18 @@
 # CCA Finder: YouTube Live Detection — Findings & Plan
 
 Living reference doc. Updated as we make decisions. Started 2026-08-18.
-Updated 2026-08-18 with a better primary signal found in the full page HTML.
+**CORRECTED 2026-08-19** after real production testing revealed the
+schema.org signal produces false positives - see section 1b.
 
 ---
 
-## 1. The core detection technique (confirmed empirically, twice)
+## 1. The core detection technique (confirmed empirically, then corrected after production testing)
 
 **Method:** Take any church's YouTube channel URL and append `/live`
 (e.g. `https://www.youtube.com/@CCChinoValley/live`). Fetch that URL's raw
 HTML.
 
-### Primary signal (preferred): schema.org structured data in `<head>`
-
-Confirmed present on a real live page, near the top of the document:
-
-```html
-<span itemprop="publication" itemscope itemtype="http://schema.org/BroadcastEvent">
-  <meta itemprop="isLiveBroadcast" content="True">
-  <meta itemprop="startDate" content="2026-08-19T03:08:52+00:00">
-</span>
-```
-
-This is official schema.org SEO markup - search engines rely on it, so
-YouTube has strong incentive to keep it stable, more so than an internal
-JS variable meant only for their own player. It's also small and appears
-early in the document, rather than buried in a huge minified JSON blob.
-
-**The check:** does the raw HTML contain
-`itemprop="isLiveBroadcast" content="True"`?
-- Found it → currently live (and `startDate` tells us exactly when the
-  broadcast began, in ISO 8601 - e.g. good enough to show "Live for 47
-  minutes")
-- Not found → not live
-
-On a NOT-live page, this entire `<span itemprop="publication">...</span>`
-block doesn't exist at all (consistent with what we found earlier: a
-not-live page has no video-related data at all, since there's no active
-video to describe).
-
-### Backup/cross-check signal: `ytInitialPlayerResponse` JSON blob
-
-Also confirmed present on the same live page, further down in a
-`<script>` tag:
+### Primary signal (current, corrected): `videoDetails.isLive` in the JSON blob
 
 ```json
 "videoDetails": { "isLive": true, ... }
@@ -52,24 +22,68 @@ Also confirmed present on the same live page, further down in a
 - Found it → currently live
 - Not found → not live
 
-This was our first confirmed signal (from an earlier, smaller test file)
-and still works, but the schema.org approach above is preferred as the
-primary check - this one is a documented fallback/cross-check if we ever
-want extra confidence, or if the schema.org markup ever changes
-unexpectedly.
+This was confirmed by fetching real LIVE and NOT-LIVE pages and diffing
+the actual content: on a genuinely not-live page, this field is
+completely ABSENT (not `false`, just missing entirely), since there's no
+active video to describe.
 
-### Minimal Worker code (primary approach)
+**Belt-and-suspenders guard:** if a `startDate` is also present and is
+still in the future, treat as not-live regardless of what `isLive` said -
+protects against any edge case where a scheduled/upcoming stream's page
+might still carry a stale or premature `isLive:true`.
+
+### 1b. Why the schema.org approach was demoted (important correction)
+
+On 2026-08-18 we found `<meta itemprop="isLiveBroadcast" content="True">`
+in a real live page and initially promoted it to the primary signal,
+reasoning it was more stable (public SEO markup) than the internal JSON
+variable.
+
+**This was wrong in practice.** After deploying and running the real
+Cron Trigger against real church channels, 13 churches were flagged
+"live" simultaneously at 5:31 AM UTC on a Tuesday - clearly a false
+positive, confirmed by the data itself: video titles like "test", a
+2021-dated video, `viewCount: 0` across every single result, and several
+`startDate` values days in the future (scheduled, not yet started).
+
+**Conclusion:** `itemprop="isLiveBroadcast"` appears to mark a video as
+"broadcast-type content" as a *category* - true for scheduled/upcoming
+streams and old past broadcasts too, not specifically "airing right
+now." It is no longer used as the deciding signal, only kept in mind as
+a data point that is NOT reliable for real-time state.
+
+The internal `videoDetails.isLive` JSON field (our original, first-
+confirmed signal) does not have this problem - it was verified via
+actual diffed LIVE vs. NOT-LIVE test files to be entirely absent, not
+just falsy, when nothing is truly airing. This is now the sole deciding
+signal, with the startDate-in-the-future check as an extra safety net.
+
+**Lesson for future signal changes:** when in doubt, prefer the signal
+that was verified via real diffed before/after test data over one that
+merely looks more "official" or stable in theory. A field's semantic
+meaning ("is this broadcast-type content") is not the same as what we
+need ("is this airing at this exact moment").
+
+### Minimal Worker code (current, corrected)
 
 ```javascript
 async function checkChurchLive(youtubeUrl) {
-  const liveUrl = buildLiveUrl(youtubeUrl); // normalize @handle/streams/etc → @handle/live
+  const liveUrl = buildLiveCheckUrl(youtubeUrl); // normalize @handle/streams/etc → @handle/live
   const response = await fetch(liveUrl);
   const html = await response.text();
-  const isLive = html.includes('itemprop="isLiveBroadcast" content="True"');
+
+  const isLive = html.includes('"isLive":true');
   if (!isLive) return { isLive: false };
 
   const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)">/);
   const startDateMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+
+  // Guard against a stale/premature isLive on a scheduled-but-not-started stream
+  if (startDateMatch) {
+    const startTime = new Date(startDateMatch[1]).getTime();
+    if (!isNaN(startTime) && startTime > Date.now()) return { isLive: false };
+  }
+
   return {
     isLive: true,
     videoId: canonicalMatch ? canonicalMatch[1] : null,
@@ -77,12 +91,6 @@ async function checkChurchLive(youtubeUrl) {
   };
 }
 ```
-
-That's the entire live/not-live check plus the two most useful extra
-pieces of data (video ID and start time). Everything else (looping over
-churches, caching, UI) builds on top of it.
-
----
 
 ## 2. Other useful data available
 
@@ -206,6 +214,13 @@ the initial page source.
 - [x] ~~Live-updating duration~~ → Resolved: yes, client-side ticking math
 - [x] ~~Trigger mechanism~~ → Resolved: automatic Cloudflare Cron Trigger
   every ~10 minutes, no button, no required user interaction
+- [x] ~~Primary detection signal~~ → Resolved 2026-08-19: switched from
+  schema.org `isLiveBroadcast` (produced false positives in production)
+  back to `videoDetails.isLive` JSON field (see section 1b)
+- [ ] Re-verify the corrected logic against a church known to be
+  genuinely live (e.g. during an actual Wednesday evening or Sunday
+  morning service) to confirm the fix eliminated the false positives
+  without also eliminating true positives
 - [ ] Exact cron interval to use (10 minutes proposed - could be tuned
   once live)
 - [ ] Exact description truncation length (default suggestion: ~120
