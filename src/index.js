@@ -517,6 +517,7 @@ async function checkChurchLive(youtubeUrl) {
   const descriptionMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
   const authorMatch = html.match(/"author":"([^"]*)"/);
   const viewCountMatch = html.match(/"viewCount":"(\d+)"/);
+  const uploadDateMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
 
   // Belt-and-suspenders: if a startDate is present and is still in the
   // future, this is a scheduled/upcoming stream, not a live one, whatever
@@ -524,6 +525,23 @@ async function checkChurchLive(youtubeUrl) {
   if (startDateMatch) {
     const startTime = new Date(startDateMatch[1]).getTime();
     if (!isNaN(startTime) && startTime > Date.now()) {
+      return { isLive: false };
+    }
+  }
+
+  // Second real-world false-positive pattern found in production: a
+  // broadcast that was never properly "ended" on YouTube's side can stay
+  // flagged isLive:true indefinitely, even years later, with nobody
+  // actually streaming (confirmed via real results: a 2021 video, several
+  // "test" videos, all with viewCount 0). A genuinely-live-right-now
+  // video was just published, so require the video's publish date to be
+  // recent - this is the strongest signal we've found so far for telling
+  // "actually live" apart from "stuck live" without needing to inspect
+  // the actual video stream data itself.
+  const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+  if (uploadDateMatch) {
+    const publishedTime = new Date(uploadDateMatch[1]).getTime();
+    if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) {
       return { isLive: false };
     }
   }

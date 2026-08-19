@@ -64,6 +64,42 @@ merely looks more "official" or stable in theory. A field's semantic
 meaning ("is this broadcast-type content") is not the same as what we
 need ("is this airing at this exact moment").
 
+### 1c. Second false-positive pattern found (still 2026-08-19) - stuck/stale "live" flags
+
+After switching to `videoDetails.isLive`, results dropped from 13 to 8,
+but the remaining 8 were *still* clearly wrong: a 2021-dated video,
+several videos titled "test", a "rebroadcast" description, all with
+`viewCount: 0`.
+
+**Likely cause:** if a broadcaster ends a stream without properly
+clicking "End stream" (common with basic phone/software setups small
+churches often use), YouTube's backend can be left thinking the
+broadcast is still technically live indefinitely, even years later, even
+though nothing is actually being streamed. This produces an identical
+`isLive:true` signal to a genuinely-live-right-now video - static page
+scraping cannot tell these two states apart from page content alone.
+
+**Fix:** require the video's publish date (`itemprop="datePublished"` or
+`itemprop="uploadDate"`) to be recent (within the last 24 hours). A
+genuinely-live-right-now video was just published; a stuck/stale one
+from 2021 obviously was not. Confirmed against our original true-positive
+test data: the real live video's `datePublished`/`uploadDate` matched the
+same day it was fetched.
+
+```javascript
+const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+if (uploadDateMatch) {
+  const publishedTime = new Date(uploadDateMatch[1]).getTime();
+  if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) {
+    return { isLive: false };
+  }
+}
+```
+
+**Status: applied, not yet re-verified against a real live church** (see
+open questions). This is now the third gate alongside `isLive:true` and
+the future-startDate guard.
+
 ### Minimal Worker code (current, corrected)
 
 ```javascript
@@ -77,11 +113,19 @@ async function checkChurchLive(youtubeUrl) {
 
   const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)">/);
   const startDateMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+  const uploadDateMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
 
-  // Guard against a stale/premature isLive on a scheduled-but-not-started stream
+  // Gate 1: reject scheduled/upcoming streams (startDate in the future)
   if (startDateMatch) {
     const startTime = new Date(startDateMatch[1]).getTime();
     if (!isNaN(startTime) && startTime > Date.now()) return { isLive: false };
+  }
+
+  // Gate 2: reject stuck/stale "live" flags from improperly-ended old broadcasts
+  const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+  if (uploadDateMatch) {
+    const publishedTime = new Date(uploadDateMatch[1]).getTime();
+    if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) return { isLive: false };
   }
 
   return {
@@ -217,9 +261,13 @@ the initial page source.
 - [x] ~~Primary detection signal~~ → Resolved 2026-08-19: switched from
   schema.org `isLiveBroadcast` (produced false positives in production)
   back to `videoDetails.isLive` JSON field (see section 1b)
-- [ ] Re-verify the corrected logic against a church known to be
-  genuinely live (e.g. during an actual Wednesday evening or Sunday
-  morning service) to confirm the fix eliminated the false positives
+- [x] ~~Stuck/stale old broadcasts still showing as live~~ → Fix applied
+  2026-08-19: require the video's publish date to be within the last 24
+  hours (see section 1c). Reduced false positives from 13 to 8 to
+  (pending re-check) 0.
+- [ ] Re-verify the corrected logic (both gates) against a church known
+  to be genuinely live (e.g. during an actual Wednesday evening or Sunday
+  morning service) to confirm the fixes eliminated the false positives
   without also eliminating true positives
 - [ ] Exact cron interval to use (10 minutes proposed - could be tuned
   once live)
