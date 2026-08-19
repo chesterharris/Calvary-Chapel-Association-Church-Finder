@@ -464,6 +464,118 @@ async function handleDeleteChurch(request, env) {
   });
 }
 
+// ---- YouTube live-stream detection ----
+//
+// A Cron Trigger (see wrangler config) calls checkAllChurchesLive() on a
+// fixed schedule (proposed: every 10 minutes), independent of site
+// traffic. Results are cached in KV under LIVE_STATUS_KV_KEY. Visitors'
+// page loads only ever read that cache via handleGetLiveStatus() - no
+// visitor page load ever triggers a real YouTube request.
+//
+// Detection method (confirmed empirically - see
+// live-stream-detection-notes.md): fetch a channel's "/live" shorthand
+// URL. If currently live, the raw HTML contains schema.org structured
+// data: `<meta itemprop="isLiveBroadcast" content="True">`. If not live,
+// that block is entirely absent. The canonical link and startDate are
+// pulled from the same response for the video id and "live since" time.
+
+const LIVE_STATUS_KV_KEY = 'live-status';
+
+// Accepts whatever format an admin pasted into youtubeUrl - a bare
+// @handle URL, a /streams URL, a /videos URL, or a /channel/UC... URL -
+// and returns the correct "/live" URL to check.
+function buildLiveCheckUrl(youtubeUrl) {
+  let url = youtubeUrl.trim();
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  url = url.replace(/\/(streams|videos|featured|community|about)\/?$/i, '');
+  url = url.replace(/\/+$/, '');
+  return url + '/live';
+}
+
+async function checkChurchLive(youtubeUrl) {
+  const liveUrl = buildLiveCheckUrl(youtubeUrl);
+  const response = await fetch(liveUrl, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCAFinderBot/1.0)' }
+  });
+  const html = await response.text();
+
+  const isLive = html.includes('itemprop="isLiveBroadcast" content="True"');
+  if (!isLive) return { isLive: false };
+
+  const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)">/);
+  const startDateMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+  const titleMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
+  const descriptionMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
+  const authorMatch = html.match(/"author":"([^"]*)"/);
+  const viewCountMatch = html.match(/"viewCount":"(\d+)"/);
+
+  return {
+    isLive: true,
+    videoId: canonicalMatch ? canonicalMatch[1] : null,
+    startDate: startDateMatch ? startDateMatch[1] : null,
+    title: titleMatch ? titleMatch[1] : null,
+    description: descriptionMatch ? descriptionMatch[1] : null,
+    author: authorMatch ? authorMatch[1] : null,
+    viewCount: viewCountMatch ? Number(viewCountMatch[1]) : null
+  };
+}
+
+// Runs on the Cron Trigger schedule. Checks every livestreamsEnabled
+// church and writes the combined results to KV as one JSON blob.
+async function checkAllChurchesLive(env) {
+  const churches = await loadChurches(env);
+  const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
+
+  const results = await Promise.all(candidates.map(async function(c) {
+    try {
+      const status = await checkChurchLive(c.youtubeUrl);
+      return Object.assign({ churchId: c.id, name: c.name }, status);
+    } catch (err) {
+      // A single church failing to fetch (network hiccup, YouTube rate
+      // limit, etc.) shouldn't block results for everyone else.
+      return { churchId: c.id, name: c.name, isLive: false, error: true };
+    }
+  }));
+
+  const liveOnly = results.filter(function(r) { return r.isLive; });
+
+  await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    live: liveOnly
+  }));
+}
+
+// Public, read-only endpoint - just returns whatever the last cron run
+// cached. No YouTube requests happen here; safe to call on every page
+// load.
+async function handleGetLiveStatus(request, env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { checkedAt: null, live: [] };
+  return new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+// Admin-only. Manually runs the same check the Cron Trigger runs
+// automatically, so live status can be tested immediately after deploy
+// without waiting up to 10 minutes for the real schedule to fire.
+async function handleDebugCheckLiveNow(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  await checkAllChurchesLive(env);
+  const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  return new Response(raw || '{}', {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
 async function handleConferences(request, ctx) {
   const cache = caches.default;
   const cacheUrl = new URL(request.url);
@@ -531,6 +643,20 @@ export default {
     if (url.pathname === '/api/churches' && request.method === 'DELETE') {
       return handleDeleteChurch(request, env);
     }
+    if (url.pathname === '/api/live-status' && request.method === 'GET') {
+      return handleGetLiveStatus(request, env);
+    }
+    if (url.pathname === '/api/debug/check-live-now' && request.method === 'POST') {
+      return handleDebugCheckLiveNow(request, env);
+    }
     return env.ASSETS.fetch(request);
+  },
+
+  // Fired automatically by the Cron Trigger defined in wrangler config
+  // (proposed schedule: every 10 minutes). Not tied to any visitor
+  // request - runs on Cloudflare's own schedule regardless of site
+  // traffic.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(checkAllChurchesLive(env));
   }
 };

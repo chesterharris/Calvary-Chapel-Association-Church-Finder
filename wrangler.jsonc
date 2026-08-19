@@ -15,5 +15,8 @@
 			"binding": "CHURCHES_KV",
 			"id": "b7e705c520484b8d9a869e46f1525967"
 		}
-	]
+	],
+	"triggers": {
+		"crons": ["*/10 * * * *"]
+	}
 }
