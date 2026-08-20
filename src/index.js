@@ -867,6 +867,20 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb8web.securenetsystems.net',
     callSign: 'KEPHLP',
     streamUrl: 'https://ice42.securenetsystems.net/KEPHLP'
+  },
+  {
+    displayName: 'The Truth (TN)',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb00web.securenetsystems.net',
+    callSign: 'WZTH',
+    streamUrl: 'https://ice7.securenetsystems.net/WZTH'
+  },
+  {
+    displayName: 'The Truth (GA)',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WZTG',
+    streamUrl: 'https://ice26.securenetsystems.net/WZTG'
   }
 ];
 
