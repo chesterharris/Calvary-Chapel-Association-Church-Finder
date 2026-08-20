@@ -480,19 +480,76 @@ async function handleDeleteChurch(request, env) {
 // pulled from the same response for the video id and "live since" time.
 
 const LIVE_STATUS_KV_KEY = 'live-status';
+const LIVE_CHECK_STAGGER_STATE_KV_KEY = 'live-check-stagger-state';
 
-// How long to pause between each church's fetch in a cron run. YouTube's
-// anti-bot rate limiting kicks in fast on bursts of requests (confirmed in
-// testing: a 429 after just a couple of fetches in quick succession), so
-// checks are sent one at a time with a gap instead of all at once via
-// Promise.all. See live-stream-detection-notes.md for the incident this
-// was written to fix (a whole cron cycle's worth of churches getting
-// rate-limited together and all reporting as "not live" at once).
-const LIVE_CHECK_STAGGER_MS = 300;
+// Starting point for the delay between each church's fetch in a cron run.
+// YouTube's anti-bot rate limiting kicks in fast on bursts of requests
+// (confirmed in testing: a 429 after just a couple of fetches in quick
+// succession), so checks are sent one at a time with a gap instead of all
+// at once via Promise.all.
+//
+// IMPORTANT: there is no published, trustworthy number for "how much delay
+// is enough" - this isn't a documented rate limit, it's anti-bot heuristics
+// on YouTube's end, and Cloudflare Workers share a small pool of egress IPs
+// across ALL Workers customers (confirmed via Cloudflare's own community
+// forum), so the threshold that matters isn't just our own request rate -
+// it includes however much other, unrelated traffic happens to be sharing
+// our egress IP at a given moment. No fixed constant can be "correct" for
+// that. So instead of guessing a single number, the delay is adaptive: it
+// grows automatically when a cycle sees rate-limit errors, and eases back
+// down slowly during clean runs. Bounds below are the starting guess and
+// the safety ceiling, not a claim about the true threshold.
+// Three named tiers: 1000ms healthy baseline -> 2000ms after a rough cycle
+// -> 8000ms worst case. Growth doubles each bad cycle (1000 -> 2000 -> 4000
+// -> 8000), so the tiers land on clean, round numbers instead of drifting.
+const LIVE_CHECK_STAGGER_MIN_MS = 1000;
+const LIVE_CHECK_STAGGER_MAX_MS = 8000;
+const LIVE_CHECK_STAGGER_DEFAULT_MS = 1000;
+const LIVE_CHECK_STAGGER_GROWTH_FACTOR = 2;   // applied on a bad cycle
+const LIVE_CHECK_STAGGER_DECAY_FACTOR = 0.9;  // applied on a fully clean cycle
+const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
 
 // If a single fetch gets rate-limited (429) or otherwise fails, retry once
 // after a short pause before giving up on that church for this cycle.
 const LIVE_CHECK_RETRY_DELAY_MS = 1500;
+
+function sleep(ms) {
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
+}
+
+async function loadStaggerState(env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
+  if (!raw) return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.staggerMs === 'number' && !isNaN(parsed.staggerMs)) {
+      return parsed;
+    }
+  } catch (err) {
+    // Fall through to default on any parse issue - safer to under-guess
+    // than to carry forward corrupted state.
+  }
+  return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+}
+
+// Adjusts the stagger delay based on how the just-finished cycle went, and
+// persists it for the next cron run to read. Errs on the side of caution:
+// growth is faster (1.6x) than decay (0.9x), so a single bad cycle raises
+// the delay noticeably, while trust is rebuilt gradually only after
+// several fully clean cycles in a row.
+function nextStaggerMs(currentMs, checked, errored) {
+  if (checked === 0) return currentMs;
+  const errorRate = errored / checked;
+  let next = currentMs;
+  if (errorRate > LIVE_CHECK_ERROR_RATE_THRESHOLD) {
+    next = currentMs * LIVE_CHECK_STAGGER_GROWTH_FACTOR;
+  } else if (errorRate === 0) {
+    next = currentMs * LIVE_CHECK_STAGGER_DECAY_FACTOR;
+  }
+  // Otherwise (some errors, but under the threshold): hold steady rather
+  // than adjusting on a small, possibly-noisy sample.
+  return Math.max(LIVE_CHECK_STAGGER_MIN_MS, Math.min(LIVE_CHECK_STAGGER_MAX_MS, Math.round(next)));
+}
 
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
@@ -621,6 +678,10 @@ async function checkAllChurchesLive(env) {
   const previousById = {};
   previous.live.forEach(function(r) { previousById[r.churchId] = r; });
 
+  const staggerState = await loadStaggerState(env);
+  const staggerMs = staggerState.staggerMs;
+
+  let erroredCount = 0;
   const results = [];
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
@@ -632,6 +693,7 @@ async function checkAllChurchesLive(env) {
       // last known-good status for this church instead of assuming it
       // went offline. If we've never seen this church live before, this
       // is just an ordinary "not live" result.
+      erroredCount++;
       const prior = previousById[c.id];
       if (prior) {
         results.push(Object.assign({}, prior, { stale: true }));
@@ -643,7 +705,7 @@ async function checkAllChurchesLive(env) {
     // Stagger requests to YouTube instead of firing them all at once.
     // Skip the delay after the last item - no need to wait once we're done.
     if (i < candidates.length - 1) {
-      await sleep(LIVE_CHECK_STAGGER_MS);
+      await sleep(staggerMs);
     }
   }
 
@@ -651,8 +713,32 @@ async function checkAllChurchesLive(env) {
 
   await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
     checkedAt: new Date().toISOString(),
-    live: liveOnly
+    live: liveOnly,
+    // Cycle-level stats for observability - lets us see the *actual*,
+    // empirical error rate for our own traffic over time in KV, rather
+    // than guessing at what YouTube's threshold is. Check this after
+    // deploying instead of assuming the stagger delay is "enough."
+    stats: {
+      checked: candidates.length,
+      errored: erroredCount,
+      staggerMsUsed: staggerMs
+    }
   }));
+
+  // Adjust the delay for next cycle based on how this one went, and
+  // persist it. This is what replaces the old fixed-guess constant -
+  // the delay grows on its own if error rates climb, and only eases back
+  // down after cycles come back fully clean.
+  const updatedStaggerMs = nextStaggerMs(staggerMs, candidates.length, erroredCount);
+  if (updatedStaggerMs !== staggerMs) {
+    await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
+      staggerMs: updatedStaggerMs,
+      updatedAt: new Date().toISOString(),
+      reason: erroredCount / Math.max(candidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
+        ? 'error-rate-above-threshold'
+        : 'clean-cycle-decay'
+    }));
+  }
 }
 
 // Public, read-only endpoint - just returns whatever the last cron run
