@@ -443,7 +443,8 @@
     height: 12px;
     display: block;
   }
-  .form-row input {
+  .form-row input,
+  .form-row textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 7px 8px;
@@ -453,6 +454,10 @@
     background: #fff;
     color: var(--ink);
     font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .form-row textarea {
+    min-height: 120px;
+    resize: vertical;
   }
   .form-row-split {
     display: flex;
@@ -1006,8 +1011,8 @@
 
 <div id="feedbackModal" class="modal-overlay" style="display: none;">
   <div class="modal admin-modal">
-    <h2>CCA Finder Feedback</h2>
-    <p class="admin-modal-copy">Maintaining accurate data is labor of love.  Did you spot something I'm missing, or outdated listing, a bug, or have a suggestion? Let us know below.</p>
+    <h2>Feedback</h2>
+    <p class="admin-modal-copy">Spot an outdated listing, a bug, or have a suggestion? Let us know below.</p>
     <form id="feedbackForm">
       <div class="form-row">
         <label for="fb_name">Name (optional)</label>
