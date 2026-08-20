@@ -481,6 +481,23 @@ async function handleDeleteChurch(request, env) {
 
 const LIVE_STATUS_KV_KEY = 'live-status';
 
+// How long to pause between each church's fetch in a cron run. YouTube's
+// anti-bot rate limiting kicks in fast on bursts of requests (confirmed in
+// testing: a 429 after just a couple of fetches in quick succession), so
+// checks are sent one at a time with a gap instead of all at once via
+// Promise.all. See live-stream-detection-notes.md for the incident this
+// was written to fix (a whole cron cycle's worth of churches getting
+// rate-limited together and all reporting as "not live" at once).
+const LIVE_CHECK_STAGGER_MS = 300;
+
+// If a single fetch gets rate-limited (429) or otherwise fails, retry once
+// after a short pause before giving up on that church for this cycle.
+const LIVE_CHECK_RETRY_DELAY_MS = 1500;
+
+function sleep(ms) {
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
+}
+
 // Accepts whatever format an admin pasted into youtubeUrl - a bare
 // @handle URL, a /streams URL, a /videos URL, or a /channel/UC... URL -
 // and returns the correct "/live" URL to check.
@@ -492,12 +509,32 @@ function buildLiveCheckUrl(youtubeUrl) {
   return url + '/live';
 }
 
-async function checkChurchLive(youtubeUrl) {
-  const liveUrl = buildLiveCheckUrl(youtubeUrl);
+async function fetchLivePage(liveUrl) {
   const response = await fetch(liveUrl, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCAFinderBot/1.0)' }
   });
-  const html = await response.text();
+  if (!response.ok) {
+    throw new Error('Live page fetch failed with status ' + response.status);
+  }
+  return response.text();
+}
+
+// Wraps fetchLivePage with a single retry after a short backoff. Most
+// failures here are transient YouTube rate-limiting (429s), not permanent
+// errors, so one retry recovers the majority of cases without materially
+// slowing down the cron run.
+async function fetchLivePageWithRetry(liveUrl) {
+  try {
+    return await fetchLivePage(liveUrl);
+  } catch (err) {
+    await sleep(LIVE_CHECK_RETRY_DELAY_MS);
+    return fetchLivePage(liveUrl);
+  }
+}
+
+async function checkChurchLive(youtubeUrl) {
+  const liveUrl = buildLiveCheckUrl(youtubeUrl);
+  const html = await fetchLivePageWithRetry(liveUrl);
 
   // IMPORTANT: itemprop="isLiveBroadcast" (schema.org) turned out to mark
   // "this video is a livestream-type broadcast" as a category - true for
@@ -559,20 +596,56 @@ async function checkChurchLive(youtubeUrl) {
 
 // Runs on the Cron Trigger schedule. Checks every livestreamsEnabled
 // church and writes the combined results to KV as one JSON blob.
+//
+// Two changes from the original Promise.all version, both aimed at the
+// same root cause (YouTube rate-limiting a burst of near-simultaneous
+// fetches from the same Worker, which previously wiped the whole live
+// list to empty for a cycle):
+//
+// 1. Churches are checked one at a time with a stagger delay between
+//    each, instead of all at once - this is what actually keeps request
+//    volume to YouTube low enough to avoid tripping the rate limit in
+//    the first place.
+// 2. If a church's fetch still fails after the retry in
+//    fetchLivePageWithRetry, we fall back to whatever that church's
+//    status was on the PREVIOUS successful cycle, rather than forcing
+//    isLive: false. A transient rate-limit blip on one church now just
+//    means slightly stale data for that one church, not a false "nobody
+//    is live" result for everyone.
 async function checkAllChurchesLive(env) {
   const churches = await loadChurches(env);
   const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
 
-  const results = await Promise.all(candidates.map(async function(c) {
+  const previousRaw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  const previous = previousRaw ? JSON.parse(previousRaw) : { live: [] };
+  const previousById = {};
+  previous.live.forEach(function(r) { previousById[r.churchId] = r; });
+
+  const results = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
     try {
       const status = await checkChurchLive(c.youtubeUrl);
-      return Object.assign({ churchId: c.id, name: c.name }, status);
+      results.push(Object.assign({ churchId: c.id, name: c.name }, status));
     } catch (err) {
-      // A single church failing to fetch (network hiccup, YouTube rate
-      // limit, etc.) shouldn't block results for everyone else.
-      return { churchId: c.id, name: c.name, isLive: false, error: true };
+      // Both the original fetch and the retry failed - fall back to the
+      // last known-good status for this church instead of assuming it
+      // went offline. If we've never seen this church live before, this
+      // is just an ordinary "not live" result.
+      const prior = previousById[c.id];
+      if (prior) {
+        results.push(Object.assign({}, prior, { stale: true }));
+      } else {
+        results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
+      }
     }
-  }));
+
+    // Stagger requests to YouTube instead of firing them all at once.
+    // Skip the delay after the last item - no need to wait once we're done.
+    if (i < candidates.length - 1) {
+      await sleep(LIVE_CHECK_STAGGER_MS);
+    }
+  }
 
   const liveOnly = results.filter(function(r) { return r.isLive; });
 
