@@ -656,11 +656,169 @@ async function handleConferences(request, ctx) {
   }
 }
 
+// ---- Radio "Now Playing" ticker ----
+//
+// Same overall shape as the Conference ticker above (edge-cached JSON,
+// graceful per-item failure) but sourced from each station's own streaming
+// platform instead of scraping an HTML page. Cache TTL is deliberately much
+// shorter than Conferences (20s vs 6 hours) - now-playing data changes
+// every few minutes, while conference listings barely change at all.
+
+const RADIO_CACHE_SECONDS = 20;
+const RADIO_CACHE_VERSION = 1;
+
+// Config-driven station list. Adding a new station is just adding one entry
+// here (assuming it's on a provider already handled by RADIO_PROVIDERS below;
+// see the note there for what's involved in adding a new provider).
+//
+//   displayName - what visitors see in the ticker. May differ from the
+//                 station's own internal/technical call sign - e.g. Dove FM
+//                 is set up internally as "DOVEMAIN", but should never show
+//                 that publicly.
+//   provider    - key into RADIO_PROVIDERS below; decides how we fetch/parse
+//                 this station's now-playing data.
+//   subdomain   - the streamdbXweb.securenetsystems.net host serving this
+//                 station's now-playing XML feed.
+//   callSign    - the technical station identifier used in the now-playing
+//                 XML endpoint's URL path (NOT necessarily the same as
+//                 displayName - see Dove FM above).
+//   streamUrl   - the actual raw audio stream URL the mini-player plays.
+//                 NOT yet confirmed for every station - see TODOs below.
+const RADIO_STATIONS = [
+  {
+    displayName: 'EQUIP FM',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb9web.securenetsystems.net',
+    callSign: 'EQUIPFM',
+    streamUrl: 'https://ice66.securenetsystems.net/EQUIPFM'
+  },
+  {
+    displayName: 'WIAM',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb3web.securenetsystems.net',
+    callSign: 'WIAM',
+    streamUrl: 'https://ice42.securenetsystems.net/WIAM'
+  },
+  {
+    displayName: 'DOVE FM',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'DOVEMAIN',
+    // TODO: confirm the ice-server stream URL for this station. View-source
+    // the station page and look for a line like:
+    //   var streamSRC = "https://iceNN.securenetsystems.net/DOVEMAIN?playSessionID=...";
+    // Use just the https://iceNN.../DOVEMAIN part (drop the playSessionID -
+    // it appears to be a per-page-load tracking token, not required for
+    // playback, based on EQUIPFM/WIAM's pattern - but worth confirming live).
+    streamUrl: null
+  },
+  {
+    displayName: 'REVIVE FM',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb8web.securenetsystems.net',
+    callSign: 'KEPHLP',
+    // TODO: same as Dove FM above - confirm this station's ice-server stream URL.
+    streamUrl: null
+  }
+];
+
+// Extracts <title> and <artist> from the small XML feed each SecureNetSystems
+// station exposes. Deliberately simple regex extraction is fine here (unlike
+// the Conference ticker's messy nested HTML) because this is clean,
+// predictable, machine-generated XML with no nesting to worry about.
+function parseSecureNetSystemsXml(xml) {
+  const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/i);
+  const artistMatch = xml.match(/<artist>([\s\S]*?)<\/artist>/i);
+  return {
+    title: titleMatch ? decodeEntities(titleMatch[1]).trim() : '',
+    artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : ''
+  };
+}
+
+// Registry of provider-specific fetch+parse logic. Every provider must
+// expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
+// always return { title, artist } regardless of the provider's own native
+// format (XML here, but a future provider might be JSON) - that's the one
+// contract the ticker rendering code relies on. Adding a future
+// non-SecureNetSystems station (streamon.fm, Live365, etc.) means adding one
+// new entry here, not touching the handler, the cache logic, or the
+// frontend at all.
+const RADIO_PROVIDERS = {
+  securenetsystems: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.subdomain + '/player_status_update/' + station.callSign + '.xml';
+    },
+    parse: parseSecureNetSystemsXml
+  }
+};
+
+async function fetchStationNowPlaying(station) {
+  const provider = RADIO_PROVIDERS[station.provider];
+  if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
+
+  const res = await fetch(provider.buildNowPlayingUrl(station), {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
+  });
+  if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
+
+  const raw = await res.text();
+  const parsed = provider.parse(raw);
+  return {
+    displayName: station.displayName,
+    title: parsed.title,
+    artist: parsed.artist,
+    streamUrl: station.streamUrl
+  };
+}
+
+async function handleRadio(request, ctx) {
+  const cache = caches.default;
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set('cacheVersion', String(RADIO_CACHE_VERSION));
+  const cacheKey = new Request(cacheUrl.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const jsonHeaders = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'public, max-age=' + RADIO_CACHE_SECONDS
+  };
+
+  // Each station is fetched independently - one station's feed being down
+  // shouldn't blank out the whole ticker, same philosophy as the church
+  // live-status checker above.
+  const stations = await Promise.all(RADIO_STATIONS.map(async function(station) {
+    try {
+      return await fetchStationNowPlaying(station);
+    } catch (err) {
+      return {
+        displayName: station.displayName,
+        title: null,
+        artist: null,
+        streamUrl: station.streamUrl,
+        error: err.message
+      };
+    }
+  }));
+
+  const body = JSON.stringify({
+    stations: stations,
+    fetchedAt: new Date().toISOString()
+  });
+  const response = new Response(body, { headers: jsonHeaders });
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/conferences') {
       return handleConferences(request, ctx);
+    }
+    if (url.pathname === '/radio-now-playing') {
+      return handleRadio(request, ctx);
     }
     if (url.pathname === '/api/verify-admin' && request.method === 'POST') {
       return handleVerifyAdmin(request, env);

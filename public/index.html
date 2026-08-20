@@ -776,6 +776,82 @@
     height: 100%;
   }
   .ticker-dismiss:hover { opacity: 1; color: var(--ember); }
+
+  /* ---- Radio ticker (reuses .ticker-* styling above; same look/speed) ---- */
+  .radio-item {
+    cursor: pointer;
+  }
+  .radio-item:hover, .radio-item:focus {
+    color: #f2c76e;
+    text-decoration: underline;
+    outline: none;
+  }
+
+  /* ---- Radio mini-player bar ----
+     Pinned to the bottom of the viewport rather than a side panel, so it
+     never competes with the map for screen width - visitors can keep
+     exploring the map while it plays. */
+  .radio-player-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 56px;
+    background: var(--ink);
+    border-top: 2px solid var(--brass);
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    z-index: 2000;
+    box-shadow: 0 -3px 10px rgba(0,0,0,0.25);
+  }
+  .radio-player-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--brass);
+    background: transparent;
+    color: var(--paper);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .radio-player-btn:hover { background: rgba(166,138,74,0.2); }
+  .radio-player-info {
+    flex: 1;
+    min-width: 0;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .radio-player-station {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--brass);
+  }
+  .radio-player-nowplaying {
+    font-size: 13px;
+    color: var(--paper);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .radio-player-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--paper);
+    opacity: 0.7;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 6px;
+  }
+  .radio-player-close:hover { opacity: 1; color: var(--ember); }
 </style>
 </head>
 <body class="">
@@ -824,6 +900,16 @@
       </div>
     </div>
     <button type="button" id="tickerDismissBtn" class="ticker-dismiss" title="Hide conference ticker">×</button>
+  </div>
+
+  <div id="radioTicker" class="ticker-bar ticker-loading">
+    <span class="ticker-label">CCA Radio</span>
+    <div class="ticker-track-wrap">
+      <div id="radioTickerTrack" class="ticker-track">
+        <span class="ticker-item">Loading radio stations…</span>
+      </div>
+    </div>
+    <button type="button" id="radioTickerDismissBtn" class="ticker-dismiss" title="Hide radio ticker">×</button>
   </div>
   <div id="filterBar" class="filter-bar">
     <span class="filter-label">Filter by score:</span>
@@ -928,6 +1014,16 @@
     <button id="exportDataBtn" class="btn btn-outline">↓ Download Backup (JSON)</button>
     <div id="syncStatus" class="side-panel-sync-status"></div>
   </div>
+</div>
+
+<div id="radioPlayerBar" class="radio-player-bar">
+  <button type="button" id="radioPlayPauseBtn" class="radio-player-btn" title="Play or pause" aria-label="Play or pause">▶</button>
+  <div class="radio-player-info">
+    <div id="radioPlayerStation" class="radio-player-station"></div>
+    <div id="radioPlayerNowPlaying" class="radio-player-nowplaying"></div>
+  </div>
+  <audio id="radioAudio" preload="none"></audio>
+  <button type="button" id="radioPlayerCloseBtn" class="radio-player-close" title="Stop and close player" aria-label="Stop and close player">×</button>
 </div>
 
 <div id="liveNowPanel" class="side-panel" style="display: none;">
@@ -1694,6 +1790,139 @@
   });
 
   loadTicker();
+
+  // ---- Radio "Now Playing" ticker ----
+  // Data source: /radio-now-playing (see handleRadio() in src/index.js), which
+  // itself pulls each station's own now-playing feed server-side.
+  //
+  // Unlike the Conference ticker (loaded once - conference listings barely
+  // change), this one re-polls periodically since now-playing data changes
+  // every few minutes. Poll interval roughly matches the Worker's own cache
+  // TTL, so we're not polling faster than the data could possibly change.
+
+  const radioTickerBar = document.getElementById('radioTicker');
+  const radioTickerTrack = document.getElementById('radioTickerTrack');
+  const radioTickerDismissBtn = document.getElementById('radioTickerDismissBtn');
+  const radioPlayerBar = document.getElementById('radioPlayerBar');
+  const radioPlayerStation = document.getElementById('radioPlayerStation');
+  const radioPlayerNowPlaying = document.getElementById('radioPlayerNowPlaying');
+  const radioPlayPauseBtn = document.getElementById('radioPlayPauseBtn');
+  const radioPlayerCloseBtn = document.getElementById('radioPlayerCloseBtn');
+  const radioAudio = document.getElementById('radioAudio');
+
+  const RADIO_POLL_MS = 20000; // matches RADIO_CACHE_SECONDS on the Worker side
+  let radioStations = []; // last-loaded station list, indexed for ticker click lookups
+
+  // No artist (e.g. a teaching program rather than a song) -> title alone,
+  // no dangling separator. No now-playing data at all (station feed down) ->
+  // fall back to a plain "Live" label so the ticker still reads sensibly.
+  function formatNowPlaying(station) {
+    if (!station.title) return 'Live';
+    return station.artist ? station.title + ' - ' + station.artist : station.title;
+  }
+
+  function renderRadioTicker(stations) {
+    radioTickerBar.classList.remove('ticker-loading');
+    radioStations = stations;
+    if (!stations || !stations.length) {
+      radioTickerTrack.innerHTML = '<span class="ticker-item">No radio stations configured</span>';
+      return;
+    }
+    const pieces = stations.map(function(s, i) {
+      const label = escapeHtml(s.displayName) + ' - ' + escapeHtml(formatNowPlaying(s));
+      return '<span class="ticker-item radio-item" data-station-index="' + i + '" role="button" tabindex="0">' + label + '</span>';
+    });
+    const row = pieces.join('<span class="ticker-sep">&bull;</span>');
+    // Duplicated once so the marquee loop is seamless, same trick as the Conference ticker.
+    radioTickerTrack.innerHTML = row + '<span class="ticker-sep">&bull;</span>' + row;
+
+    requestAnimationFrame(function() {
+      const fullWidth = radioTickerTrack.scrollWidth / 2;
+      const duration = Math.max(fullWidth / TICKER_PX_PER_SEC, 15);
+      radioTickerBar.style.setProperty('--ticker-duration', duration + 's');
+    });
+  }
+
+  async function loadRadioTicker() {
+    try {
+      const res = await fetch('/radio-now-playing', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Radio ticker endpoint returned ' + res.status);
+      const data = await res.json();
+      if (data && Array.isArray(data.stations) && data.stations.length) {
+        renderRadioTicker(data.stations);
+        return;
+      }
+      throw new Error('Radio ticker endpoint returned no stations');
+    } catch (err) {
+      // No fallback list here (unlike Conferences) - stale "now playing" text
+      // would actively mislead a visitor, so an honest empty state is better.
+      radioTickerBar.classList.remove('ticker-loading');
+      radioTickerTrack.innerHTML = '<span class="ticker-item">Radio ticker unavailable right now</span>';
+    }
+  }
+
+  radioTickerDismissBtn.addEventListener('click', function() {
+    radioTickerBar.style.display = 'none';
+  });
+
+  function playStation(station) {
+    if (!station.streamUrl) {
+      // Configured but its direct stream URL isn't confirmed yet - fail
+      // quietly rather than breaking playback for every other station.
+      alert(station.displayName + ' isn\'t available to play yet.');
+      return;
+    }
+    radioAudio.src = station.streamUrl;
+    radioAudio.play().catch(function() {
+      // Autoplay can be blocked by the browser - the play/pause button still
+      // reflects real state via the audio element's own play/pause events below.
+    });
+    radioPlayerStation.textContent = station.displayName;
+    radioPlayerNowPlaying.textContent = formatNowPlaying(station);
+    radioPlayerBar.style.display = 'flex';
+  }
+
+  function handleRadioTickerActivate(e) {
+    const item = e.target.closest('.radio-item');
+    if (!item) return;
+    const idx = Number(item.dataset.stationIndex);
+    const station = radioStations[idx];
+    if (station) playStation(station);
+  }
+
+  radioTickerTrack.addEventListener('click', handleRadioTickerActivate);
+  radioTickerTrack.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleRadioTickerActivate(e);
+    }
+  });
+
+  radioPlayPauseBtn.addEventListener('click', function() {
+    if (radioAudio.paused) {
+      radioAudio.play();
+    } else {
+      radioAudio.pause();
+    }
+  });
+  radioAudio.addEventListener('play', function() {
+    radioPlayPauseBtn.textContent = '⏸';
+    radioPlayPauseBtn.setAttribute('aria-label', 'Pause');
+  });
+  radioAudio.addEventListener('pause', function() {
+    radioPlayPauseBtn.textContent = '▶';
+    radioPlayPauseBtn.setAttribute('aria-label', 'Play');
+  });
+
+  radioPlayerCloseBtn.addEventListener('click', function() {
+    radioAudio.pause();
+    radioAudio.removeAttribute('src');
+    radioAudio.load();
+    radioPlayerBar.style.display = 'none';
+  });
+
+  loadRadioTicker();
+  setInterval(loadRadioTicker, RADIO_POLL_MS);
 
   // ---- Admin sign-in (Google) ----
   //
