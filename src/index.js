@@ -551,10 +551,6 @@ function nextStaggerMs(currentMs, checked, errored) {
   return Math.max(LIVE_CHECK_STAGGER_MIN_MS, Math.min(LIVE_CHECK_STAGGER_MAX_MS, Math.round(next)));
 }
 
-function sleep(ms) {
-  return new Promise(function(resolve) { setTimeout(resolve, ms); });
-}
-
 // Accepts whatever format an admin pasted into youtubeUrl - a bare
 // @handle URL, a /streams URL, a /videos URL, or a /channel/UC... URL -
 // and returns the correct "/live" URL to check.
