@@ -704,21 +704,14 @@ const RADIO_STATIONS = [
     provider: 'securenetsystems',
     subdomain: 'streamdb7web.securenetsystems.net',
     callSign: 'DOVEMAIN',
-    // TODO: confirm the ice-server stream URL for this station. View-source
-    // the station page and look for a line like:
-    //   var streamSRC = "https://iceNN.securenetsystems.net/DOVEMAIN?playSessionID=...";
-    // Use just the https://iceNN.../DOVEMAIN part (drop the playSessionID -
-    // it appears to be a per-page-load tracking token, not required for
-    // playback, based on EQUIPFM/WIAM's pattern - but worth confirming live).
-    streamUrl: null
+    streamUrl: 'https://ice64.securenetsystems.net/DOVEMAIN'
   },
   {
     displayName: 'REVIVE FM',
     provider: 'securenetsystems',
     subdomain: 'streamdb8web.securenetsystems.net',
     callSign: 'KEPHLP',
-    // TODO: same as Dove FM above - confirm this station's ice-server stream URL.
-    streamUrl: null
+    streamUrl: 'https://ice42.securenetsystems.net/KEPHLP'
   }
 ];
 
