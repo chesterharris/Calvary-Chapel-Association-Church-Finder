@@ -875,6 +875,7 @@
       <button id="btnLiveNow" class="btn btn-live" style="display:none;">🔴 <span id="liveNowCount">0</span> churches live now</button>
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
+      <button id="btnFeedback" class="btn btn-outline">Feedback</button>
       <span id="adminArea" class="admin-area">
         <a href="#" id="adminSignInLink" class="admin-link">Admin</a>
         <span id="adminBadge" class="admin-badge" style="display:none;">Admin ✓ <a href="#" id="adminSignOutLink" class="admin-link admin-signout">Sign out</a></span>
@@ -998,6 +999,39 @@
       <div class="form-actions">
         <button type="button" id="cancelModalBtn" class="btn btn-outline">Cancel</button>
         <button type="submit" class="btn btn-ember" id="saveLocationBtn">Save Location</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="feedbackModal" class="modal-overlay" style="display: none;">
+  <div class="modal admin-modal">
+    <h2>Feedback</h2>
+    <p class="admin-modal-copy">Spot an outdated listing, a bug, or have a suggestion? Let us know below.</p>
+    <form id="feedbackForm">
+      <div class="form-row">
+        <label for="fb_name">Name (optional)</label>
+        <input id="fb_name" maxlength="200">
+      </div>
+      <div class="form-row">
+        <label for="fb_email">Email (optional, so we can reply)</label>
+        <input id="fb_email" type="email" maxlength="200">
+      </div>
+      <div class="form-row">
+        <label for="fb_message">Message *</label>
+        <textarea id="fb_message" required="" maxlength="5000" rows="5"></textarea>
+      </div>
+      <!-- Honeypot: hidden from real visitors via off-screen positioning
+           (not display:none, which some bots detect and skip). Left blank
+           by humans; bots that auto-fill every field trip it. -->
+      <div class="form-row" style="position:absolute; left:-9999px; top:-9999px;" aria-hidden="true">
+        <label for="fb_website">Website</label>
+        <input id="fb_website" tabindex="-1" autocomplete="off">
+      </div>
+      <div id="feedbackStatus" class="side-panel-sync-status"></div>
+      <div class="form-actions">
+        <button type="button" id="cancelFeedbackBtn" class="btn btn-outline">Cancel</button>
+        <button type="submit" class="btn btn-ember" id="submitFeedbackBtn">Send Feedback</button>
       </div>
     </form>
   </div>
@@ -1584,6 +1618,66 @@
 
   document.getElementById('btnAddLocation').addEventListener('click', openModal);
   document.getElementById('cancelModalBtn').addEventListener('click', closeModal);
+
+  // ---- Feedback form ----
+  (function() {
+    const feedbackModal = document.getElementById('feedbackModal');
+    const feedbackForm = document.getElementById('feedbackForm');
+    const feedbackStatus = document.getElementById('feedbackStatus');
+    const submitFeedbackBtn = document.getElementById('submitFeedbackBtn');
+
+    function openFeedbackModal() {
+      feedbackForm.reset();
+      feedbackStatus.textContent = '';
+      feedbackModal.style.display = 'flex';
+    }
+
+    function closeFeedbackModal() {
+      feedbackModal.style.display = 'none';
+    }
+
+    document.getElementById('btnFeedback').addEventListener('click', openFeedbackModal);
+    document.getElementById('cancelFeedbackBtn').addEventListener('click', closeFeedbackModal);
+    feedbackModal.addEventListener('click', function(e) {
+      if (e.target === feedbackModal) closeFeedbackModal();
+    });
+
+    feedbackForm.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      feedbackStatus.textContent = '';
+      submitFeedbackBtn.disabled = true;
+      submitFeedbackBtn.textContent = 'Sending…';
+
+      const payload = {
+        name: document.getElementById('fb_name').value.trim(),
+        email: document.getElementById('fb_email').value.trim(),
+        message: document.getElementById('fb_message').value.trim(),
+        website: document.getElementById('fb_website').value // honeypot
+      };
+
+      try {
+        const res = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(function() { return {}; });
+
+        if (res.ok && data.success) {
+          feedbackStatus.textContent = 'Thanks! Your feedback was sent.';
+          feedbackForm.reset();
+          setTimeout(closeFeedbackModal, 1500);
+        } else {
+          feedbackStatus.textContent = data.error || 'Something went wrong. Please try again.';
+        }
+      } catch (err) {
+        feedbackStatus.textContent = 'Network error. Please try again.';
+      } finally {
+        submitFeedbackBtn.disabled = false;
+        submitFeedbackBtn.textContent = 'Send Feedback';
+      }
+    });
+  })();
 
   form.addEventListener('submit', async function(e) {
     e.preventDefault();

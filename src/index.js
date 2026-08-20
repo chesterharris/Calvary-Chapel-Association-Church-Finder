@@ -959,6 +959,94 @@ async function handleRadio(request, ctx) {
   return response;
 }
 
+// ---- Feedback form ----
+//
+// Public visitors can submit a name (optional), reply email (optional),
+// and a message. We validate + rate-limit server-side, then relay it as
+// an email via Resend (env.RESEND_API_KEY, a Worker secret) to
+// env.ADMIN_EMAIL - the same secret already used for admin login, so no
+// new secret is needed for the destination address.
+async function handleFeedback(request, env) {
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Honeypot: a hidden field real users never fill in. Bots that
+  // auto-fill every field trip this and get silently "accepted" (so they
+  // don't know to retry) without ever reaching the inbox.
+  if (incoming.website) {
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const message = (incoming.message || '').trim();
+  if (!message || message.length > 5000) {
+    return new Response(JSON.stringify({ error: 'Message is required (max 5000 characters)' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const name = (incoming.name || '').trim().slice(0, 200);
+  const replyEmail = (incoming.email || '').trim().slice(0, 200);
+
+  // Lightweight rate limit: max 5 submissions per IP per hour. Reuses the
+  // existing CHURCHES_KV binding under a distinct key prefix so it never
+  // collides with church data, and each key auto-expires in an hour.
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const rateKey = `feedback_rate_${ip}`;
+  const recentCount = parseInt((await env.CHURCHES_KV.get(rateKey)) || '0', 10);
+  if (recentCount >= 5) {
+    return new Response(JSON.stringify({ error: 'Too many submissions, please try again later' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  await env.CHURCHES_KV.put(rateKey, String(recentCount + 1), { expirationTtl: 3600 });
+
+  if (!env.RESEND_API_KEY || !env.ADMIN_EMAIL) {
+    return new Response(JSON.stringify({ error: 'Feedback is not configured yet' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const emailRes = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: 'CCA Finder Feedback <onboarding@resend.dev>',
+      to: env.ADMIN_EMAIL,
+      reply_to: replyEmail || undefined,
+      subject: `CCA Finder feedback${name ? ' from ' + name : ''}`,
+      text: `From: ${name || 'Anonymous'}\nEmail: ${replyEmail || 'Not provided'}\n\n${message}`
+    })
+  });
+
+  if (!emailRes.ok) {
+    // Don't leak Resend's response body back to the client - just log
+    // enough server-side to debug, and tell the visitor it failed.
+    console.error('Resend send failed', emailRes.status, await emailRes.text());
+    return new Response(JSON.stringify({ error: 'Failed to send' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -991,6 +1079,9 @@ export default {
     }
     if (url.pathname === '/api/debug/check-live-now' && request.method === 'POST') {
       return handleDebugCheckLiveNow(request, env);
+    }
+    if (url.pathname === '/api/feedback' && request.method === 'POST') {
+      return handleFeedback(request, env);
     }
     return env.ASSETS.fetch(request);
   },
