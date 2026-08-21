@@ -831,14 +831,22 @@ const RADIO_CACHE_VERSION = 1;
 //                 is set up internally as "DOVEMAIN", but should never show
 //                 that publicly.
 //   provider    - key into RADIO_PROVIDERS below; decides how we fetch/parse
-//                 this station's now-playing data.
+//                 this station's now-playing data, and which of the
+//                 provider-specific fields below apply.
+//   streamUrl   - the actual raw audio stream URL the mini-player plays.
+//                 Required for every provider.
+//
+//   SecureNetSystems stations also need:
 //   subdomain   - the streamdbXweb.securenetsystems.net host serving this
 //                 station's now-playing XML feed.
 //   callSign    - the technical station identifier used in the now-playing
 //                 XML endpoint's URL path (NOT necessarily the same as
 //                 displayName - see Dove FM above).
-//   streamUrl   - the actual raw audio stream URL the mini-player plays.
-//                 NOT yet confirmed for every station - see TODOs below.
+//
+//   Icecast stations also need:
+//   host        - the host:port serving the station's status-json.xsl feed.
+//   mount       - the mount point (without leading slash) identifying this
+//                 station's stream on that Icecast server.
 const RADIO_STATIONS = [
   {
     displayName: 'EQUIP FM',
@@ -881,6 +889,20 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb4web.securenetsystems.net',
     callSign: 'WZTG',
     streamUrl: 'https://ice26.securenetsystems.net/WZTG'
+  },
+  {
+    displayName: 'KLHT FM (HI)',
+    provider: 'icecast',
+    host: 'klht.rhemastreams.net:8443',
+    mount: 'klhtfm',
+    streamUrl: 'https://klht.rhemastreams.net:8443/klhtfm'
+  },
+  {
+    displayName: 'KLHT AM (HI)',
+    provider: 'icecast',
+    host: 'klht.rhemastreams.net:8443',
+    mount: 'klhtam',
+    streamUrl: 'https://klht.rhemastreams.net:8443/klhtam'
   }
 ];
 
@@ -894,6 +916,39 @@ function parseSecureNetSystemsXml(xml) {
   return {
     title: titleMatch ? decodeEntities(titleMatch[1]).trim() : '',
     artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : ''
+  };
+}
+
+// Extracts now-playing info from an Icecast status-json.xsl response. Unlike
+// SecureNetSystems, Icecast reports a single combined "title" field rather
+// than separate title/artist fields - by convention it's usually formatted
+// as "Artist - Track" (or "Host - Program" for talk stations), so we split
+// on the first " - " to recover both. If a station's title doesn't follow
+// that convention, we fall back to treating the whole string as the title
+// with no artist, rather than guessing wrong.
+function parseIcecastJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Icecast JSON response');
+  }
+
+  // status-json.xsl returns "source" as a single object when the server has
+  // just one mount, but as an array when it has several. Requesting with
+  // ?mount= should always give us a single object, but handle the array
+  // shape too in case a server ever ignores that filter.
+  let source = data && data.icestats && data.icestats.source;
+  if (Array.isArray(source)) source = source[0];
+
+  const rawTitle = source && typeof source.title === 'string' ? source.title.trim() : '';
+  if (!rawTitle) return { title: '', artist: '' };
+
+  const sepIndex = rawTitle.indexOf(' - ');
+  if (sepIndex === -1) return { title: rawTitle, artist: '' };
+  return {
+    artist: rawTitle.slice(0, sepIndex).trim(),
+    title: rawTitle.slice(sepIndex + 3).trim()
   };
 }
 
@@ -911,6 +966,12 @@ const RADIO_PROVIDERS = {
       return 'https://' + station.subdomain + '/player_status_update/' + station.callSign + '.xml';
     },
     parse: parseSecureNetSystemsXml
+  },
+  icecast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/status-json.xsl?mount=/' + station.mount;
+    },
+    parse: parseIcecastJson
   }
 };
 
