@@ -2009,13 +2009,36 @@
     return station.artist ? station.title + ' - ' + station.artist : station.title;
   }
 
+  // Radio-ticker-specific duration cap, on top of the Conference ticker's
+  // shared TICKER_PX_PER_SEC/floor above. With a growing station list, a
+  // fixed scroll speed means a full lap keeps getting longer forever -
+  // capping it here means scroll speed instead nudges up automatically as
+  // stations are added, keeping "time to see everything" bounded rather
+  // than growing unbounded. Adjust this single number if it ever feels too
+  // fast/slow after adding more stations.
+  const RADIO_TICKER_MAX_DURATION_SEC = 75;
+
+  // Rotates which station starts each lap, so the same handful of stations
+  // don't chronically end up stuck at the tail end where a quick glance is
+  // less likely to reach them. Purely cosmetic ordering - doesn't affect
+  // playback, click targets, or which station is "first" in RADIO_STATIONS.
+  let radioRotationOffset = 0;
+
   // Actually rebuilds the ticker's DOM/animation for a given station list.
   // Only call this at a moment where a visual "restart" is acceptable -
   // either the very first load, or the animationiteration boundary below.
   function applyRadioTickerContent(stations) {
-    const pieces = stations.map(function(s, i) {
+    const offset = stations.length ? radioRotationOffset % stations.length : 0;
+    const rotated = stations.slice(offset).concat(stations.slice(0, offset));
+    radioRotationOffset++;
+
+    const pieces = rotated.map(function(s) {
+      // data-station-index refers to the ORIGINAL (unrotated) list - that's
+      // what radioStations below is indexed by, so click-to-play keeps
+      // working correctly regardless of visual rotation.
+      const originalIndex = stations.indexOf(s);
       const label = escapeHtml(s.displayName) + ' - ' + escapeHtml(formatNowPlaying(s));
-      return '<span class="ticker-item radio-item" data-station-index="' + i + '" role="button" tabindex="0">' + label + '</span>';
+      return '<span class="ticker-item radio-item" data-station-index="' + originalIndex + '" role="button" tabindex="0">' + label + '</span>';
     });
     const row = pieces.join(RADIO_TICKER_SEP);
     // Duplicated once so the marquee loop is seamless, same trick as the Conference ticker.
@@ -2023,7 +2046,8 @@
 
     requestAnimationFrame(function() {
       const fullWidth = radioTickerTrack.scrollWidth / 2;
-      const duration = Math.max(fullWidth / TICKER_PX_PER_SEC, 15);
+      const naturalDuration = fullWidth / TICKER_PX_PER_SEC;
+      const duration = Math.min(Math.max(naturalDuration, 15), RADIO_TICKER_MAX_DURATION_SEC);
       radioTickerBar.style.setProperty('--ticker-duration', duration + 's');
     });
   }
