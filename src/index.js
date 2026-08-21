@@ -970,11 +970,10 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
   },
   {
-    displayName: 'WRBP 92.5FM (WI)',
-    provider: 'icecast',
-    host: '23.29.119.99:8211',
-    mount: 'live',
-    streamUrl: 'http://23.29.119.99:8211/live'
+    displayName: 'Real Hope Radio 90.9 FM (ID)',
+    provider: 'futuri',
+    mount: '7066_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
   }
 ];
 
