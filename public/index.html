@@ -850,6 +850,16 @@
     justify-content: center;
   }
   .radio-player-btn:hover { background: rgba(166,138,74,0.2); }
+  .radio-player-cover {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    border: 1px solid rgba(166,138,74,0.5);
+    object-fit: cover;
+    background: rgba(255,255,255,0.05);
+    display: none;
+  }
   .radio-player-info {
     flex: 1;
     min-width: 0;
@@ -1081,6 +1091,7 @@
 
 <div id="radioPlayerBar" class="radio-player-bar">
   <button type="button" id="radioPlayPauseBtn" class="radio-player-btn" title="Play or pause" aria-label="Play or pause">▶</button>
+  <img id="radioPlayerCover" class="radio-player-cover" alt="">
   <div class="radio-player-info">
     <div id="radioPlayerStation" class="radio-player-station"></div>
     <div id="radioPlayerNowPlaying" class="radio-player-nowplaying"></div>
@@ -1940,6 +1951,7 @@
   const radioPlayerBar = document.getElementById('radioPlayerBar');
   const radioPlayerStation = document.getElementById('radioPlayerStation');
   const radioPlayerNowPlaying = document.getElementById('radioPlayerNowPlaying');
+  const radioPlayerCover = document.getElementById('radioPlayerCover');
   const radioPlayPauseBtn = document.getElementById('radioPlayPauseBtn');
   const radioPlayerCloseBtn = document.getElementById('radioPlayerCloseBtn');
   const radioAudio = document.getElementById('radioAudio');
@@ -2088,6 +2100,25 @@
     });
     radioPlayerStation.textContent = station.displayName;
     radioPlayerNowPlaying.textContent = formatNowPlaying(station);
+
+    // Cover art only exists for SecureNetSystems stations (Icecast has no
+    // equivalent field, so coverUrl is null there) - hide the thumbnail
+    // entirely rather than show a broken-image icon when there's none.
+    // onerror also covers the rarer case where a SecureNetSystems station's
+    // cover link is present but the image itself 404s.
+    if (station.coverUrl) {
+      radioPlayerCover.onerror = function() {
+        radioPlayerCover.style.display = 'none';
+      };
+      radioPlayerCover.src = station.coverUrl;
+      radioPlayerCover.alt = station.displayName + ' cover art';
+      radioPlayerCover.style.display = 'block';
+    } else {
+      radioPlayerCover.onerror = null;
+      radioPlayerCover.removeAttribute('src');
+      radioPlayerCover.style.display = 'none';
+    }
+
     radioPlayerBar.style.display = 'flex';
   }
 

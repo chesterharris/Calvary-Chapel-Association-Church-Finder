@@ -819,7 +819,7 @@ async function handleConferences(request, ctx) {
 // shorter than Conferences (20s vs 6 hours) - now-playing data changes
 // every few minutes, while conference listings barely change at all.
 
-const RADIO_CACHE_SECONDS = 20;
+const RADIO_CACHE_SECONDS = 60;
 const RADIO_CACHE_VERSION = 1;
 
 // Config-driven station list. Adding a new station is just adding one entry
@@ -906,16 +906,22 @@ const RADIO_STATIONS = [
   }
 ];
 
-// Extracts <title> and <artist> from the small XML feed each SecureNetSystems
-// station exposes. Deliberately simple regex extraction is fine here (unlike
-// the Conference ticker's messy nested HTML) because this is clean,
-// predictable, machine-generated XML with no nesting to worry about.
+// Extracts <title>, <artist>, and <cover> from the small XML feed each
+// SecureNetSystems station exposes. Deliberately simple regex extraction is
+// fine here (unlike the Conference ticker's messy nested HTML) because this
+// is clean, predictable, machine-generated XML with no nesting to worry
+// about. <cover> is the station's own album-art/show-image URL - Icecast has
+// no equivalent field, so coverUrl is SecureNetSystems-only and callers must
+// treat it as optional.
 function parseSecureNetSystemsXml(xml) {
   const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/i);
   const artistMatch = xml.match(/<artist>([\s\S]*?)<\/artist>/i);
+  const coverMatch = xml.match(/<cover>([\s\S]*?)<\/cover>/i);
+  const coverUrl = coverMatch ? decodeEntities(coverMatch[1]).trim() : '';
   return {
     title: titleMatch ? decodeEntities(titleMatch[1]).trim() : '',
-    artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : ''
+    artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : '',
+    coverUrl: coverUrl || null
   };
 }
 
@@ -942,24 +948,26 @@ function parseIcecastJson(rawJson) {
   if (Array.isArray(source)) source = source[0];
 
   const rawTitle = source && typeof source.title === 'string' ? source.title.trim() : '';
-  if (!rawTitle) return { title: '', artist: '' };
+  if (!rawTitle) return { title: '', artist: '', coverUrl: null };
 
   const sepIndex = rawTitle.indexOf(' - ');
-  if (sepIndex === -1) return { title: rawTitle, artist: '' };
+  if (sepIndex === -1) return { title: rawTitle, artist: '', coverUrl: null };
   return {
     artist: rawTitle.slice(0, sepIndex).trim(),
-    title: rawTitle.slice(sepIndex + 3).trim()
+    title: rawTitle.slice(sepIndex + 3).trim(),
+    coverUrl: null
   };
 }
 
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
-// always return { title, artist } regardless of the provider's own native
-// format (XML here, but a future provider might be JSON) - that's the one
-// contract the ticker rendering code relies on. Adding a future
-// non-SecureNetSystems station (streamon.fm, Live365, etc.) means adding one
-// new entry here, not touching the handler, the cache logic, or the
-// frontend at all.
+// always return { title, artist, coverUrl } regardless of the provider's own
+// native format (XML here, but a future provider might be JSON) - that's the
+// one contract the ticker rendering code relies on. coverUrl is null for any
+// provider (like Icecast) that doesn't expose station/show artwork. Adding a
+// future non-SecureNetSystems station (streamon.fm, Live365, etc.) means
+// adding one new entry here, not touching the handler, the cache logic, or
+// the frontend at all.
 const RADIO_PROVIDERS = {
   securenetsystems: {
     buildNowPlayingUrl: function(station) {
@@ -990,6 +998,7 @@ async function fetchStationNowPlaying(station) {
     displayName: station.displayName,
     title: parsed.title,
     artist: parsed.artist,
+    coverUrl: parsed.coverUrl || null,
     streamUrl: station.streamUrl
   };
 }
@@ -1019,6 +1028,7 @@ async function handleRadio(request, ctx) {
         displayName: station.displayName,
         title: null,
         artist: null,
+        coverUrl: null,
         streamUrl: station.streamUrl,
         error: err.message
       };
