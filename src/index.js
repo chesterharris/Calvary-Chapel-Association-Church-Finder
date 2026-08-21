@@ -894,6 +894,18 @@ const RADIO_CACHE_VERSION = 1;
 //   host        - the host:port serving the station's status-json.xsl feed.
 //   mount       - the mount point (without leading slash) identifying this
 //                 station's stream on that Icecast server.
+//
+//   Futuri/streamon.fm stations also need:
+//   mount       - identifies this station on yp.cdnstream1.com's metadata
+//                 API (e.g. "7077_24k" -> .../metadata/7077_24k/current.json).
+//                 Found in the station's own player page JS as
+//                 "cfg_yp_mount" or in the "currentapi" URL. Unlike the
+//                 other two providers, streamUrl here is the plain
+//                 continuous-stream ("iceaac") format from that same page's
+//                 "streams" config array, NOT the HLS ("hlsaac"/.m3u8) one -
+//                 a plain <audio> tag can't play HLS without an extra
+//                 library, but the iceaac format works exactly like a
+//                 SecureNetSystems/Icecast stream.
 const RADIO_STATIONS = [
   {
     displayName: 'EQUIP FM',
@@ -950,6 +962,12 @@ const RADIO_STATIONS = [
     host: 'klht.rhemastreams.net:8443',
     mount: 'klhtam',
     streamUrl: 'https://klht.rhemastreams.net:8443/klhtam'
+  },
+  {
+    displayName: 'WTSW-LP (WI)',
+    provider: 'futuri',
+    mount: '7077_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
   }
 ];
 
@@ -1006,6 +1024,34 @@ function parseIcecastJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from a Futuri/streamon.fm "current.json"
+// metadata endpoint. Confirmed via a real response to return a one-element
+// array (not a bare object like Icecast's single-mount case) using ID3
+// frame names as keys: TIT2 for title, TPE1 for artist, WXXX_album_art for
+// cover art. WXXX_album_art can be present but an empty string when the
+// current program has no art configured (seen in production - a talk show
+// with no art, vs. a music track that would have one), so treat blank the
+// same as absent rather than showing a broken image.
+function parseFuturiJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Futuri JSON response');
+  }
+
+  const entry = Array.isArray(data) ? data[0] : data;
+  if (!entry) return { title: '', artist: '', coverUrl: null };
+
+  const title = typeof entry.TIT2 === 'string' ? entry.TIT2.trim() : '';
+  const artist = typeof entry.TPE1 === 'string' ? entry.TPE1.trim() : '';
+  const coverUrl = typeof entry.WXXX_album_art === 'string' && entry.WXXX_album_art.trim()
+    ? entry.WXXX_album_art.trim()
+    : null;
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1027,6 +1073,12 @@ const RADIO_PROVIDERS = {
       return 'https://' + station.host + '/status-json.xsl?mount=/' + station.mount;
     },
     parse: parseIcecastJson
+  },
+  futuri: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://yp.cdnstream1.com/metadata/' + station.mount + '/current.json';
+    },
+    parse: parseFuturiJson
   }
 };
 
