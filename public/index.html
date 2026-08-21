@@ -2062,6 +2062,17 @@
     // the visual update below gets deferred.
     radioStations = stations;
 
+    // Keep the mini player's displayed program in sync with reality on
+    // every poll - unlike the ticker's marquee, there's no scroll animation
+    // here to protect from a jarring restart, so this doesn't wait for a
+    // lap boundary the way the ticker's own visual update does below.
+    if (currentPlayingDisplayName && stations) {
+      const stillPlaying = stations.find(function(s) {
+        return s.displayName === currentPlayingDisplayName;
+      });
+      if (stillPlaying) updateMiniPlayerNowPlaying(stillPlaying);
+    }
+
     if (!stations || !stations.length) {
       // An empty/error state is worth showing right away, not worth queuing.
       pendingRadioStations = null;
@@ -2133,26 +2144,29 @@
     radioTickerBar.style.display = 'none';
   });
 
-  function playStation(station) {
-    if (!station.streamUrl) {
-      // Configured but its direct stream URL isn't confirmed yet - fail
-      // quietly rather than breaking playback for every other station.
-      alert(station.displayName + ' isn\'t available to play yet.');
-      return;
-    }
-    radioAudio.src = station.streamUrl;
-    radioAudio.play().catch(function() {
-      // Autoplay can be blocked by the browser - the play/pause button still
-      // reflects real state via the audio element's own play/pause events below.
-    });
+  // Tracks which station is currently loaded in the mini player (by
+  // displayName, which is unique per station), so renderRadioTicker below
+  // can find that station's fresh data on every poll and keep the mini
+  // player's displayed text in sync - otherwise it would keep showing
+  // whatever program was airing at the moment someone clicked Play,
+  // confusingly outliving the actual show change on the real stream.
+  let currentPlayingDisplayName = null;
+
+  // Updates the mini player's visible text/cover for a given station's
+  // current data. Shared by playStation() (initial load) and the periodic
+  // refresh in renderRadioTicker() (keeping it live) so both stay
+  // consistent. Deliberately NOT tied to the ticker's scroll-lap deferral
+  // logic above - there's no marquee animation here to protect from a
+  // jarring restart, so this can and should update immediately every poll.
+  function updateMiniPlayerNowPlaying(station) {
     radioPlayerStation.textContent = station.displayName;
     radioPlayerNowPlaying.textContent = formatNowPlaying(station);
 
-    // Cover art only exists for SecureNetSystems stations (Icecast has no
-    // equivalent field, so coverUrl is null there) - hide the thumbnail
-    // entirely rather than show a broken-image icon when there's none.
-    // onerror also covers the rarer case where a SecureNetSystems station's
-    // cover link is present but the image itself 404s.
+    // Cover art only exists for SecureNetSystems/SoCast stations (Icecast
+    // and Futuri have no equivalent field, so coverUrl is null there) -
+    // hide the thumbnail entirely rather than show a broken-image icon
+    // when there's none. onerror also covers the rarer case where a
+    // station's cover link is present but the image itself 404s.
     if (station.coverUrl) {
       radioPlayerCover.onerror = function() {
         radioPlayerCover.style.display = 'none';
@@ -2165,7 +2179,22 @@
       radioPlayerCover.removeAttribute('src');
       radioPlayerCover.style.display = 'none';
     }
+  }
 
+  function playStation(station) {
+    if (!station.streamUrl) {
+      // Configured but its direct stream URL isn't confirmed yet - fail
+      // quietly rather than breaking playback for every other station.
+      alert(station.displayName + ' isn\'t available to play yet.');
+      return;
+    }
+    radioAudio.src = station.streamUrl;
+    radioAudio.play().catch(function() {
+      // Autoplay can be blocked by the browser - the play/pause button still
+      // reflects real state via the audio element's own play/pause events below.
+    });
+    currentPlayingDisplayName = station.displayName;
+    updateMiniPlayerNowPlaying(station);
     radioPlayerBar.style.display = 'flex';
   }
 
@@ -2206,6 +2235,7 @@
     radioAudio.removeAttribute('src');
     radioAudio.load();
     radioPlayerBar.style.display = 'none';
+    currentPlayingDisplayName = null;
   });
 
   loadRadioTicker();
