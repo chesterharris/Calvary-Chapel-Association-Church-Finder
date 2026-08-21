@@ -906,6 +906,15 @@ const RADIO_CACHE_VERSION = 1;
 //                 a plain <audio> tag can't play HLS without an extra
 //                 library, but the iceaac format works exactly like a
 //                 SecureNetSystems/Icecast stream.
+//
+//   SoCast stations also need:
+//   accountId   - PlayerData.accountID in the station's player page JS.
+//   streamId    - PlayerData.streamID in that same JS. Together these build
+//                 the now-playing URL: PlayerData.nowPlayingURL is literally
+//                 ".../np_{accountId}_{streamId}.js" - the raw audio stream
+//                 itself (streamUrl) is unrelated to this platform and is
+//                 usually hosted separately (e.g. on StreamGuys), found in
+//                 that same JS as PlayerData.streamObj.mp3/.m4a.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1000,6 +1009,13 @@ const RADIO_STATIONS = [
     provider: 'futuri',
     mount: '7066_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
+  },
+  {
+    displayName: 'Radio by Grace (TX)',
+    provider: 'socast',
+    accountId: '1023',
+    streamId: '973',
+    streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
   }
 ];
 
@@ -1094,6 +1110,39 @@ function parseFuturiJson(rawJson) {
   return { title: title, artist: artist, coverUrl: coverUrl };
 }
 
+// Extracts now-playing info from a SoCast player's now-playing feed. Unlike
+// the other providers, this isn't bare JSON - it's JSONP, a JS-callback
+// wrapper around a JSON object (confirmed via a real response:
+// `jsonpcallback({...});`), designed to be loaded via a <script> tag on the
+// station's own player page rather than fetched and parsed directly. We
+// don't execute it as script - just regex out the object literal and
+// JSON.parse that part ourselves.
+function parseSocastJsonp(raw) {
+  const wrapperMatch = raw.match(/jsonpcallback\(([\s\S]*)\)\s*;?\s*$/);
+  if (!wrapperMatch) throw new Error('Unexpected SoCast now-playing response format');
+
+  let data;
+  try {
+    data = JSON.parse(wrapperMatch[1]);
+  } catch (err) {
+    throw new Error('Invalid SoCast JSON payload');
+  }
+
+  const title = typeof data.song_name === 'string' ? data.song_name.trim() : '';
+  const artist = typeof data.artist_name === 'string' ? data.artist_name.trim() : '';
+  // "image" is the show/song art when present; "itunes_img" seen as a
+  // fallback field in the same payload shape - both null in the one real
+  // response we've confirmed, but handle either being populated.
+  let coverUrl = null;
+  if (typeof data.image === 'string' && data.image.trim()) {
+    coverUrl = data.image.trim();
+  } else if (typeof data.itunes_img === 'string' && data.itunes_img.trim()) {
+    coverUrl = data.itunes_img.trim();
+  }
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1121,6 +1170,12 @@ const RADIO_PROVIDERS = {
       return 'https://yp.cdnstream1.com/metadata/' + station.mount + '/current.json';
     },
     parse: parseFuturiJson
+  },
+  socast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://socast-public.s3.amazonaws.com/player/np_' + station.accountId + '_' + station.streamId + '.js';
+    },
+    parse: parseSocastJsonp
   }
 };
 
