@@ -908,13 +908,24 @@ const RADIO_CACHE_VERSION = 1;
 //                 SecureNetSystems/Icecast stream.
 //
 //   SoCast stations also need:
-//   accountId   - PlayerData.accountID in the station's player page JS.
-//   streamId    - PlayerData.streamID in that same JS. Together these build
-//                 the now-playing URL: PlayerData.nowPlayingURL is literally
-//                 ".../np_{accountId}_{streamId}.js" - the raw audio stream
-//                 itself (streamUrl) is unrelated to this platform and is
-//                 usually hosted separately (e.g. on StreamGuys), found in
-//                 that same JS as PlayerData.streamObj.mp3/.m4a.
+//   domain      - the station's OWN website domain hosting the
+//                 "/api/music/currentProgram" WordPress REST route (e.g.
+//                 "www.radiobygrace.com") - NOT a shared SoCast
+//                 infrastructure host. Found by waiting ~10 minutes after
+//                 pressing Play on the station's own player page with
+//                 DevTools Network (filter: JS or All, search "program")
+//                 open - this call is only made once every 10 minutes and
+//                 not immediately on page load, easy to miss.
+//   accountId   - PlayerData.accountID in the station's player page JS;
+//                 also appears as the accountID query param on the above
+//                 endpoint. NOTE: an earlier, DIFFERENT SoCast endpoint
+//                 (np_{accountId}_{streamId}.js, hosted on
+//                 socast-public.s3.amazonaws.com) looked plausible at
+//                 first and returns real data too, but tracks background
+//                 song/music cues, NOT who's actually on air - confirmed
+//                 wrong in production (showed a song's artist instead of
+//                 "Ed Taylor", the actual live host). currentProgram is
+//                 the one that actually reflects on-air host/show info.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1013,8 +1024,8 @@ const RADIO_STATIONS = [
   {
     displayName: 'Radio by Grace (TX)',
     provider: 'socast',
+    domain: 'www.radiobygrace.com',
     accountId: '1023',
-    streamId: '973',
     streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
   }
 ];
@@ -1116,31 +1127,58 @@ function parseFuturiJson(rawJson) {
 // `jsonpcallback({...});`), designed to be loaded via a <script> tag on the
 // station's own player page rather than fetched and parsed directly. We
 // don't execute it as script - just regex out the object literal and
-// JSON.parse that part ourselves.
-function parseSocastJsonp(raw) {
-  const wrapperMatch = raw.match(/jsonpcallback\(([\s\S]*)\)\s*;?\s*$/);
-  if (!wrapperMatch) throw new Error('Unexpected SoCast now-playing response format');
+// Extracts on-air program info from a SoCast station's "currentProgram" API
+// - a WordPress REST route hosted on the STATION'S OWN domain (not the
+// shared socast-public.s3.amazonaws.com infrastructure used by the
+// song-tracking feed we tried first). Confirmed via a real response to be
+// the correct source for actual show/host identity (e.g. "Pastor Ed
+// Taylor / Abounding Grace") - the song-based np_x_x.js feed we originally
+// wired up instead tracks background music cues, which for a talk station
+// never reflects who's actually on air, even though both feeds technically
+// "work" and return data.
+//
+// Response is JSONP (see parseSocastJsonp's comment for what that means),
+// but with a dynamically-generated callback name unique per request
+// (e.g. "jQuery19105312052787680952_1787330750766") rather than a fixed
+// literal - the regex below matches any valid identifier as the wrapper
+// function name rather than requiring one specific name.
+function parseSocastProgramJsonp(raw) {
+  const wrapperMatch = raw.match(/^\s*[\w$]+\(([\s\S]*)\)\s*;?\s*$/);
+  if (!wrapperMatch) throw new Error('Unexpected SoCast program response format');
 
-  let data;
+  let parsed;
   try {
-    data = JSON.parse(wrapperMatch[1]);
+    parsed = JSON.parse(wrapperMatch[1]);
   } catch (err) {
-    throw new Error('Invalid SoCast JSON payload');
+    throw new Error('Invalid SoCast program JSON payload');
   }
 
-  const title = typeof data.song_name === 'string' ? data.song_name.trim() : '';
-  const artist = typeof data.artist_name === 'string' ? data.artist_name.trim() : '';
-  // "image" is the show/song art when present; "itunes_img" seen as a
-  // fallback field in the same payload shape - both null in the one real
-  // response we've confirmed, but handle either being populated.
+  if (!parsed || parsed.status !== 'success' || !parsed.data) {
+    return { title: '', artist: '', coverUrl: null };
+  }
+
+  // No separate "artist" concept for a program schedule - program_name is
+  // already the full descriptive string (e.g. "Host Name / Show Title"),
+  // so it goes entirely into title with artist left blank. The frontend's
+  // existing "no artist -> just show the title" fallback handles this the
+  // same way it already does for Icecast stations with no artist data.
+  const title = typeof parsed.data.program_name === 'string' ? parsed.data.program_name.trim() : '';
+
+  // program_button has been the populated one in practice (a host photo);
+  // program_header_img/program_mobile_img are alternate fields in the same
+  // payload shape that were empty strings in the one real response we've
+  // confirmed, but checked here in case a different program populates one
+  // of those instead.
   let coverUrl = null;
-  if (typeof data.image === 'string' && data.image.trim()) {
-    coverUrl = data.image.trim();
-  } else if (typeof data.itunes_img === 'string' && data.itunes_img.trim()) {
-    coverUrl = data.itunes_img.trim();
+  if (typeof parsed.data.program_button === 'string' && parsed.data.program_button.trim()) {
+    coverUrl = parsed.data.program_button.trim();
+  } else if (typeof parsed.data.program_header_img === 'string' && parsed.data.program_header_img.trim()) {
+    coverUrl = parsed.data.program_header_img.trim();
+  } else if (typeof parsed.data.program_mobile_img === 'string' && parsed.data.program_mobile_img.trim()) {
+    coverUrl = parsed.data.program_mobile_img.trim();
   }
 
-  return { title: title, artist: artist, coverUrl: coverUrl };
+  return { title: title, artist: '', coverUrl: coverUrl };
 }
 
 // Registry of provider-specific fetch+parse logic. Every provider must
@@ -1173,9 +1211,9 @@ const RADIO_PROVIDERS = {
   },
   socast: {
     buildNowPlayingUrl: function(station) {
-      return 'https://socast-public.s3.amazonaws.com/player/np_' + station.accountId + '_' + station.streamId + '.js';
+      return 'https://' + station.domain + '/api/music/currentProgram?jsonpcallback=npCallback&accountID=' + station.accountId + '&_=' + Date.now();
     },
-    parse: parseSocastJsonp
+    parse: parseSocastProgramJsonp
   }
 };
 
