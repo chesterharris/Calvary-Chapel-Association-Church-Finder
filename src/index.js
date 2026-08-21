@@ -1051,6 +1051,13 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb4web.securenetsystems.net',
     callSign: 'WZTM',
     streamUrl: 'https://ice26.securenetsystems.net/WZTM'
+  },
+  {
+    displayName: 'KSGR (TX)',
+    provider: 'icecast',
+    host: 'ksgr.ddns.net:1841',
+    mount: 'stream.mp3',
+    streamUrl: 'https://ksgr.ddns.net:1841/stream.mp3'
   }
 ];
 
