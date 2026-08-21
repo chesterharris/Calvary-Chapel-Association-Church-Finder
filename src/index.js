@@ -981,6 +981,18 @@ const RADIO_STATIONS = [
     host: 'radio.shoutcheap.com/proxy/kaxzann1',
     mount: 'live',
     streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
+  },
+  {
+    // streamUrl inferred from the status endpoint's own URL pattern
+    // (".../stream/status-json.xsl" -> ".../stream/{mount}") since the
+    // page only embeds a third-party (LibreTime) player iframe with no
+    // visible audio src to confirm against directly - verify playback
+    // next time before assuming this is exactly right.
+    displayName: 'Calvary Radio (Vero Beach)',
+    provider: 'icecast',
+    host: 'wwsh.ccvb.fm/stream',
+    mount: 'main',
+    streamUrl: 'https://wwsh.ccvb.fm/stream/main'
   }
 ];
 
