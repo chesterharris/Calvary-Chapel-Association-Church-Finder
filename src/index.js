@@ -601,7 +601,14 @@ async function checkChurchLive(youtubeUrl) {
   const isLive = html.includes('"isLive":true');
   if (!isLive) return { isLive: false };
 
-  const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)">/);
+  // Loosely matched on purpose: only require the href value itself, not an
+  // exact immediate ">" after it. YouTube's markup for this tag isn't
+  // perfectly consistent across channels/pages (self-closing "/>", other
+  // attributes after href, etc.) - a stricter match here was silently
+  // failing for at least one real church's page, leaving videoId null and
+  // producing a broken thumbnail on the frontend even though the church
+  // really was live.
+  const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
   const startDateMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
   const titleMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
   const descriptionMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
