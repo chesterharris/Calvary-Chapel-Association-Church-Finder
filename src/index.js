@@ -908,6 +908,25 @@ const RADIO_CACHE_VERSION = 1;
 //                 SecureNetSystems/Icecast stream.
 const RADIO_STATIONS = [
   {
+    // streamUrl inferred from the status endpoint's own URL pattern
+    // (".../stream/status-json.xsl" -> ".../stream/{mount}") since the
+    // page only embeds a third-party (LibreTime) player iframe with no
+    // visible audio src to confirm against directly - verify playback
+    // next time before assuming this is exactly right.
+    displayName: 'Calvary Radio (Vero Beach)',
+    provider: 'icecast',
+    host: 'wwsh.ccvb.fm/stream',
+    mount: 'main',
+    streamUrl: 'https://wwsh.ccvb.fm/stream/main'
+  },
+  {
+    displayName: 'TrueFM (KS)',
+    provider: 'icecast',
+    host: 'radio.shoutcheap.com/proxy/kaxzann1',
+    mount: 'live',
+    streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
+  },
+  {
     displayName: 'EQUIP FM',
     provider: 'securenetsystems',
     subdomain: 'streamdb9web.securenetsystems.net',
@@ -974,25 +993,6 @@ const RADIO_STATIONS = [
     provider: 'futuri',
     mount: '7066_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
-  },
-  {
-    displayName: 'TrueFM (KS)',
-    provider: 'icecast',
-    host: 'radio.shoutcheap.com/proxy/kaxzann1',
-    mount: 'live',
-    streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
-  },
-  {
-    // streamUrl inferred from the status endpoint's own URL pattern
-    // (".../stream/status-json.xsl" -> ".../stream/{mount}") since the
-    // page only embeds a third-party (LibreTime) player iframe with no
-    // visible audio src to confirm against directly - verify playback
-    // next time before assuming this is exactly right.
-    displayName: 'Calvary Radio (Vero Beach)',
-    provider: 'icecast',
-    host: 'wwsh.ccvb.fm/stream',
-    mount: 'main',
-    streamUrl: 'https://wwsh.ccvb.fm/stream/main'
   }
 ];
 
