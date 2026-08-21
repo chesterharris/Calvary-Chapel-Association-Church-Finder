@@ -974,6 +974,13 @@ const RADIO_STATIONS = [
     provider: 'futuri',
     mount: '7066_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
+  },
+  {
+    displayName: 'TrueFM (KS)',
+    provider: 'icecast',
+    host: 'radio.shoutcheap.com/proxy/kaxzann1',
+    mount: 'live',
+    streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
   }
 ];
 
