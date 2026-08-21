@@ -968,6 +968,13 @@ const RADIO_STATIONS = [
     provider: 'futuri',
     mount: '7077_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
+  },
+  {
+    displayName: 'WRBP 92.5FM (WI)',
+    provider: 'icecast',
+    host: '23.29.119.99:8211',
+    mount: 'live',
+    streamUrl: 'http://23.29.119.99:8211/live'
   }
 ];
 
@@ -1016,12 +1023,22 @@ function parseIcecastJson(rawJson) {
   if (!rawTitle) return { title: '', artist: '', coverUrl: null };
 
   const sepIndex = rawTitle.indexOf(' - ');
-  if (sepIndex === -1) return { title: rawTitle, artist: '', coverUrl: null };
-  return {
-    artist: rawTitle.slice(0, sepIndex).trim(),
-    title: rawTitle.slice(sepIndex + 3).trim(),
-    coverUrl: null
-  };
+  if (sepIndex !== -1) {
+    return {
+      artist: rawTitle.slice(0, sepIndex).trim(),
+      title: rawTitle.slice(sepIndex + 3).trim(),
+      coverUrl: null
+    };
+  }
+
+  // Some stations (confirmed in production - WRBP 92.5FM) report an empty
+  // artist as a bare leading "- Title" instead of omitting the separator
+  // entirely. After trimming the string, that leaves a stray "- " prefix
+  // that the split above won't catch (no leading space left to match
+  // " - " against) - strip it here so the ticker doesn't show a dangling
+  // dash with no artist before it.
+  const bareTitle = rawTitle.replace(/^-\s+/, '').trim();
+  return { title: bareTitle, artist: '', coverUrl: null };
 }
 
 // Extracts now-playing info from a Futuri/streamon.fm "current.json"
