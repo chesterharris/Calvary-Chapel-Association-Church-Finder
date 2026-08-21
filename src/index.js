@@ -193,6 +193,20 @@ function stripTags(html) {
   return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
 }
 
+// Safely decodes a raw JSON string's escape sequences (\", \\, \n, \uXXXX,
+// etc.) when we've pulled that string's contents out via regex rather than
+// a full JSON.parse of the surrounding (often huge, not-fully-valid-as-one-
+// object) page script. Wrapping in quotes and handing it back to JSON.parse
+// is a simple, correct way to reuse the platform's own escape handling
+// instead of reimplementing it.
+function decodeJsonString(raw) {
+  try {
+    return JSON.parse('"' + raw + '"');
+  } catch (err) {
+    return raw;
+  }
+}
+
 // Removes entire <script>...</script> and <style>...</style> blocks - code and
 // all - not just the tags. Without this, embedded JS text (e.g. from analytics
 // or emoji-support snippets WordPress injects inline) can leak into the parsed
@@ -608,19 +622,45 @@ async function checkChurchLive(youtubeUrl) {
   // failing for at least one real church's page, leaving videoId null and
   // producing a broken thumbnail on the frontend even though the church
   // really was live.
+  // Loosely matched on purpose: only require the href value itself, not an
+  // exact immediate ">" after it. YouTube's markup for this tag isn't
+  // perfectly consistent across channels/pages (self-closing "/>", other
+  // attributes after href, etc.).
   const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
-  const startDateMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
-  const titleMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
-  const descriptionMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
+  const startDateMetaMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+  const titleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
+  const descriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
   const authorMatch = html.match(/"author":"([^"]*)"/);
   const viewCountMatch = html.match(/"viewCount":"(\d+)"/);
-  const uploadDateMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
+  const uploadDateMetaMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
+
+  // Fallback source: the page's embedded videoDetails/microformat JSON.
+  // Confirmed via a real production case (Calvary Chapel Gresham) where the
+  // <meta>/<link>/itemprop tags above were ALL absent, yet the church was
+  // genuinely live - author (matched above via its own JSON field) still
+  // came through fine, meaning this JSON blob was present and reliable even
+  // though the page's <head> tags weren't. "videoId" is consistently the
+  // first key inside the videoDetails object, so anchoring on that object
+  // (rather than a bare "videoId" match, which could hit an unrelated
+  // recommended-video ID elsewhere on the page) keeps this specific to the
+  // actual broadcast.
+  const videoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+  const titleJsonMatch = html.match(/"videoDetails":\{"videoId":"[a-zA-Z0-9_-]{11}","title":"((?:[^"\\]|\\.)*)"/);
+  const descriptionJsonMatch = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+  const startDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
+  const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
+
+  const videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
+  const title = titleMetaMatch ? titleMetaMatch[1] : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : null);
+  const description = descriptionMetaMatch ? descriptionMetaMatch[1] : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
+  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : null);
+  const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
 
   // Belt-and-suspenders: if a startDate is present and is still in the
   // future, this is a scheduled/upcoming stream, not a live one, whatever
   // the isLive field said.
-  if (startDateMatch) {
-    const startTime = new Date(startDateMatch[1]).getTime();
+  if (startDate) {
+    const startTime = new Date(startDate).getTime();
     if (!isNaN(startTime) && startTime > Date.now()) {
       return { isLive: false };
     }
@@ -636,8 +676,8 @@ async function checkChurchLive(youtubeUrl) {
   // "actually live" apart from "stuck live" without needing to inspect
   // the actual video stream data itself.
   const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-  if (uploadDateMatch) {
-    const publishedTime = new Date(uploadDateMatch[1]).getTime();
+  if (uploadDate) {
+    const publishedTime = new Date(uploadDate).getTime();
     if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) {
       return { isLive: false };
     }
@@ -645,10 +685,10 @@ async function checkChurchLive(youtubeUrl) {
 
   return {
     isLive: true,
-    videoId: canonicalMatch ? canonicalMatch[1] : null,
-    startDate: startDateMatch ? startDateMatch[1] : null,
-    title: titleMatch ? titleMatch[1] : null,
-    description: descriptionMatch ? descriptionMatch[1] : null,
+    videoId: videoId,
+    startDate: startDate,
+    title: title,
+    description: description,
     author: authorMatch ? authorMatch[1] : null,
     viewCount: viewCountMatch ? Number(viewCountMatch[1]) : null
   };
