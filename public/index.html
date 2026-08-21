@@ -1924,6 +1924,12 @@
 
   const RADIO_POLL_MS = 60000; // matches RADIO_CACHE_SECONDS on the Worker side
   let radioStations = []; // last-loaded station list, indexed for ticker click lookups
+  // Signature of the last content we actually rendered. A now-playing track
+  // usually lasts several minutes, so most 60s polls come back with
+  // identical text - rebuilding the ticker's DOM in that case would reset
+  // the CSS marquee animation for no reason (a jarring jump back to the
+  // start every minute). We only rebuild when something really changed.
+  let lastRadioSignature = null;
 
   // Broadcast tower separator used between stations in the radio ticker only
   // (the Conference ticker keeps its plain bullet). currentColor picks up
@@ -1949,11 +1955,24 @@
 
   function renderRadioTicker(stations) {
     radioTickerBar.classList.remove('ticker-loading');
+    // Always keep this fresh for click-to-play lookups, even on polls where
+    // we skip the visual rebuild below.
     radioStations = stations;
+
     if (!stations || !stations.length) {
-      radioTickerTrack.innerHTML = '<span class="ticker-item">No radio stations configured</span>';
+      if (lastRadioSignature !== 'EMPTY') {
+        radioTickerTrack.innerHTML = '<span class="ticker-item">No radio stations configured</span>';
+        lastRadioSignature = 'EMPTY';
+      }
       return;
     }
+
+    const signature = stations.map(function(s) {
+      return s.displayName + '|' + (s.title || '') + '|' + (s.artist || '');
+    }).join('||');
+    if (signature === lastRadioSignature) return;
+    lastRadioSignature = signature;
+
     const pieces = stations.map(function(s, i) {
       const label = escapeHtml(s.displayName) + ' - ' + escapeHtml(formatNowPlaying(s));
       return '<span class="ticker-item radio-item" data-station-index="' + i + '" role="button" tabindex="0">' + label + '</span>';
