@@ -766,6 +766,17 @@
     opacity: 0.6;
     padding: 0 2px;
   }
+  .ticker-dove-sep {
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+  }
+  .ticker-dove-sep svg {
+    width: 14px;
+    height: 12px;
+    display: block;
+  }
   .radio-ticker-sep {
     color: #f2c76e;
     opacity: 1;
@@ -1849,6 +1860,17 @@
   // Reading speed in pixels/second - tune this to taste. Lower = slower/easier to read.
   const TICKER_PX_PER_SEC = 55;
 
+  // White dove separator used between entries in the Conference ticker only
+  // (mirrors the winged-flame dove silhouette CCA uses elsewhere). Solid
+  // white fill, not currentColor, since this dove is always white regardless
+  // of ticker theme - unlike the gold broadcast tower separator above.
+  const TICKER_DOVE_SEP = '<span class="ticker-dove-sep" aria-hidden="true">' +
+    '<svg viewBox="0 0 120 100" fill="#ffffff">' +
+    '<path d="M14,23 Q20,8 27,19 Q35,25 44,32 L57,0 Q62,10 67,18 Q85,12 95,17 ' +
+    'L78,48 L119,39 Q112,55 104,68 Q88,80 71,83 L51,100 L24,83 ' +
+    'Q10,75 1,60 Q-1,48 1,41 Q4,28 14,23 Z"/>' +
+    '</svg></span>';
+
   function renderTicker(items) {
     tickerBar.classList.remove('ticker-loading');
     if (!items || !items.length) {
@@ -1867,9 +1889,9 @@
       }
       return html;
     });
-    const row = pieces.join('<span class="ticker-sep">&bull;</span>');
+    const row = pieces.join(TICKER_DOVE_SEP);
     // Duplicated once so the marquee loop is seamless (see -50% keyframe).
-    tickerTrack.innerHTML = row + '<span class="ticker-sep">&bull;</span>' + row;
+    tickerTrack.innerHTML = row + TICKER_DOVE_SEP + row;
 
     // Set scroll duration based on actual content width so speed (px/sec)
     // stays roughly constant whether there are 3 conferences or 30.
