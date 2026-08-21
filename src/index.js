@@ -926,6 +926,17 @@ const RADIO_CACHE_VERSION = 1;
 //                 wrong in production (showed a song's artist instead of
 //                 "Ed Taylor", the actual live host). currentProgram is
 //                 the one that actually reflects on-air host/show info.
+//
+//   wpshowplaying stations also need:
+//   npUrl       - the FULL now-playing URL, stored whole rather than
+//                 decomposed into a host+path pattern (unlike the other
+//                 providers), since this format has been seen on exactly
+//                 one WordPress theme ("radiostation") so far with no
+//                 confirmed shared structure across stations. Response is
+//                 plain HTML (not XML/JSON) - a `<div id="nowPlaying">`
+//                 containing "Played earlier" / "Now playing" / "Up next"
+//                 sections, each line formatted as "{title} by {artist}".
+//                 We only care about the bolded "Now playing" line.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1027,6 +1038,12 @@ const RADIO_STATIONS = [
     domain: 'www.radiobygrace.com',
     accountId: '1023',
     streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
+  },
+  {
+    displayName: 'Renew FM (MA)',
+    provider: 'wpshowplaying',
+    npUrl: 'https://renewfm.org/wp-content/themes/radiostation/showPlaying.php?device=web',
+    streamUrl: 'https://streams.radio.co/s34b0aa3a7/listen'
   }
 ];
 
@@ -1181,6 +1198,36 @@ function parseSocastProgramJsonp(raw) {
   return { title: title, artist: '', coverUrl: coverUrl };
 }
 
+// Extracts the "Now playing" line from a WordPress "radiostation" theme's
+// showPlaying.php feed. This is plain HTML (not XML/JSON) built for a
+// browser to display and auto-refresh directly (the response includes its
+// own <script>setTimeout(...location.reload...)</script> - we ignore that,
+// we just re-fetch on our own poll schedule instead) - confirmed via a real
+// response to look like:
+//   <div id='nowPlaying'>...
+//     <b><i><u>Played earlier</u></i></b><br/>Song by Artist<br/>...
+//     <b><i><u>Now playing</u></i></b><br/><b>Title by Artist</b><br/>
+//     <b><i><u>Up next</u></i></b><br/>Song by Artist
+//   </div>
+// Only the bolded "Now playing" line is what we want. Each line follows a
+// "{title} by {artist}" convention - split on the first " by " the same
+// way other providers split on " - ".
+function parseWpShowPlayingHtml(html) {
+  const nowPlayingMatch = html.match(/Now playing<\/u><\/i><\/b><br\s*\/?>\s*<b>([\s\S]*?)<\/b>/i);
+  if (!nowPlayingMatch) return { title: '', artist: '', coverUrl: null };
+
+  const raw = decodeEntities(nowPlayingMatch[1].replace(/<[^>]+>/g, '')).trim();
+  if (!raw) return { title: '', artist: '', coverUrl: null };
+
+  const sepIndex = raw.indexOf(' by ');
+  if (sepIndex === -1) return { title: raw, artist: '', coverUrl: null };
+  return {
+    title: raw.slice(0, sepIndex).trim(),
+    artist: raw.slice(sepIndex + 4).trim(),
+    coverUrl: null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1214,6 +1261,12 @@ const RADIO_PROVIDERS = {
       return 'https://' + station.domain + '/api/music/currentProgram?jsonpcallback=npCallback&accountID=' + station.accountId + '&_=' + Date.now();
     },
     parse: parseSocastProgramJsonp
+  },
+  wpshowplaying: {
+    buildNowPlayingUrl: function(station) {
+      return station.npUrl;
+    },
+    parse: parseWpShowPlayingHtml
   }
 };
 
