@@ -927,6 +927,13 @@ const RADIO_STATIONS = [
     streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
   },
   {
+    displayName: 'WJWD (WI)',
+    provider: 'icecast',
+    host: 'lunar.citrus3.com:8034',
+    mount: 'stream',
+    streamUrl: 'https://lunar.citrus3.com:8034/stream'
+  },
+  {
     displayName: 'EQUIP FM',
     provider: 'securenetsystems',
     subdomain: 'streamdb9web.securenetsystems.net',
