@@ -1044,6 +1044,13 @@ const RADIO_STATIONS = [
     provider: 'wpshowplaying',
     npUrl: 'https://renewfm.org/wp-content/themes/radiostation/showPlaying.php?device=web',
     streamUrl: 'https://streams.radio.co/s34b0aa3a7/listen'
+  },
+  {
+    displayName: 'Truth FM (MD)',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WZTM',
+    streamUrl: 'https://ice26.securenetsystems.net/WZTM'
   }
 ];
 
