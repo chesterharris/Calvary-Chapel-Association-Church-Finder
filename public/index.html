@@ -1974,26 +1974,10 @@
     return station.artist ? station.title + ' - ' + station.artist : station.title;
   }
 
-  function renderRadioTicker(stations) {
-    radioTickerBar.classList.remove('ticker-loading');
-    // Always keep this fresh for click-to-play lookups, even on polls where
-    // we skip the visual rebuild below.
-    radioStations = stations;
-
-    if (!stations || !stations.length) {
-      if (lastRadioSignature !== 'EMPTY') {
-        radioTickerTrack.innerHTML = '<span class="ticker-item">No radio stations configured</span>';
-        lastRadioSignature = 'EMPTY';
-      }
-      return;
-    }
-
-    const signature = stations.map(function(s) {
-      return s.displayName + '|' + (s.title || '') + '|' + (s.artist || '');
-    }).join('||');
-    if (signature === lastRadioSignature) return;
-    lastRadioSignature = signature;
-
+  // Actually rebuilds the ticker's DOM/animation for a given station list.
+  // Only call this at a moment where a visual "restart" is acceptable -
+  // either the very first load, or the animationiteration boundary below.
+  function applyRadioTickerContent(stations) {
     const pieces = stations.map(function(s, i) {
       const label = escapeHtml(s.displayName) + ' - ' + escapeHtml(formatNowPlaying(s));
       return '<span class="ticker-item radio-item" data-station-index="' + i + '" role="button" tabindex="0">' + label + '</span>';
@@ -2009,6 +1993,59 @@
     });
   }
 
+  // Holds a changed station list that's waiting for the current scroll lap
+  // to finish, so we're not cutting the marquee off mid-pass.
+  let pendingRadioStations = null;
+
+  function renderRadioTicker(stations) {
+    radioTickerBar.classList.remove('ticker-loading');
+    // Always keep this fresh for click-to-play lookups, even on polls where
+    // the visual update below gets deferred.
+    radioStations = stations;
+
+    if (!stations || !stations.length) {
+      // An empty/error state is worth showing right away, not worth queuing.
+      pendingRadioStations = null;
+      if (lastRadioSignature !== 'EMPTY') {
+        radioTickerTrack.innerHTML = '<span class="ticker-item">No radio stations configured</span>';
+        lastRadioSignature = 'EMPTY';
+      }
+      return;
+    }
+
+    const signature = stations.map(function(s) {
+      return s.displayName + '|' + (s.title || '') + '|' + (s.artist || '');
+    }).join('||');
+    if (signature === lastRadioSignature) return;
+    lastRadioSignature = signature;
+
+    if (radioTickerTrack.dataset.everRendered !== 'true') {
+      // First real content - nothing is scrolling yet, so there's no lap to
+      // wait for. Show it immediately.
+      radioTickerTrack.dataset.everRendered = 'true';
+      applyRadioTickerContent(stations);
+      return;
+    }
+
+    // Something actually changed mid-scroll. Don't interrupt the current
+    // lap - stash the update and let the marquee finish its pass. The
+    // animationiteration listener below applies it right as the loop
+    // resets to the start, so the swap lands on the existing seam instead
+    // of causing a new one.
+    pendingRadioStations = stations;
+  }
+
+  // The track is duplicated (see applyRadioTickerContent) so one full
+  // "iteration" of the scroll animation is exactly one lap of the content -
+  // animationiteration fires right as it loops back to the start, which is
+  // the one moment a DOM swap won't look like a jump.
+  radioTickerTrack.addEventListener('animationiteration', function() {
+    if (!pendingRadioStations) return;
+    const stations = pendingRadioStations;
+    pendingRadioStations = null;
+    applyRadioTickerContent(stations);
+  });
+
   async function loadRadioTicker() {
     try {
       const res = await fetch('/radio-now-playing', { cache: 'no-store' });
@@ -2022,6 +2059,12 @@
     } catch (err) {
       // No fallback list here (unlike Conferences) - stale "now playing" text
       // would actively mislead a visitor, so an honest empty state is better.
+      // Reset tracking so the next successful fetch shows immediately rather
+      // than waiting for a loop boundary on a track that no longer has our
+      // duplicated-row content in it.
+      pendingRadioStations = null;
+      lastRadioSignature = null;
+      radioTickerTrack.dataset.everRendered = 'false';
       radioTickerBar.classList.remove('ticker-loading');
       radioTickerTrack.innerHTML = '<span class="ticker-item">Radio ticker unavailable right now</span>';
     }
