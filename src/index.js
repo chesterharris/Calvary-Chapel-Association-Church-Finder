@@ -1344,6 +1344,15 @@ const RADIO_STATIONS = [
     provider: 'shoutcast',
     host: 'broadcast.shoutcheap.com/proxy/wleblpt1',
     streamUrl: 'https://broadcast.shoutcheap.com/proxy/wleblpt1/stream'
+  },
+  {
+    displayName: 'Crossover',
+    cityState: 'Cedar City, UT',
+    homePage: 'https://crossoverfm.org/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'KCHG',
+    streamUrl: 'https://ice8.securenetsystems.net/KCHG'
   }
 ];
 
