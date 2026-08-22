@@ -627,6 +627,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .radio-browse-row-meta {
+    font-size: 11px;
+    opacity: 0.65;
+    margin-top: 2px;
+  }
+  .radio-browse-homepage-link {
+    color: var(--brass);
+    text-decoration: none;
+  }
+  .radio-browse-homepage-link:hover { text-decoration: underline; }
   .radio-browse-star {
     flex-shrink: 0;
     background: none;
@@ -3192,10 +3202,22 @@
 
     listEl.innerHTML = filtered.map(function(s) {
       const isFav = favorites.indexOf(s.displayName) !== -1;
+      // cityState/homePage are optional, display-only fields (see
+      // RADIO_STATIONS comment block) - only shown here in the browse
+      // panel, never in the ticker. Gracefully omitted for any station
+      // that doesn't have them filled in yet.
+      const metaLine = s.cityState || s.homePage
+        ? '<div class="radio-browse-row-meta">' +
+            (s.cityState ? '<span>' + escapeHtml(s.cityState) + '</span>' : '') +
+            (s.cityState && s.homePage ? ' <span aria-hidden="true">\u00b7</span> ' : '') +
+            (s.homePage ? '<a href="' + escapeHtml(s.homePage) + '" target="_blank" rel="noopener noreferrer" class="radio-browse-homepage-link">Station website</a>' : '') +
+          '</div>'
+        : '';
       return '<div class="radio-browse-row" data-station-name="' + escapeHtml(s.displayName) + '">' +
         '<div class="radio-browse-row-info">' +
           '<div class="radio-browse-row-name">' + escapeHtml(s.displayName) + '</div>' +
           '<div class="radio-browse-row-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
+          metaLine +
         '</div>' +
         '<button type="button" class="radio-browse-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
           buildFavoriteStarSvg(isFav) +
@@ -3224,6 +3246,11 @@
     renderRadioBrowsePanel();
   });
   document.getElementById('radioBrowseList').addEventListener('click', function(e) {
+    if (e.target.closest('.radio-browse-homepage-link')) {
+      // Let the link's own navigation happen - clicking "Station website"
+      // clearly means "take me there," not "also start playing audio."
+      return;
+    }
     const starBtn = e.target.closest('.radio-browse-star');
     if (starBtn) {
       // Star button click: toggle favorite only, don't also start playback

@@ -1098,6 +1098,12 @@ const RADIO_CACHE_VERSION = 1;
 //                 provider-specific fields below apply.
 //   streamUrl   - the actual raw audio stream URL the mini-player plays.
 //                 Required for every provider.
+//   cityState   - OPTIONAL, hand-entered, display-only (e.g. "Vero Beach,
+//                 FL"). Shown in the browse panel only - the ticker never
+//                 renders anything beyond displayName + now-playing text.
+//                 Fine to leave off entries that don't have it yet.
+//   homePage    - OPTIONAL, hand-entered, display-only - the station's own
+//                 website, shown as a link in the browse panel only.
 //
 //   SecureNetSystems stations also need:
 //   subdomain   - the streamdbXweb.securenetsystems.net host serving this
@@ -1161,6 +1167,8 @@ const RADIO_STATIONS = [
     // visible audio src to confirm against directly - verify playback
     // next time before assuming this is exactly right.
     displayName: 'Calvary Radio (Vero Beach)',
+    cityState: 'Vero Beach, FL',
+    homePage: 'https://ccvb.fm/',
     provider: 'icecast',
     host: 'wwsh.ccvb.fm/stream',
     mount: 'main',
@@ -1516,7 +1524,15 @@ async function fetchStationNowPlaying(station) {
     title: parsed.title,
     artist: parsed.artist,
     coverUrl: parsed.coverUrl || null,
-    streamUrl: station.streamUrl
+    streamUrl: station.streamUrl,
+    // Optional, hand-entered display-only fields - never shown in the
+    // ticker (that only ever renders displayName + now-playing text), just
+    // in the browse panel. Purely cosmetic, unrelated to any of the
+    // technical/streaming fields above. Add more the same way: (1) put it
+    // on the RADIO_STATIONS entry, (2) pass it through here AND in the
+    // error fallback below, (3) render it in the browse panel row.
+    cityState: station.cityState || null,
+    homePage: station.homePage || null
   };
 }
 
@@ -1547,6 +1563,8 @@ async function handleRadio(request, ctx) {
         artist: null,
         coverUrl: null,
         streamUrl: station.streamUrl,
+        cityState: station.cityState || null,
+        homePage: station.homePage || null,
         error: err.message
       };
     }
