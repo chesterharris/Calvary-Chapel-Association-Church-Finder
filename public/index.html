@@ -643,6 +643,17 @@
   .live-debug-badge.ok { background: #dff0d8; color: #3c763d; }
   .live-debug-badge.stale { background: #fcf8e3; color: #8a6d3b; }
   .live-debug-badge.error { background: #f2dede; color: #a94442; }
+  .live-debug-badge.skipped { background: #e2e2e2; color: #666; }
+  .live-debug-warning-banner {
+    background: #fcf1ea;
+    border: 1px solid var(--ember);
+    color: var(--ember);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
   .live-now-empty {
     color: var(--ink);
     opacity: 0.7;
@@ -1379,7 +1390,15 @@
     const errorRate = cycle.checked ? (cycle.errored / cycle.checked) : 0;
     const staggerMs = data.currentStaggerState ? data.currentStaggerState.staggerMs : null;
 
-    let html = '<div class="live-debug-section-title">Latest Cycle</div>';
+    let html = '';
+    if (cycle.hitSubrequestLimit) {
+      html += '<div class="live-debug-warning-banner">' +
+        '⚠️ Hit Cloudflare\'s subrequest limit this cycle - not every church could be checked. ' +
+        'This is a platform-level cap (50/invocation on the Free plan, 10,000 on Paid), not a YouTube ' +
+        'rate-limit issue - upgrading to Workers Paid is the direct fix if this keeps happening.</div>';
+    }
+
+    html += '<div class="live-debug-section-title">Latest Cycle</div>';
     html += '<div class="live-debug-summary">';
     html += '<div><span class="label">Checked</span><span class="value">' + formatRelativeTime(cycle.checkedAt) + '</span></div>';
     html += '<div><span class="label">Duration</span><span class="value">' + (cycle.durationMs != null ? (cycle.durationMs / 1000).toFixed(1) + 's' : '-') + '</span></div>';
@@ -1393,7 +1412,9 @@
       html += '<table class="live-debug-table"><thead><tr><th>Church</th><th>Live</th><th>Error</th></tr></thead><tbody>';
       cycle.results.forEach(function(r) {
         let badge;
-        if (r.error) {
+        if (r.skipped) {
+          badge = '<span class="live-debug-badge skipped">skipped</span>';
+        } else if (r.error) {
           badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
             (r.usedStaleData ? 'stale' : 'failed') + '</span>';
         } else {
@@ -1412,7 +1433,7 @@
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
         const hadErrors = h.errored > 0;
-        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + '</td><td>' + h.checked + '</td>' +
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + h.checked + '</td>' +
           '<td' + (hadErrors ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + (h.durationMs != null ? (h.durationMs / 1000).toFixed(1) + 's' : '-') + '</td></tr>';
       });

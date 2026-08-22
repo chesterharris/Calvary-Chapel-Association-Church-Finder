@@ -733,6 +733,17 @@ async function checkAllChurchesLive(env) {
 
   const cycleStartedAt = Date.now();
   let erroredCount = 0;
+  // Set the moment we hit Cloudflare's own per-invocation subrequest
+  // ceiling (confirmed in production: 50/invocation on the Free/Bundled
+  // plan). This is a hard platform limit, not a YouTube rate-limit signal -
+  // once it's hit, every further fetch() in this SAME invocation fails
+  // instantly regardless of target or delay, so there's nothing to gain by
+  // continuing to loop through (and waiting the stagger delay between)
+  // whatever candidates are left. Also excluded from the adaptive stagger
+  // calculation below for the same reason: slowing down doesn't fix a
+  // count-based ceiling, so treating this like a bad YouTube cycle would
+  // just needlessly max out the delay for future (unrelated) cycles.
+  let hitSubrequestLimit = false;
   const results = [];
   // Every candidate's outcome this cycle, including non-live and errored
   // ones the public-facing `live` list below discards - this is what the
@@ -741,6 +752,28 @@ async function checkAllChurchesLive(env) {
   const debugResults = [];
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
+
+    if (hitSubrequestLimit) {
+      // Record the rest as skipped rather than attempting (and failing)
+      // each one identically - still falls back to last-known-good data
+      // exactly like a normal per-church failure would.
+      const prior = previousById[c.id];
+      debugResults.push({
+        churchId: c.id,
+        name: c.name,
+        isLive: prior ? prior.isLive : false,
+        error: 'Not attempted - subrequest budget exhausted this cycle',
+        usedStaleData: !!prior,
+        skipped: true
+      });
+      if (prior) {
+        results.push(Object.assign({}, prior, { stale: true }));
+      } else {
+        results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
+      }
+      continue;
+    }
+
     try {
       const status = await checkChurchLive(c.youtubeUrl);
       results.push(Object.assign({ churchId: c.id, name: c.name }, status));
@@ -756,6 +789,13 @@ async function checkAllChurchesLive(env) {
       // fetchLivePage's "...failed with status " + response.status) - this
       // is the one place that distinguishes a 429 from a timeout from a
       // 5xx, so keep it verbatim rather than collapsing to a boolean.
+      // Cloudflare's own subrequest-limit error text (confirmed in
+      // production: "Too many subrequests...") is checked for separately
+      // from ordinary per-church fetch failures - see hitSubrequestLimit
+      // above for why it needs different handling.
+      if (/too many subrequests/i.test(err.message || '')) {
+        hitSubrequestLimit = true;
+      }
       debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior });
       if (prior) {
         results.push(Object.assign({}, prior, { stale: true }));
@@ -765,8 +805,10 @@ async function checkAllChurchesLive(env) {
     }
 
     // Stagger requests to YouTube instead of firing them all at once.
-    // Skip the delay after the last item - no need to wait once we're done.
-    if (i < candidates.length - 1) {
+    // Skip the delay after the last item, or once we've already hit the
+    // subrequest ceiling - no point waiting to attempt something we know
+    // will fail identically.
+    if (i < candidates.length - 1 && !hitSubrequestLimit) {
       await sleep(staggerMs);
     }
   }
@@ -800,7 +842,8 @@ async function checkAllChurchesLive(env) {
     checked: candidates.length,
     errored: erroredCount,
     staggerMsUsed: staggerMs,
-    durationMs: cycleDurationMs
+    durationMs: cycleDurationMs,
+    hitSubrequestLimit: hitSubrequestLimit
   });
   while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
 
@@ -811,6 +854,7 @@ async function checkAllChurchesLive(env) {
       errored: erroredCount,
       staggerMsUsed: staggerMs,
       durationMs: cycleDurationMs,
+      hitSubrequestLimit: hitSubrequestLimit,
       results: debugResults
     },
     history: history
@@ -820,15 +864,22 @@ async function checkAllChurchesLive(env) {
   // persist it. This is what replaces the old fixed-guess constant -
   // the delay grows on its own if error rates climb, and only eases back
   // down after cycles come back fully clean.
-  const updatedStaggerMs = nextStaggerMs(staggerMs, candidates.length, erroredCount);
-  if (updatedStaggerMs !== staggerMs) {
-    await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
-      staggerMs: updatedStaggerMs,
-      updatedAt: new Date().toISOString(),
-      reason: erroredCount / Math.max(candidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
-        ? 'error-rate-above-threshold'
-        : 'clean-cycle-decay'
-    }));
+  //
+  // Skipped entirely if this cycle hit Cloudflare's subrequest ceiling -
+  // that failure mode reflects a platform limit no amount of delay can
+  // fix, not YouTube's actual rate-limiting behavior, and a truncated
+  // cycle isn't a representative sample of the real error rate anyway.
+  if (!hitSubrequestLimit) {
+    const updatedStaggerMs = nextStaggerMs(staggerMs, candidates.length, erroredCount);
+    if (updatedStaggerMs !== staggerMs) {
+      await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
+        staggerMs: updatedStaggerMs,
+        updatedAt: new Date().toISOString(),
+        reason: erroredCount / Math.max(candidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
+          ? 'error-rate-above-threshold'
+          : 'clean-cycle-decay'
+      }));
+    }
   }
 }
 
