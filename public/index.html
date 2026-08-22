@@ -735,9 +735,10 @@
   /* Per-church table: name gets breathing room, badge stays compact,
      error text gets the rest and wraps instead of forcing horizontal
      scroll (previously the widest offender). */
-  #liveDebugPerChurchTable col.col-church { width: 42%; }
-  #liveDebugPerChurchTable col.col-live { width: 16%; }
-  #liveDebugPerChurchTable col.col-error { width: 42%; }
+  #liveDebugPerChurchTable col.col-church { width: 34%; }
+  #liveDebugPerChurchTable col.col-live { width: 14%; }
+  #liveDebugPerChurchTable col.col-time { width: 12%; }
+  #liveDebugPerChurchTable col.col-error { width: 40%; }
   #liveDebugPerChurchTable td.church-name {
     white-space: nowrap;
     overflow: hidden;
@@ -759,6 +760,8 @@
     white-space: nowrap;
   }
   .live-debug-badge.ok { background: #dff0d8; color: #3c763d; }
+  .live-debug-badge.live { background: #d9edf7; color: #31708f; font-weight: 800; }
+  .live-debug-badge.waiting { background: #fcf3cf; color: #8a6d1a; }
   .live-debug-badge.stale { background: #fcf8e3; color: #8a6d3b; }
   .live-debug-badge.error { background: #f2dede; color: #a94442; }
   .live-debug-badge.notchecked { background: #e2e2e2; color: #666; }
@@ -1590,7 +1593,7 @@
   // state worth surfacing even while hiding the routine "not live" noise
   // that makes up the vast majority of rows).
   function isDebugRowAnIssue(r) {
-    return !!(r.notChecked || r.error || r.isLive);
+    return !!(r.notChecked || r.error || r.isLive || r.status === 'waiting');
   }
 
   function renderLiveDebugContent(data) {
@@ -1649,8 +1652,8 @@
 
       if (rowsToShow.length) {
         html += '<table class="live-debug-table" id="liveDebugPerChurchTable">' +
-          '<colgroup><col class="col-church"><col class="col-live"><col class="col-error"></colgroup>' +
-          '<thead><tr><th>Church</th><th>Live</th><th>Error</th></tr></thead><tbody>';
+          '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
+          '<thead><tr><th>Church</th><th>Status</th><th>Time</th><th>Error</th></tr></thead><tbody>';
         rowsToShow.forEach(function(r) {
           let badge;
           if (r.notChecked) {
@@ -1658,11 +1661,31 @@
           } else if (r.error) {
             badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
               (r.usedStaleData ? 'stale' : 'failed') + '</span>';
+          } else if (r.status === 'live') {
+            badge = '<span class="live-debug-badge live">live</span>';
+          } else if (r.status === 'waiting') {
+            badge = '<span class="live-debug-badge waiting">waiting</span>';
           } else {
+            // Fallback for entries from before the 3-state status field
+            // existed (see checkChurchLive) - falls back to the old
+            // isLive-only distinction rather than showing nothing.
             badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
           }
+
+          // Highlights an outlier at a glance rather than making someone
+          // scan every row for a slow one - thresholds are a starting
+          // guess (typical fetches land well under 1s), not a claim about
+          // where "slow" objectively begins.
+          let timeText = '-';
+          if (typeof r.checkMs === 'number') {
+            const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
+            const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
+            timeText = '<span' + timeClass + '>' + timeSec + '</span>';
+          }
+
           html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
-            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : '') + '</td></tr>';
+            '<td>' + timeText + '</td>' +
+            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (r.status === 'waiting' && r.startDate ? '<span style="opacity:0.65;">Starts ' + escapeHtmlDebug(r.startDate) + '</span>' : '')) + '</td></tr>';
         });
         html += '</tbody></table>';
       } else {

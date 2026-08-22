@@ -627,7 +627,7 @@ async function checkChurchLive(youtubeUrl) {
   // verified via actual diffed LIVE vs NOT-LIVE test files to be
   // completely ABSENT (not just false) on a genuinely not-live page.
   const isLive = html.includes('"isLive":true');
-  if (!isLive) return { isLive: false };
+  if (!isLive) return { isLive: false, status: 'not_live' };
 
   // Loosely matched on purpose: only require the href value itself, not an
   // exact immediate ">" after it. YouTube's markup for this tag isn't
@@ -672,11 +672,24 @@ async function checkChurchLive(youtubeUrl) {
 
   // Belt-and-suspenders: if a startDate is present and is still in the
   // future, this is a scheduled/upcoming stream, not a live one, whatever
-  // the isLive field said.
+  // the isLive field said. This used to just return { isLive: false },
+  // discarding all the title/description/startDate we'd just parsed and
+  // making a genuinely-scheduled stream indistinguishable from a channel
+  // with nothing going on at all - now surfaced as its own "waiting"
+  // status so the admin debug view (and, if useful later, the public
+  // side) can actually tell the two apart.
   if (startDate) {
     const startTime = new Date(startDate).getTime();
     if (!isNaN(startTime) && startTime > Date.now()) {
-      return { isLive: false };
+      return {
+        isLive: false,
+        status: 'waiting',
+        videoId: videoId,
+        startDate: startDate,
+        title: title,
+        description: description,
+        author: authorMatch ? authorMatch[1] : null
+      };
     }
   }
 
@@ -693,12 +706,13 @@ async function checkChurchLive(youtubeUrl) {
   if (uploadDate) {
     const publishedTime = new Date(uploadDate).getTime();
     if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) {
-      return { isLive: false };
+      return { isLive: false, status: 'not_live' };
     }
   }
 
   return {
     isLive: true,
+    status: 'live',
     videoId: videoId,
     startDate: startDate,
     title: title,
@@ -817,9 +831,11 @@ async function checkAllChurchesLive(env) {
     }
 
     try {
+      const churchCheckStartedAt = Date.now();
       const status = await checkChurchLive(c.youtubeUrl);
+      const churchCheckMs = Date.now() - churchCheckStartedAt;
       results.push(Object.assign({ churchId: c.id, name: c.name }, status));
-      debugResults.push({ churchId: c.id, name: c.name, isLive: status.isLive, error: null });
+      debugResults.push({ churchId: c.id, name: c.name, isLive: status.isLive, status: status.status || null, startDate: status.startDate || null, checkMs: churchCheckMs, error: null });
     } catch (err) {
       // Both the original fetch and the retry failed - fall back to the
       // last known-good status for this church instead of assuming it
