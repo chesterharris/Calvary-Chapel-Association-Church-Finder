@@ -1664,10 +1664,10 @@ const RADIO_PROVIDERS = {
     // Deliberately named distinctly from a hypothetical future
     // "live365sse"-style provider - this is NOT the same mechanism as the
     // rejected SSE endpoint, and shouldn't be confused with it later.
-    buildNowPlayingUrl: function(station) {
-      return 'https://' + station.host + '/' + station.stationId + '/playlist.m3u8';
-    },
-    parse: parseLive365HlsPlaylist
+    // Uses fetchAndParse (not buildNowPlayingUrl/parse) because the real
+    // media playlist lives behind a master-playlist redirect that has to
+    // be followed fresh every poll - see fetchLive365NowPlaying above.
+    fetchAndParse: fetchLive365NowPlaying
   },
   radiomast: {
     // Metadata URL is always just the stream URL itself + "/metadata"
@@ -1682,17 +1682,57 @@ const RADIO_PROVIDERS = {
   }
 };
 
+const LIVE365_FETCH_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' };
+
+// Live365's own base playlist URL isn't the media playlist we need - it's
+// a "master" playlist pointing to a freshly-issued, session-specific edge
+// URL that changes on every single request (confirmed in production: two
+// separate fetches returned two different listeningSessionId values).
+// This is NOT the same kind of gating as the rejected SSE `/metadata`
+// endpoint (no spoofed headers needed, nothing session-authenticated) -
+// it's just a normal, public two-step redirect we have to follow fresh
+// every poll rather than something we can cache/hardcode.
+//
+// This needs its own fetch function (rather than the generic single
+// fetch+parse used by every other provider) because it requires two HTTP
+// calls, not one - see fetchAndParse on the live365hls provider entry.
+async function fetchLive365NowPlaying(station) {
+  const masterUrl = 'https://' + station.host + '/' + station.stationId + '/playlist.m3u8';
+  const masterRes = await fetch(masterUrl, { headers: LIVE365_FETCH_HEADERS });
+  if (!masterRes.ok) throw new Error('Station ' + station.displayName + ' master playlist returned ' + masterRes.status);
+  const masterText = await masterRes.text();
+
+  const variantMatch = masterText.match(/^https?:\/\/\S+\.m3u8\S*$/m);
+  if (!variantMatch) throw new Error('Station ' + station.displayName + ' master playlist had no variant URL');
+
+  const mediaRes = await fetch(variantMatch[0], { headers: LIVE365_FETCH_HEADERS });
+  if (!mediaRes.ok) throw new Error('Station ' + station.displayName + ' media playlist returned ' + mediaRes.status);
+  const mediaText = await mediaRes.text();
+
+  return parseLive365HlsPlaylist(mediaText);
+}
+
 async function fetchStationNowPlaying(station) {
   const provider = RADIO_PROVIDERS[station.provider];
   if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
 
-  const res = await fetch(provider.buildNowPlayingUrl(station), {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
-  });
-  if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
+  // Most providers just need one fetch+parse (buildNowPlayingUrl + parse).
+  // A provider that needs more than one HTTP call (like live365hls's
+  // master-playlist-then-edge-URL chain) instead exposes fetchAndParse,
+  // which takes full control of its own fetching and returns the same
+  // { title, artist, coverUrl } shape directly.
+  let parsed;
+  if (provider.fetchAndParse) {
+    parsed = await provider.fetchAndParse(station);
+  } else {
+    const res = await fetch(provider.buildNowPlayingUrl(station), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
+    });
+    if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
+    const raw = await res.text();
+    parsed = provider.parse(raw);
+  }
 
-  const raw = await res.text();
-  const parsed = provider.parse(raw);
   return {
     displayName: station.displayName,
     title: parsed.title,
