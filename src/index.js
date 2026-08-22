@@ -1320,6 +1320,22 @@ const RADIO_STATIONS = [
     host: 'ksgr.ddns.net:1841',
     mount: 'stream.mp3',
     streamUrl: 'https://ksgr.ddns.net:1841/stream.mp3'
+  },
+  {
+    displayName: 'WGSS',
+    cityState: 'Amityville, NY',
+    homePage: 'https://www.godstillspeaks.com/',
+    provider: 'radiomast',
+    streamUrl: 'https://streams.radiomast.io/bbe3faf2-3aa6-440a-9e1f-06b766d9bd70'
+  },
+  {
+    displayName: 'The Word',
+    cityState: 'Farmington, NY',
+    homePage: 'https://wzxv.org/',
+    provider: 'live365hls',
+    host: 'streaming.live365.com',
+    stationId: 'a10665',
+    streamUrl: 'https://streaming.live365.com/a10665'
   }
 ];
 
@@ -1504,6 +1520,106 @@ function parseWpShowPlayingHtml(html) {
   };
 }
 
+// Safe JSON.parse that returns null on failure instead of throwing - used
+// by parseRadioMastSse below to try a few candidate shapes in order rather
+// than committing to one and failing hard if it's wrong.
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Extracts now-playing info from a RadioMast.io stream's metadata feed.
+// Confirmed via a real response to be:
+//   { "metadata": "05 You Say - Laura Daigle", "metadata_ext": {} }
+// RadioMast's own docs describe this as a Server-Sent Events endpoint
+// (`new EventSource(streamUrl + "/metadata")`), meant to push updates
+// indefinitely - a fundamentally different shape than every other
+// provider here (all one-shot GET+parse). We don't hold the connection
+// open; a single fetch() is enough since the current state is sent
+// immediately upon connecting, and we just read whatever arrives first.
+// The exact raw wire format (proper "data: {...}" SSE framing vs. what
+// look liked bare JSON in manual testing) wasn't fully pinned down, so
+// this tries a few candidate shapes in order rather than assuming one:
+//   1. The whole response is bare JSON, no framing at all.
+//   2. Proper SSE framing - a "data: {...}" line as the first event.
+//   3. Last resort - the first {...} span found anywhere in the text.
+function parseRadioMastSse(raw) {
+  const trimmed = raw.trim();
+  let data = tryParseJson(trimmed);
+
+  if (!data) {
+    const firstEvent = trimmed.split(/\r?\n\r?\n/)[0];
+    const dataLine = firstEvent.split(/\r?\n/).filter(function(line) {
+      return line.indexOf('data:') === 0;
+    })[0];
+    if (dataLine) data = tryParseJson(dataLine.slice(dataLine.indexOf(':') + 1).trim());
+  }
+
+  if (!data) {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (match) data = tryParseJson(match[0]);
+  }
+
+  if (!data) throw new Error('Unexpected RadioMast metadata response format');
+
+  const combined = typeof data.metadata === 'string' ? data.metadata.trim() : '';
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  // Combined string convention here is "{Title} - {Artist}" (confirmed:
+  // "05 You Say - Laura Daigle" - Laura Daigle is the artist) - the
+  // OPPOSITE order from Icecast's "{Artist} - {Track}" convention, so
+  // don't copy that split blindly for a future RadioMast station.
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+
+  let title = combined.slice(0, sepIndex).trim();
+  const artist = combined.slice(sepIndex + 3).trim();
+
+  // Strips a leading track-number prefix some automation systems include
+  // (confirmed in production: "05 You Say" for a track actually titled
+  // "You Say") - inferred from a single real example, may need revisiting
+  // if a future station's real titles legitimately start with a number.
+  title = title.replace(/^\d{1,3}[\s.]+/, '');
+
+  return { title: title, artist: artist, coverUrl: null };
+}
+
+// Extracts now-playing info from a Live365 HLS media playlist's embedded
+// #EXTINF tags - a completely different (and much simpler) mechanism than
+// Live365's SSE-based `/metadata` endpoint, which we deliberately decided
+// NOT to build (see the "Providers we looked at and deliberately did NOT
+// build" doc section - that endpoint appeared to require spoofing Origin/
+// Referer headers to impersonate Live365's own player). This one needs
+// none of that: the current track is sitting in plain text inside the
+// public playlist file every segment already carries, confirmed via a
+// real response:
+//   #EXTINF:4.96327,PASTOR JOHN THOMAS - IN THE POTTERS HAND
+//   /L2ExMDY2NQ../.../segment-163670.mp3?listeningSessionId=...
+// Multiple #EXTINF lines can appear per fetch (one per segment in the
+// current sliding window) - we want the LAST one, since segments are
+// listed oldest-to-newest and the last is the most recently added.
+function parseLive365HlsPlaylist(m3u8Text) {
+  const matches = [...m3u8Text.matchAll(/^#EXTINF:[\d.]+,(.*)$/gm)];
+  if (!matches.length) return { title: '', artist: '', coverUrl: null };
+
+  const combined = matches[matches.length - 1][1].trim();
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  // Convention here is "{Artist} - {Title}" (confirmed: "PASTOR JOHN
+  // THOMAS - IN THE POTTERS HAND" - a preacher's name, then the sermon
+  // title) - same order as Icecast's split, NOT RadioMast's reversed one.
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+  return {
+    artist: combined.slice(0, sepIndex).trim(),
+    title: combined.slice(sepIndex + 3).trim(),
+    coverUrl: null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1543,6 +1659,26 @@ const RADIO_PROVIDERS = {
       return station.npUrl;
     },
     parse: parseWpShowPlayingHtml
+  },
+  live365hls: {
+    // Deliberately named distinctly from a hypothetical future
+    // "live365sse"-style provider - this is NOT the same mechanism as the
+    // rejected SSE endpoint, and shouldn't be confused with it later.
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/' + station.stationId + '/playlist.m3u8';
+    },
+    parse: parseLive365HlsPlaylist
+  },
+  radiomast: {
+    // Metadata URL is always just the stream URL itself + "/metadata"
+
+    // (confirmed via RadioMast's own docs and a real response) - no
+    // separate station-specific field needed beyond the streamUrl every
+    // station already has for playback.
+    buildNowPlayingUrl: function(station) {
+      return station.streamUrl + '/metadata';
+    },
+    parse: parseRadioMastSse
   }
 };
 
