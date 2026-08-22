@@ -495,6 +495,13 @@ async function handleDeleteChurch(request, env) {
 
 const LIVE_STATUS_KV_KEY = 'live-status';
 const LIVE_CHECK_STAGGER_STATE_KV_KEY = 'live-check-stagger-state';
+// Separate from LIVE_STATUS_KV_KEY (which only ever holds the live-only
+// list visitors' pins are built from) - this holds EVERY candidate's result
+// from the most recent cycle, including ones that errored or simply weren't
+// live, plus a rolling history of recent cycles' stats. Admin-only
+// visibility, never read by the public-facing map.
+const LIVE_CHECK_DEBUG_KV_KEY = 'live-check-debug';
+const LIVE_CHECK_HISTORY_MAX_CYCLES = 50;
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -724,13 +731,20 @@ async function checkAllChurchesLive(env) {
   const staggerState = await loadStaggerState(env);
   const staggerMs = staggerState.staggerMs;
 
+  const cycleStartedAt = Date.now();
   let erroredCount = 0;
   const results = [];
+  // Every candidate's outcome this cycle, including non-live and errored
+  // ones the public-facing `live` list below discards - this is what the
+  // admin debug view reads from, since "nobody's live" and "everything's
+  // 429ing" look identical from the public list alone.
+  const debugResults = [];
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     try {
       const status = await checkChurchLive(c.youtubeUrl);
       results.push(Object.assign({ churchId: c.id, name: c.name }, status));
+      debugResults.push({ churchId: c.id, name: c.name, isLive: status.isLive, error: null });
     } catch (err) {
       // Both the original fetch and the retry failed - fall back to the
       // last known-good status for this church instead of assuming it
@@ -738,6 +752,11 @@ async function checkAllChurchesLive(env) {
       // is just an ordinary "not live" result.
       erroredCount++;
       const prior = previousById[c.id];
+      // err.message is what actually carries the HTTP status code (see
+      // fetchLivePage's "...failed with status " + response.status) - this
+      // is the one place that distinguishes a 429 from a timeout from a
+      // 5xx, so keep it verbatim rather than collapsing to a boolean.
+      debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior });
       if (prior) {
         results.push(Object.assign({}, prior, { stale: true }));
       } else {
@@ -753,6 +772,7 @@ async function checkAllChurchesLive(env) {
   }
 
   const liveOnly = results.filter(function(r) { return r.isLive; });
+  const cycleDurationMs = Date.now() - cycleStartedAt;
 
   await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
     checkedAt: new Date().toISOString(),
@@ -766,6 +786,34 @@ async function checkAllChurchesLive(env) {
       errored: erroredCount,
       staggerMsUsed: staggerMs
     }
+  }));
+
+  // Full admin debug snapshot: every candidate's result (not just live
+  // ones), plus a rolling history of recent cycles' summary stats so a
+  // trend (e.g. error rate climbing over the course of an evening) is
+  // visible, not just the latest cycle in isolation.
+  const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  const debugPrevious = debugRaw ? JSON.parse(debugRaw) : { history: [] };
+  const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
+  history.push({
+    checkedAt: new Date().toISOString(),
+    checked: candidates.length,
+    errored: erroredCount,
+    staggerMsUsed: staggerMs,
+    durationMs: cycleDurationMs
+  });
+  while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+
+  await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
+    latestCycle: {
+      checkedAt: new Date().toISOString(),
+      checked: candidates.length,
+      errored: erroredCount,
+      staggerMsUsed: staggerMs,
+      durationMs: cycleDurationMs,
+      results: debugResults
+    },
+    history: history
   }));
 
   // Adjust the delay for next cycle based on how this one went, and
@@ -811,6 +859,27 @@ async function handleDebugCheckLiveNow(request, env) {
   await checkAllChurchesLive(env);
   const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
   return new Response(raw || '{}', {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+// Admin-only, read-only - just returns whatever the last cron cycle wrote
+// to LIVE_CHECK_DEBUG_KV_KEY (see checkAllChurchesLive). Never triggers a
+// real check itself (unlike handleDebugCheckLiveNow above) - safe to poll
+// repeatedly from an open debug panel without generating any extra
+// YouTube traffic.
+async function handleDebugLiveCheckStatus(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  const staggerRaw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { latestCycle: null, history: [] };
+  data.currentStaggerState = staggerRaw ? JSON.parse(staggerRaw) : { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
@@ -1465,6 +1534,9 @@ export default {
     }
     if (url.pathname === '/api/debug/check-live-now' && request.method === 'POST') {
       return handleDebugCheckLiveNow(request, env);
+    }
+    if (url.pathname === '/api/debug/live-check-status' && request.method === 'GET') {
+      return handleDebugLiveCheckStatus(request, env);
     }
     if (url.pathname === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env);

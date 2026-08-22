@@ -570,6 +570,79 @@
     overflow-y: auto;
     padding: 12px 16px;
   }
+  #liveDebugPanel {
+    width: 480px;
+  }
+  .live-debug-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-debug-run-status {
+    font-size: 11.5px;
+    color: var(--ink);
+    opacity: 0.7;
+  }
+  .live-debug-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    font-size: 12.5px;
+  }
+  .live-debug-section-title {
+    font-family: 'Georgia', serif;
+    font-weight: 700;
+    color: var(--evergreen);
+    margin: 14px 0 6px 0;
+    font-size: 13px;
+  }
+  .live-debug-section-title:first-child { margin-top: 0; }
+  .live-debug-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    background: rgba(0,0,0,0.03);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .live-debug-summary div { display: flex; justify-content: space-between; gap: 6px; }
+  .live-debug-summary .label { opacity: 0.7; }
+  .live-debug-summary .value { font-weight: 700; }
+  .live-debug-summary .value.warn { color: var(--ember); }
+  table.live-debug-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.live-debug-table th, table.live-debug-table td {
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.live-debug-table th {
+    font-weight: 700;
+    color: var(--evergreen);
+    white-space: nowrap;
+  }
+  .live-debug-error-text {
+    color: var(--ember);
+    font-family: monospace;
+    font-size: 11px;
+  }
+  .live-debug-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .live-debug-badge.ok { background: #dff0d8; color: #3c763d; }
+  .live-debug-badge.stale { background: #fcf8e3; color: #8a6d3b; }
+  .live-debug-badge.error { background: #f2dede; color: #a94442; }
   .live-now-empty {
     color: var(--ink);
     opacity: 0.7;
@@ -930,6 +1003,7 @@
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
       <button id="btnFeedback" class="btn btn-outline">Feedback</button>
+      <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
       <span id="adminArea" class="admin-area">
         <a href="#" id="adminSignInLink" class="admin-link">Admin</a>
         <span id="adminBadge" class="admin-badge" style="display:none;">Admin ✓ <a href="#" id="adminSignOutLink" class="admin-link admin-signout">Sign out</a></span>
@@ -1123,6 +1197,19 @@
   <div id="liveNowList" class="live-now-list"></div>
 </div>
 
+<div id="liveDebugPanel" class="side-panel" style="display: none;">
+  <div class="side-panel-header">
+    <h2>🛠️ Live Check Debug</h2>
+    <button id="closeLiveDebugBtn" class="btn-close">×</button>
+  </div>
+  <div class="live-debug-toolbar">
+    <button id="liveDebugRefreshBtn" class="btn btn-outline">Refresh</button>
+    <button id="liveDebugRunNowBtn" class="btn btn-ember">Run Check Now</button>
+    <span id="liveDebugRunStatus" class="live-debug-run-status"></span>
+  </div>
+  <div id="liveDebugContent" class="live-debug-content">Loading...</div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
 <script>
@@ -1250,6 +1337,135 @@
   document.getElementById('closeLiveNowBtn').addEventListener('click', function() {
     document.getElementById('liveNowPanel').style.display = 'none';
   });
+
+  // ---- Live Check Debug panel (admin-only) ----
+  //
+  // Reads from /api/debug/live-check-status, which is purely read-only -
+  // it never triggers a YouTube request itself, just returns whatever the
+  // most recent Cron Trigger cycle already wrote to KV. Safe to poll
+  // repeatedly while the panel's open. The one way to actually trigger a
+  // fresh check from here is the explicit "Run Check Now" button, which
+  // hits the existing /api/debug/check-live-now endpoint.
+  const liveDebugPanel = document.getElementById('liveDebugPanel');
+  const liveDebugContent = document.getElementById('liveDebugContent');
+  const liveDebugRunStatus = document.getElementById('liveDebugRunStatus');
+  let liveDebugAutoRefreshTimer = null;
+
+  function escapeHtmlDebug(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function formatRelativeTime(iso) {
+    if (!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (isNaN(ms)) return iso;
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return sec + 's ago';
+    const min = Math.round(sec / 60);
+    if (min < 60) return min + 'm ago';
+    const hr = Math.round(min / 60);
+    return hr + 'h ago';
+  }
+
+  function renderLiveDebugContent(data) {
+    if (!data || !data.latestCycle) {
+      liveDebugContent.innerHTML = '<p>No cycle data yet - the Cron Trigger may not have run since deploy. Try "Run Check Now".</p>';
+      return;
+    }
+
+    const cycle = data.latestCycle;
+    const errorRate = cycle.checked ? (cycle.errored / cycle.checked) : 0;
+    const staggerMs = data.currentStaggerState ? data.currentStaggerState.staggerMs : null;
+
+    let html = '<div class="live-debug-section-title">Latest Cycle</div>';
+    html += '<div class="live-debug-summary">';
+    html += '<div><span class="label">Checked</span><span class="value">' + formatRelativeTime(cycle.checkedAt) + '</span></div>';
+    html += '<div><span class="label">Duration</span><span class="value">' + (cycle.durationMs != null ? (cycle.durationMs / 1000).toFixed(1) + 's' : '-') + '</span></div>';
+    html += '<div><span class="label">Churches checked</span><span class="value">' + cycle.checked + '</span></div>';
+    html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + ' (' + Math.round(errorRate * 100) + '%)</span></div>';
+    html += '<div><span class="label">Current stagger delay</span><span class="value">' + (staggerMs != null ? staggerMs + 'ms' : '-') + '</span></div>';
+    html += '</div>';
+
+    if (cycle.results && cycle.results.length) {
+      html += '<div class="live-debug-section-title">Per-Church Results</div>';
+      html += '<table class="live-debug-table"><thead><tr><th>Church</th><th>Live</th><th>Error</th></tr></thead><tbody>';
+      cycle.results.forEach(function(r) {
+        let badge;
+        if (r.error) {
+          badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
+            (r.usedStaleData ? 'stale' : 'failed') + '</span>';
+        } else {
+          badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
+        }
+        html += '<tr><td>' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
+          '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : '') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    if (data.history && data.history.length) {
+      html += '<div class="live-debug-section-title">Recent Cycles (trend)</div>';
+      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Checked</th><th>Errored</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
+      // Most recent first - easier to spot a worsening trend at a glance
+      // without scrolling to the bottom.
+      data.history.slice().reverse().forEach(function(h) {
+        const hadErrors = h.errored > 0;
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + '</td><td>' + h.checked + '</td>' +
+          '<td' + (hadErrors ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
+          '<td>' + h.staggerMsUsed + 'ms</td><td>' + (h.durationMs != null ? (h.durationMs / 1000).toFixed(1) + 's' : '-') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    liveDebugContent.innerHTML = html;
+  }
+
+  async function loadLiveDebugStatus() {
+    try {
+      const res = await fetch('/api/debug/live-check-status', { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) throw new Error('status ' + res.status);
+      const data = await res.json();
+      renderLiveDebugContent(data);
+    } catch (err) {
+      liveDebugContent.innerHTML = '<p>Failed to load debug data (' + escapeHtmlDebug(err.message) + ').</p>';
+    }
+  }
+
+  document.getElementById('btnLiveDebug').addEventListener('click', function() {
+    liveDebugPanel.style.display = 'flex';
+    loadLiveDebugStatus();
+    // Auto-refresh while the panel's open, purely reading cached KV data -
+    // no extra YouTube requests are triggered by having this panel open.
+    if (liveDebugAutoRefreshTimer) clearInterval(liveDebugAutoRefreshTimer);
+    liveDebugAutoRefreshTimer = setInterval(loadLiveDebugStatus, 15000);
+  });
+  document.getElementById('closeLiveDebugBtn').addEventListener('click', function() {
+    liveDebugPanel.style.display = 'none';
+    if (liveDebugAutoRefreshTimer) {
+      clearInterval(liveDebugAutoRefreshTimer);
+      liveDebugAutoRefreshTimer = null;
+    }
+  });
+  document.getElementById('liveDebugRefreshBtn').addEventListener('click', loadLiveDebugStatus);
+  document.getElementById('liveDebugRunNowBtn').addEventListener('click', async function() {
+    const btn = document.getElementById('liveDebugRunNowBtn');
+    btn.disabled = true;
+    liveDebugRunStatus.textContent = 'Running...';
+    try {
+      const res = await fetch('/api/debug/check-live-now', { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('status ' + res.status);
+      liveDebugRunStatus.textContent = 'Done.';
+      await loadLiveDebugStatus();
+    } catch (err) {
+      liveDebugRunStatus.textContent = 'Failed: ' + err.message;
+    } finally {
+      btn.disabled = false;
+      setTimeout(function() { liveDebugRunStatus.textContent = ''; }, 4000);
+    }
+  });
+
   document.getElementById('liveNowList').addEventListener('click', function(e) {
     const card = e.target.closest('.live-now-card');
     if (!card) return;
@@ -2290,6 +2506,8 @@
   function setAdminUiState(isAdmin) {
     adminSignInLink.style.display = isAdmin ? 'none' : 'inline';
     adminBadge.style.display = isAdmin ? 'inline' : 'none';
+    const debugBtn = document.getElementById('btnLiveDebug');
+    if (debugBtn) debugBtn.style.display = isAdmin ? 'inline-block' : 'none';
   }
 
   // Hides the score filter bar and the Add/Manage Locations buttons from
