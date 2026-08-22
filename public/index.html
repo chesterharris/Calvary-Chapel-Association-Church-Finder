@@ -1709,6 +1709,25 @@
     return hr + 'h ago';
   }
 
+  // For a "waiting" church's scheduled start time - reads much more
+  // clearly as "in 2h 48m" than the raw "2026-08-23T01:00:00+00:00" ISO
+  // string. Falls back to formatRelativeTime's "ago" phrasing if the
+  // scheduled time has already passed by the time this renders (e.g. the
+  // debug panel sat open across the actual start) rather than showing a
+  // confusing negative countdown.
+  function formatCountdown(iso) {
+    if (!iso) return '';
+    const targetMs = new Date(iso).getTime();
+    if (isNaN(targetMs)) return iso;
+    const diffMs = targetMs - Date.now();
+    if (diffMs <= 0) return formatRelativeTime(iso);
+    const totalMin = Math.round(diffMs / 60000);
+    const hr = Math.floor(totalMin / 60);
+    const min = totalMin % 60;
+    if (hr === 0) return 'in ' + min + 'm';
+    return 'in ' + hr + 'h ' + min + 'm';
+  }
+
   // Longer cycles (seen up to ~900s in production) read much more clearly
   // as "15m 10s" than "910.4s".
   function formatDurationMs(ms) {
@@ -1863,7 +1882,7 @@
 
           html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
             '<td>' + timeText + '</td>' +
-            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (r.status === 'waiting' && r.startDate ? '<span style="opacity:0.65;">Starts ' + escapeHtmlDebug(r.startDate) + '</span>' : '')) + '</td></tr>';
+            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (r.status === 'waiting' && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
         });
         html += '</tbody></table>';
       } else {
