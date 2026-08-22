@@ -1676,9 +1676,18 @@
       // Most recent first - easier to spot a worsening trend at a glance
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
-        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + h.totalCandidates + '</td>' +
+        // Backward compatibility: history entries written before this
+        // field rename (checked -> totalCandidates) and before notChecked
+        // existed at all are still sitting in the rolling 50-cycle
+        // history right after a deploy. Rather than show a raw
+        // "undefined" for those old rows until they naturally age out,
+        // fall back to the old field name (or a plain dash) so the table
+        // reads cleanly either way.
+        const total = h.totalCandidates != null ? h.totalCandidates : (h.checked != null ? h.checked : '-');
+        const notChecked = h.notChecked != null ? h.notChecked : '-';
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + total + '</td>' +
           '<td' + (h.errored > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
-          '<td' + (h.notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.notChecked + '</td>' +
+          '<td' + (typeof notChecked === 'number' && notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + notChecked + '</td>' +
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';
       });
       html += '</tbody></table>';
