@@ -1353,6 +1353,15 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb7web.securenetsystems.net',
     callSign: 'KCHG',
     streamUrl: 'https://ice8.securenetsystems.net/KCHG'
+  },
+  {
+    displayName: 'WXMB',
+    cityState: 'Myrtle Beach, SC',
+    homePage: 'https://wxmbfm.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'WXMB',
+    streamUrl: 'https://ice25.securenetsystems.net/WXMB'
   }
 ];
 
