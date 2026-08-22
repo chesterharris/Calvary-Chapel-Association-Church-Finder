@@ -1166,7 +1166,7 @@ const RADIO_STATIONS = [
     // page only embeds a third-party (LibreTime) player iframe with no
     // visible audio src to confirm against directly - verify playback
     // next time before assuming this is exactly right.
-    displayName: 'Calvary Radio (Vero Beach)',
+    displayName: 'CCVB',
     cityState: 'Vero Beach, FL',
     homePage: 'https://ccvb.fm/',
     provider: 'icecast',
@@ -1175,42 +1175,60 @@ const RADIO_STATIONS = [
     streamUrl: 'https://wwsh.ccvb.fm/stream/main'
   },
   {
-    displayName: 'TrueFM (KS)',
+    displayName: 'TrueFM',
+    cityState: 'Wichita, KS',
+    homePage: 'http://www.truefm.net',
     provider: 'icecast',
     host: 'radio.shoutcheap.com/proxy/kaxzann1',
     mount: 'live',
     streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
   },
   {
-    displayName: 'WJWD (WI)',
+    displayName: 'WJWD',
+    cityState: 'Marshall, WI',
+    homePage: 'https://jesuspeoplefm.com',
     provider: 'icecast',
     host: 'lunar.citrus3.com:8034',
     mount: 'stream',
     streamUrl: 'https://lunar.citrus3.com:8034/stream'
   },
   {
-    displayName: 'EQUIP FM (VA)',
+    displayName: 'EQUIP FM',
+    cityState: 'Lynchburg, VA',
+    homePage: 'https://equipfm.org/sponsors/calvary-chapel-lynchburg/',
     provider: 'securenetsystems',
     subdomain: 'streamdb9web.securenetsystems.net',
     callSign: 'EQUIPFM',
     streamUrl: 'https://ice66.securenetsystems.net/EQUIPFM'
   },
   {
-    displayName: 'WIAM (TN)',
+    displayName: 'WIAM',
+    cityState: 'Knoxville, TN',
+    homePage: 'https://thewaymedia.net/calvary-knoxville',
     provider: 'securenetsystems',
     subdomain: 'streamdb3web.securenetsystems.net',
     callSign: 'WIAM',
     streamUrl: 'https://ice42.securenetsystems.net/WIAM'
   },
   {
-    displayName: 'DOVE FM (PA)',
+    displayName: 'DOVE FM',
+    cityState: 'Russell, PA',
+    homePage: 'https://www.dovefm.org/',
     provider: 'securenetsystems',
     subdomain: 'streamdb7web.securenetsystems.net',
     callSign: 'DOVEMAIN',
     streamUrl: 'https://ice64.securenetsystems.net/DOVEMAIN'
   },
   {
+    // NOTE: displayName deliberately left as-is (not renamed to "REVIVE FM
+    // (TX)") even though the person's cityState note suggested that -
+    // renaming would silently un-favorite this station for anyone who's
+    // already starred it (favorites are matched by exact displayName), and
+    // this one wasn't part of the earlier explicit EQUIP FM/WIAM/DOVE FM
+    // rename request. Flag if a rename is actually wanted.
     displayName: 'REVIVE FM',
+    cityState: 'Houston, TX',
+    homePage: 'https://revive953.com/',
     provider: 'securenetsystems',
     subdomain: 'streamdb8web.securenetsystems.net',
     callSign: 'KEPHLP',
@@ -1218,6 +1236,8 @@ const RADIO_STATIONS = [
   },
   {
     displayName: 'The Truth (TN)',
+    cityState: 'Greeneville, TN',
+    homePage: 'https://www.truthfm.net/',
     provider: 'securenetsystems',
     subdomain: 'streamdb00web.securenetsystems.net',
     callSign: 'WZTH',
@@ -1225,59 +1245,77 @@ const RADIO_STATIONS = [
   },
   {
     displayName: 'The Truth (GA)',
+    cityState: 'Clayton, GA',
+    homePage: 'https://www.truthfm.net/',
     provider: 'securenetsystems',
     subdomain: 'streamdb4web.securenetsystems.net',
     callSign: 'WZTG',
     streamUrl: 'https://ice26.securenetsystems.net/WZTG'
   },
   {
-    displayName: 'KLHT FM (HI)',
+    displayName: 'KLHT FM',
+    cityState: 'Honolulu, HI',
+    homePage: 'https://fm.klight.org',
     provider: 'icecast',
     host: 'klht.rhemastreams.net:8443',
     mount: 'klhtfm',
     streamUrl: 'https://klht.rhemastreams.net:8443/klhtfm'
   },
   {
-    displayName: 'KLHT AM (HI)',
+    displayName: 'KLHT AM',
+    cityState: 'Honolulu, HI',
+    homePage: 'https://am.klight.org',
     provider: 'icecast',
     host: 'klht.rhemastreams.net:8443',
     mount: 'klhtam',
     streamUrl: 'https://klht.rhemastreams.net:8443/klhtam'
   },
   {
-    displayName: 'WTSW-LP (WI)',
+    displayName: 'WTSW-LP',
+    cityState: 'Manitowoc, WI',
+    homePage: 'https://wtswlp.org/',
     provider: 'futuri',
     mount: '7077_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
   },
   {
-    displayName: 'Real Hope Radio 90.9 FM (ID)',
+    displayName: 'Real Hope Radio',
+    cityState: 'Grangeville, ID',
+    homePage: 'https://realhoperadio.com/',
     provider: 'futuri',
     mount: '7066_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
   },
   {
-    displayName: 'Radio by Grace (TX)',
+    displayName: 'Radio by Grace',
+    cityState: 'Amarillo, TX',
+    homePage: 'http://www.radiobygrace.com',
     provider: 'socast',
     domain: 'www.radiobygrace.com',
     accountId: '1023',
     streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
   },
   {
-    displayName: 'Renew FM (MA)',
+    displayName: 'Renew FM',
+    cityState: 'Fitchburg, MA',
+    homePage: 'https://renewfm.org',
     provider: 'wpshowplaying',
     npUrl: 'https://renewfm.org/wp-content/themes/radiostation/showPlaying.php?device=web',
     streamUrl: 'https://streams.radio.co/s34b0aa3a7/listen'
   },
   {
-    displayName: 'Truth FM (MD)',
+    displayName: 'Truth FM',
+    cityState: 'Hagerstown, MD',
+    homePage: 'https://www.calvarycumberland.com/Listen-on-line',
     provider: 'securenetsystems',
     subdomain: 'streamdb4web.securenetsystems.net',
     callSign: 'WZTM',
     streamUrl: 'https://ice26.securenetsystems.net/WZTM'
   },
   {
-    displayName: 'KSGR (TX)',
+    displayName: 'KSGR',
+    cityState: 'Corpus Christi, TX',
+    homePage: 'https://ksgr.org',
     provider: 'icecast',
     host: 'ksgr.ddns.net:1841',
     mount: 'stream.mp3',
