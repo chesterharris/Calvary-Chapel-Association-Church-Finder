@@ -591,8 +591,21 @@ function buildLiveCheckUrl(youtubeUrl) {
 }
 
 async function fetchLivePage(liveUrl) {
+  // Deliberately NOT identifying as a bot here (the old User-Agent literally
+  // said "CCAFinderBot") - confirmed in production that YouTube can serve a
+  // stripped-down page (missing meta tags AND the videoDetails JSON we fall
+  // back to) to requests that don't look like a real browser, even for a
+  // channel whose real page has everything. Using a realistic browser UA
+  // plus the Accept headers a real browser sends isn't an attempt to
+  // deceive anyone about what this is - it's a publicly viewable page - it
+  // just avoids opting INTO a reduced-content path that only exists for
+  // actual bot traffic.
   const response = await fetch(liveUrl, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCAFinderBot/1.0)' }
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9'
+    }
   });
   if (!response.ok) {
     throw new Error('Live page fetch failed with status ' + response.status);
