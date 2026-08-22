@@ -571,19 +571,85 @@
     padding: 12px 16px;
   }
   #liveDebugPanel {
-    width: 480px;
+    width: 520px;
   }
   .live-debug-toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 10px;
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
   }
-  .live-debug-run-status {
+  .live-debug-toolbar-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink);
+    opacity: 0.85;
+    min-width: 0;
+  }
+  .live-debug-status-dot {
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #999;
+  }
+  .live-debug-status-dot.ok { background: #4a9c5d; }
+  .live-debug-status-dot.warn { background: var(--brass); }
+  .live-debug-status-dot.error { background: var(--ember); }
+  .live-debug-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .live-debug-toolbar-actions .btn[disabled] {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .live-debug-spinner {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-top-color: #fff;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: -1px;
+    animation: live-debug-spin 0.7s linear infinite;
+  }
+  @keyframes live-debug-spin {
+    to { transform: rotate(360deg); }
+  }
+  .live-debug-progress-wrap {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.02);
+  }
+  .live-debug-progress-track {
+    width: 100%;
+    height: 8px;
+    background: var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .live-debug-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--brass);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+  .live-debug-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
     font-size: 11.5px;
     color: var(--ink);
-    opacity: 0.7;
+    opacity: 0.75;
   }
   .live-debug-content {
     flex: 1;
@@ -597,8 +663,24 @@
     color: var(--evergreen);
     margin: 14px 0 6px 0;
     font-size: 13px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
   }
   .live-debug-section-title:first-child { margin-top: 0; }
+  .live-debug-filter-toggle {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 400;
+    font-size: 11.5px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .live-debug-filter-toggle input { cursor: pointer; }
   .live-debug-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -612,26 +694,61 @@
   .live-debug-summary .label { opacity: 0.7; }
   .live-debug-summary .value { font-weight: 700; }
   .live-debug-summary .value.warn { color: var(--ember); }
+  .live-debug-sparkline-row {
+    display: flex;
+    gap: 14px;
+    margin: 8px 0 4px 0;
+  }
+  .live-debug-sparkline-block {
+    flex: 1;
+    background: rgba(0,0,0,0.03);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 8px;
+  }
+  .live-debug-sparkline-label {
+    font-size: 10.5px;
+    opacity: 0.7;
+    margin-bottom: 2px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .live-debug-sparkline-block svg { display: block; width: 100%; height: 24px; }
   table.live-debug-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
+    table-layout: fixed;
   }
   table.live-debug-table th, table.live-debug-table td {
     text-align: left;
-    padding: 4px 6px;
+    padding: 5px 6px;
     border-bottom: 1px solid var(--line);
     vertical-align: top;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
   table.live-debug-table th {
     font-weight: 700;
     color: var(--evergreen);
+  }
+  /* Per-church table: name gets breathing room, badge stays compact,
+     error text gets the rest and wraps instead of forcing horizontal
+     scroll (previously the widest offender). */
+  #liveDebugPerChurchTable col.col-church { width: 42%; }
+  #liveDebugPerChurchTable col.col-live { width: 16%; }
+  #liveDebugPerChurchTable col.col-error { width: 42%; }
+  #liveDebugPerChurchTable td.church-name {
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 0; /* forces the ellipsis to respect the col width in a table-layout:fixed table */
   }
   .live-debug-error-text {
     color: var(--ember);
     font-family: monospace;
-    font-size: 11px;
+    font-size: 10.5px;
+    white-space: normal;
   }
   .live-debug-badge {
     display: inline-block;
@@ -639,11 +756,12 @@
     border-radius: 3px;
     font-size: 10.5px;
     font-weight: 700;
+    white-space: nowrap;
   }
   .live-debug-badge.ok { background: #dff0d8; color: #3c763d; }
   .live-debug-badge.stale { background: #fcf8e3; color: #8a6d3b; }
   .live-debug-badge.error { background: #f2dede; color: #a94442; }
-  .live-debug-badge.skipped { background: #e2e2e2; color: #666; }
+  .live-debug-badge.notchecked { background: #e2e2e2; color: #666; }
   .live-debug-warning-banner {
     background: #fcf1ea;
     border: 1px solid var(--ember);
@@ -1214,9 +1332,23 @@
     <button id="closeLiveDebugBtn" class="btn-close">×</button>
   </div>
   <div class="live-debug-toolbar">
-    <button id="liveDebugRefreshBtn" class="btn btn-outline">Refresh</button>
-    <button id="liveDebugRunNowBtn" class="btn btn-ember">Run Check Now</button>
-    <span id="liveDebugRunStatus" class="live-debug-run-status"></span>
+    <div class="live-debug-toolbar-status">
+      <span id="liveDebugStatusDot" class="live-debug-status-dot"></span>
+      <span id="liveDebugStatusText">Loading...</span>
+    </div>
+    <div class="live-debug-toolbar-actions">
+      <button id="liveDebugRefreshBtn" class="btn btn-outline">Refresh</button>
+      <button id="liveDebugRunNowBtn" class="btn btn-ember">Run Check Now</button>
+    </div>
+  </div>
+  <div id="liveDebugProgressWrap" class="live-debug-progress-wrap" style="display:none;">
+    <div class="live-debug-progress-track">
+      <div id="liveDebugProgressBar" class="live-debug-progress-bar"></div>
+    </div>
+    <div class="live-debug-progress-meta">
+      <span id="liveDebugProgressText"></span>
+      <span id="liveDebugProgressEta"></span>
+    </div>
   </div>
   <div id="liveDebugContent" class="live-debug-content">Loading...</div>
 </div>
@@ -1351,16 +1483,32 @@
 
   // ---- Live Check Debug panel (admin-only) ----
   //
-  // Reads from /api/debug/live-check-status, which is purely read-only -
-  // it never triggers a YouTube request itself, just returns whatever the
-  // most recent Cron Trigger cycle already wrote to KV. Safe to poll
-  // repeatedly while the panel's open. The one way to actually trigger a
-  // fresh check from here is the explicit "Run Check Now" button, which
-  // hits the existing /api/debug/check-live-now endpoint.
+  // Reads from /api/debug/live-check-status for the last completed cycle's
+  // full results (purely read-only, never triggers a YouTube request) and
+  // /api/debug/live-check-progress for a REAL live progress snapshot while
+  // a cycle is actively running - the latter is what drives the progress
+  // bar/ETA, not a simulated timer, so it stays accurate even if a cycle
+  // runs faster or slower than usual.
   const liveDebugPanel = document.getElementById('liveDebugPanel');
   const liveDebugContent = document.getElementById('liveDebugContent');
-  const liveDebugRunStatus = document.getElementById('liveDebugRunStatus');
-  let liveDebugAutoRefreshTimer = null;
+  const liveDebugRunNowBtn = document.getElementById('liveDebugRunNowBtn');
+  const liveDebugRefreshBtn = document.getElementById('liveDebugRefreshBtn');
+  const liveDebugStatusDot = document.getElementById('liveDebugStatusDot');
+  const liveDebugStatusText = document.getElementById('liveDebugStatusText');
+  const liveDebugProgressWrap = document.getElementById('liveDebugProgressWrap');
+  const liveDebugProgressBar = document.getElementById('liveDebugProgressBar');
+  const liveDebugProgressText = document.getElementById('liveDebugProgressText');
+  const liveDebugProgressEta = document.getElementById('liveDebugProgressEta');
+
+  // Single self-adjusting poll loop: normally ticks every 15s (cheap KV
+  // reads), but escalates to every 1.5s the moment it detects a cycle is
+  // actively running (whether triggered by this admin's "Run Check Now"
+  // or by the Cron Trigger firing while the panel happens to be open),
+  // then drops back to the slow cadence once that cycle finishes.
+  let liveDebugPollTimer = null;
+  let liveDebugWatchingRun = false;
+  let liveDebugLastData = null;
+  let liveDebugShowIssuesOnly = false;
 
   function escapeHtmlDebug(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -1380,14 +1528,81 @@
     return hr + 'h ago';
   }
 
+  // Longer cycles (seen up to ~900s in production) read much more clearly
+  // as "15m 10s" than "910.4s".
+  function formatDurationMs(ms) {
+    if (ms == null || isNaN(ms)) return '-';
+    const totalSec = ms / 1000;
+    if (totalSec < 60) return totalSec.toFixed(1) + 's';
+    const min = Math.floor(totalSec / 60);
+    const sec = Math.round(totalSec - min * 60);
+    return min + 'm ' + sec + 's';
+  }
+
+  // Small dependency-free inline SVG sparkline - no axes or labels, just
+  // the shape of a trend. `values` should be chronological (oldest first).
+  function buildSparklineSvg(values, color) {
+    const w = 100, h = 24, pad = 2;
+    if (!values || values.length < 2) {
+      return '<svg viewBox="0 0 ' + w + ' ' + h + '"></svg>';
+    }
+    const max = Math.max.apply(null, values);
+    const min = Math.min.apply(null, values);
+    const range = (max - min) || 1;
+    const stepX = (w - pad * 2) / (values.length - 1);
+    const points = values.map(function(v, i) {
+      const x = pad + i * stepX;
+      const y = h - pad - ((v - min) / range) * (h - pad * 2);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+      '<polyline points="' + points + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
+  }
+
+  function updateToolbarStatus(data) {
+    if (!data || !data.latestCycle) {
+      liveDebugStatusDot.className = 'live-debug-status-dot';
+      liveDebugStatusText.textContent = 'No cycle data yet';
+      return;
+    }
+    const cycle = data.latestCycle;
+    if (cycle.hitSubrequestLimit) {
+      liveDebugStatusDot.className = 'live-debug-status-dot error';
+      liveDebugStatusText.textContent = 'Budget exhausted - ' + formatRelativeTime(cycle.checkedAt);
+    } else if (cycle.errored > 0) {
+      liveDebugStatusDot.className = 'live-debug-status-dot warn';
+      liveDebugStatusText.textContent = cycle.errored + ' errored - ' + formatRelativeTime(cycle.checkedAt);
+    } else {
+      liveDebugStatusDot.className = 'live-debug-status-dot ok';
+      liveDebugStatusText.textContent = 'Healthy - checked ' + formatRelativeTime(cycle.checkedAt);
+    }
+  }
+
+  function setDebugButtonsRunning(isRunning) {
+    liveDebugRunNowBtn.disabled = isRunning;
+    liveDebugRefreshBtn.disabled = isRunning;
+    liveDebugRunNowBtn.innerHTML = isRunning ? '<span class="live-debug-spinner"></span>Running...' : 'Run Check Now';
+  }
+
+  // "Issue" = anything worth a second look when filtering: not checked
+  // this cycle, an actual error, or currently live (a positive, notable
+  // state worth surfacing even while hiding the routine "not live" noise
+  // that makes up the vast majority of rows).
+  function isDebugRowAnIssue(r) {
+    return !!(r.notChecked || r.error || r.isLive);
+  }
+
   function renderLiveDebugContent(data) {
+    liveDebugLastData = data;
+    updateToolbarStatus(data);
+
     if (!data || !data.latestCycle) {
       liveDebugContent.innerHTML = '<p>No cycle data yet - the Cron Trigger may not have run since deploy. Try "Run Check Now".</p>';
       return;
     }
 
     const cycle = data.latestCycle;
-    const errorRate = cycle.checked ? (cycle.errored / cycle.checked) : 0;
     const staggerMs = data.currentStaggerState ? data.currentStaggerState.staggerMs : null;
 
     let html = '';
@@ -1395,52 +1610,89 @@
       html += '<div class="live-debug-warning-banner">' +
         '⚠️ Hit Cloudflare\'s subrequest limit this cycle - not every church could be checked. ' +
         'This is a platform-level cap (50/invocation on the Free plan, 10,000 on Paid), not a YouTube ' +
-        'rate-limit issue - upgrading to Workers Paid is the direct fix if this keeps happening.</div>';
+        'rate-limit issue.</div>';
     }
 
     html += '<div class="live-debug-section-title">Latest Cycle</div>';
     html += '<div class="live-debug-summary">';
     html += '<div><span class="label">Checked</span><span class="value">' + formatRelativeTime(cycle.checkedAt) + '</span></div>';
-    html += '<div><span class="label">Duration</span><span class="value">' + (cycle.durationMs != null ? (cycle.durationMs / 1000).toFixed(1) + 's' : '-') + '</span></div>';
-    html += '<div><span class="label">Churches checked</span><span class="value">' + cycle.checked + '</span></div>';
-    html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + ' (' + Math.round(errorRate * 100) + '%)</span></div>';
+    html += '<div><span class="label">Duration</span><span class="value">' + formatDurationMs(cycle.durationMs) + '</span></div>';
+    html += '<div><span class="label">Total candidates</span><span class="value">' + cycle.totalCandidates + '</span></div>';
+    html += '<div><span class="label">Actually checked</span><span class="value">' + cycle.actuallyChecked + '</span></div>';
+    html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + '</span></div>';
+    html += '<div><span class="label">Not checked</span><span class="value' + (cycle.notChecked > 0 ? ' warn' : '') + '">' + cycle.notChecked + '</span></div>';
     html += '<div><span class="label">Current stagger delay</span><span class="value">' + (staggerMs != null ? staggerMs + 'ms' : '-') + '</span></div>';
     html += '</div>';
 
+    // Sparklines - quick visual trend, faster to scan than a column of
+    // numbers. Last 20 cycles, chronological (oldest to newest, left to
+    // right), matching normal sparkline convention.
+    const sparkHistory = (data.history || []).slice(-20);
+    if (sparkHistory.length >= 2) {
+      const durationValues = sparkHistory.map(function(h) { return (h.durationMs || 0) / 1000; });
+      const problemValues = sparkHistory.map(function(h) { return (h.errored || 0) + (h.notChecked || 0); });
+      html += '<div class="live-debug-sparkline-row">';
+      html += '<div class="live-debug-sparkline-block">' +
+        '<div class="live-debug-sparkline-label"><span>Duration trend</span><span>' + durationValues[durationValues.length - 1].toFixed(1) + 's</span></div>' +
+        buildSparklineSvg(durationValues, '#a68a4a') + '</div>';
+      html += '<div class="live-debug-sparkline-block">' +
+        '<div class="live-debug-sparkline-label"><span>Errors + not-checked</span><span>' + problemValues[problemValues.length - 1] + '</span></div>' +
+        buildSparklineSvg(problemValues, '#c1562f') + '</div>';
+      html += '</div>';
+    }
+
     if (cycle.results && cycle.results.length) {
-      html += '<div class="live-debug-section-title">Per-Church Results</div>';
-      html += '<table class="live-debug-table"><thead><tr><th>Church</th><th>Live</th><th>Error</th></tr></thead><tbody>';
-      cycle.results.forEach(function(r) {
-        let badge;
-        if (r.skipped) {
-          badge = '<span class="live-debug-badge skipped">skipped</span>';
-        } else if (r.error) {
-          badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
-            (r.usedStaleData ? 'stale' : 'failed') + '</span>';
-        } else {
-          badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
-        }
-        html += '<tr><td>' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
-          '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : '') + '</td></tr>';
-      });
-      html += '</tbody></table>';
+      const rowsToShow = liveDebugShowIssuesOnly ? cycle.results.filter(isDebugRowAnIssue) : cycle.results;
+      html += '<div class="live-debug-section-title">Per-Church Results' +
+        '<label class="live-debug-filter-toggle"><input type="checkbox" id="liveDebugIssuesOnlyToggle"' +
+        (liveDebugShowIssuesOnly ? ' checked' : '') + '> Show issues only</label></div>';
+
+      if (rowsToShow.length) {
+        html += '<table class="live-debug-table" id="liveDebugPerChurchTable">' +
+          '<colgroup><col class="col-church"><col class="col-live"><col class="col-error"></colgroup>' +
+          '<thead><tr><th>Church</th><th>Live</th><th>Error</th></tr></thead><tbody>';
+        rowsToShow.forEach(function(r) {
+          let badge;
+          if (r.notChecked) {
+            badge = '<span class="live-debug-badge notchecked">not checked</span>';
+          } else if (r.error) {
+            badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
+              (r.usedStaleData ? 'stale' : 'failed') + '</span>';
+          } else {
+            badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
+          }
+          html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
+            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : '') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      } else {
+        html += '<p style="opacity:0.6;">No issues right now.</p>';
+      }
     }
 
     if (data.history && data.history.length) {
       html += '<div class="live-debug-section-title">Recent Cycles (trend)</div>';
-      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Checked</th><th>Errored</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
+      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
       // Most recent first - easier to spot a worsening trend at a glance
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
-        const hadErrors = h.errored > 0;
-        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + h.checked + '</td>' +
-          '<td' + (hadErrors ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
-          '<td>' + h.staggerMsUsed + 'ms</td><td>' + (h.durationMs != null ? (h.durationMs / 1000).toFixed(1) + 's' : '-') + '</td></tr>';
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + h.totalCandidates + '</td>' +
+          '<td' + (h.errored > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
+          '<td' + (h.notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.notChecked + '</td>' +
+          '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';
       });
       html += '</tbody></table>';
     }
 
     liveDebugContent.innerHTML = html;
+
+    const toggleEl = document.getElementById('liveDebugIssuesOnlyToggle');
+    if (toggleEl) {
+      toggleEl.addEventListener('change', function() {
+        liveDebugShowIssuesOnly = toggleEl.checked;
+        renderLiveDebugContent(liveDebugLastData);
+      });
+    }
   }
 
   async function loadLiveDebugStatus() {
@@ -1454,37 +1706,88 @@
     }
   }
 
+  function renderProgressUI(progress) {
+    liveDebugProgressWrap.style.display = 'block';
+    const total = progress.totalCandidates || 0;
+    const done = progress.completedCount || 0;
+    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    liveDebugProgressBar.style.width = pct + '%';
+    liveDebugProgressText.textContent = done + ' / ' + total + ' churches (' + pct + '%)';
+
+    // ETA from REAL elapsed-time-so-far, not a historical guess - self-
+    // corrects live if this particular run is faster or slower than usual.
+    if (progress.startedAt && done > 0 && done < total) {
+      const elapsedMs = Date.now() - new Date(progress.startedAt).getTime();
+      const msPerChurch = elapsedMs / done;
+      const remainingMs = msPerChurch * (total - done);
+      liveDebugProgressEta.textContent = '~' + formatDurationMs(remainingMs) + ' remaining';
+    } else {
+      liveDebugProgressEta.textContent = '';
+    }
+
+    liveDebugStatusDot.className = 'live-debug-status-dot warn';
+    liveDebugStatusText.textContent = 'Running now' + (progress.currentChurchName ? ' - checking "' + escapeHtmlDebug(progress.currentChurchName) + '"' : '');
+  }
+
+  function hideProgressUI() {
+    liveDebugProgressWrap.style.display = 'none';
+  }
+
+  async function pollProgressAndStatus() {
+    let progress;
+    try {
+      const res = await fetch('/api/debug/live-check-progress', { credentials: 'include', cache: 'no-store' });
+      progress = res.ok ? await res.json() : { running: false };
+    } catch (err) {
+      progress = { running: false };
+    }
+
+    if (progress.running) {
+      liveDebugWatchingRun = true;
+      setDebugButtonsRunning(true);
+      renderProgressUI(progress);
+      liveDebugPollTimer = setTimeout(pollProgressAndStatus, 1500);
+    } else {
+      setDebugButtonsRunning(false);
+      hideProgressUI();
+      if (liveDebugWatchingRun) {
+        // A cycle we were watching just finished - load the real final
+        // results once rather than waiting for the next slow-cadence tick.
+        liveDebugWatchingRun = false;
+        await loadLiveDebugStatus();
+      }
+      liveDebugPollTimer = setTimeout(pollProgressAndStatus, 15000);
+    }
+  }
+
   document.getElementById('btnLiveDebug').addEventListener('click', function() {
     liveDebugPanel.style.display = 'flex';
     loadLiveDebugStatus();
-    // Auto-refresh while the panel's open, purely reading cached KV data -
-    // no extra YouTube requests are triggered by having this panel open.
-    if (liveDebugAutoRefreshTimer) clearInterval(liveDebugAutoRefreshTimer);
-    liveDebugAutoRefreshTimer = setInterval(loadLiveDebugStatus, 15000);
+    if (liveDebugPollTimer) clearTimeout(liveDebugPollTimer);
+    pollProgressAndStatus();
   });
   document.getElementById('closeLiveDebugBtn').addEventListener('click', function() {
     liveDebugPanel.style.display = 'none';
-    if (liveDebugAutoRefreshTimer) {
-      clearInterval(liveDebugAutoRefreshTimer);
-      liveDebugAutoRefreshTimer = null;
+    if (liveDebugPollTimer) {
+      clearTimeout(liveDebugPollTimer);
+      liveDebugPollTimer = null;
     }
+    liveDebugWatchingRun = false;
   });
-  document.getElementById('liveDebugRefreshBtn').addEventListener('click', loadLiveDebugStatus);
-  document.getElementById('liveDebugRunNowBtn').addEventListener('click', async function() {
-    const btn = document.getElementById('liveDebugRunNowBtn');
-    btn.disabled = true;
-    liveDebugRunStatus.textContent = 'Running...';
-    try {
-      const res = await fetch('/api/debug/check-live-now', { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('status ' + res.status);
-      liveDebugRunStatus.textContent = 'Done.';
-      await loadLiveDebugStatus();
-    } catch (err) {
-      liveDebugRunStatus.textContent = 'Failed: ' + err.message;
-    } finally {
-      btn.disabled = false;
-      setTimeout(function() { liveDebugRunStatus.textContent = ''; }, 4000);
-    }
+  liveDebugRefreshBtn.addEventListener('click', loadLiveDebugStatus);
+  liveDebugRunNowBtn.addEventListener('click', function() {
+    setDebugButtonsRunning(true);
+    // This request stays open for the ENTIRE cycle duration (seen up to
+    // ~900s in production) - deliberately not awaited for UI purposes.
+    // The poll loop above (reading a separate, fast, near-instant
+    // endpoint) is what actually drives the visible progress bar/ETA.
+    fetch('/api/debug/check-live-now', { method: 'POST', credentials: 'include' }).catch(function(err) {
+      console.error('Run Check Now request failed:', err);
+    });
+    // Give the backend a brief moment to write its first progress
+    // snapshot, then start polling (or accelerate existing polling).
+    if (liveDebugPollTimer) clearTimeout(liveDebugPollTimer);
+    setTimeout(pollProgressAndStatus, 400);
   });
 
   document.getElementById('liveNowList').addEventListener('click', function(e) {

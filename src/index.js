@@ -502,6 +502,13 @@ const LIVE_CHECK_STAGGER_STATE_KV_KEY = 'live-check-stagger-state';
 // visibility, never read by the public-facing map.
 const LIVE_CHECK_DEBUG_KV_KEY = 'live-check-debug';
 const LIVE_CHECK_HISTORY_MAX_CYCLES = 50;
+// Live, in-progress status written DURING a cycle (both cron-triggered and
+// manually-triggered via "Run Check Now"), separate from
+// LIVE_CHECK_DEBUG_KV_KEY (which only gets its final write once a cycle
+// finishes). Lets the admin debug panel show a real, accurate progress bar
+// and ETA instead of a simulated one - the panel polls this key while
+// `running` is true.
+const LIVE_CHECK_PROGRESS_KV_KEY = 'live-check-progress';
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -732,17 +739,49 @@ async function checkAllChurchesLive(env) {
   const staggerMs = staggerState.staggerMs;
 
   const cycleStartedAt = Date.now();
+
+  // Writes the live in-progress snapshot the admin debug panel polls for a
+  // real progress bar/ETA. Best-effort - a failed KV write here shouldn't
+  // ever take down the actual live-check cycle, so errors are swallowed.
+  async function writeProgress(completedCount, currentChurchName, running) {
+    try {
+      await env.CHURCHES_KV.put(LIVE_CHECK_PROGRESS_KV_KEY, JSON.stringify({
+        running: running,
+        startedAt: new Date(cycleStartedAt).toISOString(),
+        updatedAt: new Date().toISOString(),
+        totalCandidates: candidates.length,
+        completedCount: completedCount,
+        currentChurchName: currentChurchName || null
+      }));
+    } catch (err) {
+      // Swallow - progress display is a nice-to-have, not worth failing
+      // the actual check over.
+    }
+  }
+
+  await writeProgress(0, candidates.length ? candidates[0].name : null, true);
+
   let erroredCount = 0;
+  // Churches that were never actually attempted this cycle because we'd
+  // already exhausted Cloudflare's subrequest budget - distinct from
+  // erroredCount (a real, attempted fetch that failed). Both the ONE
+  // church whose fetch attempt actually triggered the "too many
+  // subrequests" error, and every church after it that got skipped
+  // without attempting a fetch at all, land in this same bucket - from an
+  // admin's perspective both are equally "didn't get checked this cycle,"
+  // not meaningfully different failure types worth separate badges.
+  let notCheckedCount = 0;
   // Set the moment we hit Cloudflare's own per-invocation subrequest
   // ceiling (confirmed in production: 50/invocation on the Free/Bundled
-  // plan). This is a hard platform limit, not a YouTube rate-limit signal -
-  // once it's hit, every further fetch() in this SAME invocation fails
-  // instantly regardless of target or delay, so there's nothing to gain by
-  // continuing to loop through (and waiting the stagger delay between)
-  // whatever candidates are left. Also excluded from the adaptive stagger
-  // calculation below for the same reason: slowing down doesn't fix a
-  // count-based ceiling, so treating this like a bad YouTube cycle would
-  // just needlessly max out the delay for future (unrelated) cycles.
+  // plan, higher on Paid). This is a hard platform limit, not a YouTube
+  // rate-limit signal - once it's hit, every further fetch() in this SAME
+  // invocation fails instantly regardless of target or delay, so there's
+  // nothing to gain by continuing to loop through (and waiting the
+  // stagger delay between) whatever candidates are left. Also excluded
+  // from the adaptive stagger calculation below for the same reason:
+  // slowing down doesn't fix a count-based ceiling, so treating this like
+  // a bad YouTube cycle would just needlessly max out the delay for
+  // future (unrelated) cycles.
   let hitSubrequestLimit = false;
   const results = [];
   // Every candidate's outcome this cycle, including non-live and errored
@@ -750,27 +789,30 @@ async function checkAllChurchesLive(env) {
   // admin debug view reads from, since "nobody's live" and "everything's
   // 429ing" look identical from the public list alone.
   const debugResults = [];
+
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
 
     if (hitSubrequestLimit) {
-      // Record the rest as skipped rather than attempting (and failing)
-      // each one identically - still falls back to last-known-good data
-      // exactly like a normal per-church failure would.
+      // Record the rest as not-checked rather than attempting (and
+      // failing) each one identically - still falls back to last-known-
+      // good data exactly like a normal per-church failure would.
       const prior = previousById[c.id];
+      notCheckedCount++;
       debugResults.push({
         churchId: c.id,
         name: c.name,
         isLive: prior ? prior.isLive : false,
         error: 'Not attempted - subrequest budget exhausted this cycle',
         usedStaleData: !!prior,
-        skipped: true
+        notChecked: true
       });
       if (prior) {
         results.push(Object.assign({}, prior, { stale: true }));
       } else {
         results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
       }
+      await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
       continue;
     }
 
@@ -783,7 +825,6 @@ async function checkAllChurchesLive(env) {
       // last known-good status for this church instead of assuming it
       // went offline. If we've never seen this church live before, this
       // is just an ordinary "not live" result.
-      erroredCount++;
       const prior = previousById[c.id];
       // err.message is what actually carries the HTTP status code (see
       // fetchLivePage's "...failed with status " + response.status) - this
@@ -795,14 +836,20 @@ async function checkAllChurchesLive(env) {
       // above for why it needs different handling.
       if (/too many subrequests/i.test(err.message || '')) {
         hitSubrequestLimit = true;
+        notCheckedCount++;
+        debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior, notChecked: true });
+      } else {
+        erroredCount++;
+        debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior });
       }
-      debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior });
       if (prior) {
         results.push(Object.assign({}, prior, { stale: true }));
       } else {
         results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
       }
     }
+
+    await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
 
     // Stagger requests to YouTube instead of firing them all at once.
     // Skip the delay after the last item, or once we've already hit the
@@ -815,6 +862,11 @@ async function checkAllChurchesLive(env) {
 
   const liveOnly = results.filter(function(r) { return r.isLive; });
   const cycleDurationMs = Date.now() - cycleStartedAt;
+  // actuallyChecked = candidates a fetch was really attempted for
+  // (whether it succeeded or failed), i.e. everything EXCEPT the
+  // not-checked bucket above. candidates.length remains the honest total
+  // regardless of how the cycle went.
+  const actuallyCheckedCount = candidates.length - notCheckedCount;
 
   await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
     checkedAt: new Date().toISOString(),
@@ -824,8 +876,10 @@ async function checkAllChurchesLive(env) {
     // than guessing at what YouTube's threshold is. Check this after
     // deploying instead of assuming the stagger delay is "enough."
     stats: {
-      checked: candidates.length,
+      totalCandidates: candidates.length,
+      actuallyChecked: actuallyCheckedCount,
       errored: erroredCount,
+      notChecked: notCheckedCount,
       staggerMsUsed: staggerMs
     }
   }));
@@ -839,8 +893,10 @@ async function checkAllChurchesLive(env) {
   const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
   history.push({
     checkedAt: new Date().toISOString(),
-    checked: candidates.length,
+    totalCandidates: candidates.length,
+    actuallyChecked: actuallyCheckedCount,
     errored: erroredCount,
+    notChecked: notCheckedCount,
     staggerMsUsed: staggerMs,
     durationMs: cycleDurationMs,
     hitSubrequestLimit: hitSubrequestLimit
@@ -850,8 +906,10 @@ async function checkAllChurchesLive(env) {
   await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
     latestCycle: {
       checkedAt: new Date().toISOString(),
-      checked: candidates.length,
+      totalCandidates: candidates.length,
+      actuallyChecked: actuallyCheckedCount,
       errored: erroredCount,
+      notChecked: notCheckedCount,
       staggerMsUsed: staggerMs,
       durationMs: cycleDurationMs,
       hitSubrequestLimit: hitSubrequestLimit,
@@ -881,6 +939,8 @@ async function checkAllChurchesLive(env) {
       }));
     }
   }
+
+  await writeProgress(candidates.length, null, false);
 }
 
 // Public, read-only endpoint - just returns whatever the last cron run
@@ -930,6 +990,26 @@ async function handleDebugLiveCheckStatus(request, env) {
   const staggerRaw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
   const data = raw ? JSON.parse(raw) : { latestCycle: null, history: [] };
   data.currentStaggerState = staggerRaw ? JSON.parse(staggerRaw) : { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  return new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+// Admin-only, read-only - returns the live in-progress snapshot written
+// DURING a cycle (see writeProgress() inside checkAllChurchesLive), so the
+// debug panel can show a real progress bar/ETA instead of a simulated one.
+// Reflects ANY currently-running cycle, whether it was triggered by the
+// Cron Trigger or by this or another admin session's "Run Check Now" -
+// the panel doesn't need to have personally started the run to see it.
+async function handleDebugLiveCheckProgress(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_PROGRESS_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { running: false };
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
@@ -1588,6 +1668,9 @@ export default {
     }
     if (url.pathname === '/api/debug/live-check-status' && request.method === 'GET') {
       return handleDebugLiveCheckStatus(request, env);
+    }
+    if (url.pathname === '/api/debug/live-check-progress' && request.method === 'GET') {
+      return handleDebugLiveCheckProgress(request, env);
     }
     if (url.pathname === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env);
