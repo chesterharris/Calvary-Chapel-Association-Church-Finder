@@ -570,6 +570,141 @@
     overflow-y: auto;
     padding: 12px 16px;
   }
+  #radioBrowsePanel {
+    width: 420px;
+  }
+  .radio-browse-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .radio-browse-search {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .radio-browse-fav-count {
+    font-size: 11.5px;
+    color: var(--brass);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .radio-browse-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 16px;
+  }
+  .radio-browse-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .radio-browse-row:hover { background: rgba(0,0,0,0.03); }
+  .radio-browse-row-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .radio-browse-row-name {
+    font-weight: 700;
+    color: var(--evergreen);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .radio-browse-row-nowplaying {
+    font-size: 11.5px;
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .radio-browse-star {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--line);
+  }
+  .radio-browse-star.favorited { color: var(--brass); }
+  .radio-browse-star svg { width: 20px; height: 20px; }
+  .radio-browse-starter-row {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .radio-browse-starter-link {
+    font-size: 12px;
+    color: var(--brass);
+    text-decoration: none;
+  }
+  .radio-browse-starter-link:hover { text-decoration: underline; }
+  .radio-browse-starter-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(193,86,47,0.06);
+    font-size: 12.5px;
+  }
+  .radio-browse-starter-confirm-btns {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn.btn-small {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .radio-browse-starter-cancel {
+    background: none;
+    border: none;
+    color: var(--ink);
+    opacity: 0.6;
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .radio-browse-starter-msg {
+    padding: 8px 16px;
+    font-size: 12.5px;
+    color: #3c763d;
+    background: #dff0d8;
+    border-bottom: 1px solid var(--line);
+  }
+  .radio-browse-empty {
+    padding: 20px 4px;
+    opacity: 0.6;
+    font-size: 13px;
+  }
+  /* Ticker empty-favorites CTA - deliberately styled like the other real
+     CTAs (the Conference ticker's "more info" link) rather than looking
+     like an error or dead space, since this is the primary discovery path
+     for the favoriting feature. */
+  .radio-ticker-empty-cta {
+    color: #f2c76e;
+    text-decoration: none;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .radio-ticker-empty-cta:hover { text-decoration: underline; }
+  .radio-ticker-empty-cta svg { width: 15px; height: 15px; }
   #liveDebugPanel {
     width: 520px;
   }
@@ -964,6 +1099,14 @@
   .ticker-track-wrap:hover .ticker-track {
     animation-play-state: paused;
   }
+  /* Used only when the radio ticker has nothing to scroll (zero favorites) -
+     the CTA prompt should sit still and be clickable, not try to marquee
+     through a single short line of text. */
+  #radioTicker.radio-ticker-static .ticker-track {
+    animation: none;
+    padding-left: 16px;
+    transform: none;
+  }
   @keyframes ticker-scroll {
     from { transform: translateX(0); }
     to { transform: translateX(-50%); }
@@ -1134,6 +1277,7 @@
       <button id="btnLiveNow" class="btn btn-live" style="display:none;">🔴 <span id="liveNowCount">0</span> churches live now</button>
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
+      <button id="btnRadioBrowse" class="btn btn-outline">📻 All Stations</button>
       <button id="btnFeedback" class="btn btn-outline">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
       <span id="adminArea" class="admin-area">
@@ -1327,6 +1471,30 @@
     <button id="closeLiveNowBtn" class="btn-close">×</button>
   </div>
   <div id="liveNowList" class="live-now-list"></div>
+</div>
+
+<div id="radioBrowsePanel" class="side-panel" style="display: none;">
+  <div class="side-panel-header">
+    <h2>📻 All Radio Stations</h2>
+    <button id="closeRadioBrowseBtn" class="btn-close">×</button>
+  </div>
+  <div class="radio-browse-toolbar">
+    <input type="text" id="radioBrowseSearch" class="radio-browse-search" placeholder="Search stations...">
+    <span id="radioBrowseFavCount" class="radio-browse-fav-count"></span>
+  </div>
+  <div class="radio-browse-starter-row">
+    <a href="#" id="radioBrowseStarterLink" class="radio-browse-starter-link">Not sure which to pick? Add a starter selection you can change later.</a>
+  </div>
+  <div id="radioBrowseStarterConfirm" class="radio-browse-starter-confirm" style="display:none;">
+    <span>You already have favorites - what would you like to do?</span>
+    <div class="radio-browse-starter-confirm-btns">
+      <button type="button" id="radioBrowseStarterMerge" class="btn btn-outline btn-small">Add to my list</button>
+      <button type="button" id="radioBrowseStarterReplace" class="btn btn-ember btn-small">Replace my list</button>
+      <button type="button" id="radioBrowseStarterCancel" class="radio-browse-starter-cancel">Cancel</button>
+    </div>
+  </div>
+  <div id="radioBrowseStarterMsg" class="radio-browse-starter-msg" style="display:none;"></div>
+  <div id="radioBrowseList" class="radio-browse-list"></div>
 </div>
 
 <div id="liveDebugPanel" class="side-panel" style="display: none;">
@@ -2564,14 +2732,67 @@
   // (the Conference ticker keeps its plain bullet). currentColor picks up
   // the gold set via .radio-ticker-sep (same #f2c76e as the Conference
   // ticker's "more info" link), so it stays theme-consistent without
-  // hardcoding a hex value here.
-  const RADIO_TICKER_SEP = '<span class="radio-ticker-sep" aria-hidden="true">' +
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  // hardcoding a hex value here. Split into a bare icon constant plus the
+  // separator wrapper so the same icon can be reused standalone in the
+  // empty-favorites CTA below.
+  const RADIO_TICKER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M5.5 8.5a6.5 6.5 0 0 1 13 0"/>' +
     '<path d="M8 8.5a4 4 0 0 1 8 0"/>' +
     '<circle cx="12" cy="8.5" r="1.4" fill="currentColor" stroke="none"/>' +
     '<line x1="12" y1="9.8" x2="12" y2="20"/>' +
-    '</svg></span>';
+    '</svg>';
+  const RADIO_TICKER_SEP = '<span class="radio-ticker-sep" aria-hidden="true">' + RADIO_TICKER_ICON_SVG + '</span>';
+
+  // Favorites live entirely client-side (no visitor accounts exist) - a
+  // plain array of displayNames in localStorage. Wrapped in try/catch
+  // since some browsers/private-browsing modes can throw on storage
+  // access; failing gracefully to "no favorites persisted" beats breaking
+  // the ticker entirely over a nice-to-have preference.
+  const RADIO_FAVORITES_STORAGE_KEY = 'ccaFinderRadioFavorites';
+
+  function getFavoriteStationNames() {
+    try {
+      const raw = localStorage.getItem(RADIO_FAVORITES_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function setFavoriteStationNames(names) {
+    try {
+      localStorage.setItem(RADIO_FAVORITES_STORAGE_KEY, JSON.stringify(names));
+    } catch (err) {
+      // Ignore - favoriting just won't persist this session.
+    }
+  }
+
+  function isStationFavorited(displayName) {
+    return getFavoriteStationNames().indexOf(displayName) !== -1;
+  }
+
+  // Returns the updated favorites array so callers can react immediately
+  // (e.g. re-render the ticker) without a second storage read.
+  function toggleStationFavorite(displayName) {
+    const current = getFavoriteStationNames();
+    const idx = current.indexOf(displayName);
+    if (idx === -1) {
+      current.push(displayName);
+    } else {
+      current.splice(idx, 1);
+    }
+    setFavoriteStationNames(current);
+    return current;
+  }
+
+  function filterToFavoriteStations(stations) {
+    const favorites = getFavoriteStationNames();
+    if (!favorites.length) return [];
+    const favSet = {};
+    favorites.forEach(function(n) { favSet[n] = true; });
+    return stations.filter(function(s) { return favSet[s.displayName]; });
+  }
 
   // No artist (e.g. a teaching program rather than a song) -> title alone,
   // no dangling separator. No now-playing data at all (station feed down) ->
@@ -2626,7 +2847,29 @@
   }
 
   function applyRadioTickerContent(stations) {
-    const visibleStations = filterDuplicateSisterStations(stations);
+    const favorited = filterToFavoriteStations(stations);
+
+    if (!favorited.length) {
+      // Nobody's favorited a station yet (or just unfavorited their last
+      // one) - this doubles as the primary discovery path for the
+      // favoriting feature, so it needs to read as an inviting prompt,
+      // not empty/broken space. Static, not scrolling - there's nothing
+      // to marquee through.
+      radioTickerBar.classList.add('radio-ticker-static');
+      radioTickerTrack.innerHTML = '<span class="radio-ticker-empty-cta" id="radioTickerEmptyCta" role="button" tabindex="0">' +
+        RADIO_TICKER_ICON_SVG + 'Pick your favorite stations →</span>';
+      const cta = document.getElementById('radioTickerEmptyCta');
+      if (cta) {
+        cta.addEventListener('click', openRadioBrowsePanel);
+        cta.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRadioBrowsePanel(); }
+        });
+      }
+      return;
+    }
+    radioTickerBar.classList.remove('radio-ticker-static');
+
+    const visibleStations = filterDuplicateSisterStations(favorited);
     const offset = visibleStations.length ? radioRotationOffset % visibleStations.length : 0;
     const rotated = visibleStations.slice(offset).concat(visibleStations.slice(0, offset));
     radioRotationOffset++;
@@ -2635,7 +2878,8 @@
       // data-station-index refers to the position in the FULL (unfiltered,
       // unrotated) list - that's what radioStations below is indexed by,
       // so click-to-play keeps working correctly regardless of visual
-      // rotation OR the sister-station dedup filter above.
+      // rotation, the favorites filter, or the sister-station dedup
+      // filter above.
       const originalIndex = stations.indexOf(s);
       const label = escapeHtml(s.displayName) + ' - ' + escapeHtml(formatNowPlaying(s));
       return '<span class="ticker-item radio-item" data-station-index="' + originalIndex + '" role="button" tabindex="0">' + label + '</span>';
@@ -2671,6 +2915,14 @@
         return s.displayName === currentPlayingDisplayName;
       });
       if (stillPlaying) updateMiniPlayerNowPlaying(stillPlaying);
+    }
+
+    // Same idea for the browse panel, if it's currently open - its
+    // now-playing text per station should stay live too, not just update
+    // the next time someone happens to reopen it.
+    const radioBrowsePanelEl = document.getElementById('radioBrowsePanel');
+    if (radioBrowsePanelEl && radioBrowsePanelEl.style.display !== 'none') {
+      renderRadioBrowsePanel();
     }
 
     if (!stations || !stations.length) {
@@ -2797,6 +3049,213 @@
     updateMiniPlayerNowPlaying(station);
     radioPlayerBar.style.display = 'flex';
   }
+
+  // ---- Radio "browse all stations" panel (favoriting) ----
+  //
+  // With the station list scaling well past what a single continuous
+  // ticker line can practically show, the ticker itself now only displays
+  // whichever stations the visitor has personally favorited (see
+  // filterToFavoriteStations above) - this panel is where they discover
+  // and manage that list. Favorites persist client-side only (localStorage),
+  // so this needs zero backend involvement.
+  let radioBrowseSearchQuery = '';
+
+  // TODO: fill in with the actual hand-picked displayNames once decided -
+  // must match RADIO_STATIONS entries in src/index.js exactly (case and
+  // punctuation matter, since favorites are matched by displayName).
+  const RADIO_STARTER_PACK_NAMES = [
+    'Calvary Radio (Vero Beach)',
+    'The Truth (TN)',
+    'Radio by Grace (TX)',
+    'Renew FM (MA)',
+    'KSGR (TX)',
+    'WIAM (TN)',
+    'TrueFM (KS)',
+    'KLHT FM (HI)',
+    'Real Hope Radio 90.9 FM (ID)',
+    'Truth FM (MD)',
+    'DOVE FM (PA)',
+    'EQUIP FM (VA)'
+  ];
+
+  // Computed once when the panel OPENS, then held fixed for the rest of
+  // that viewing session - deliberately not recomputed on every star
+  // toggle or starter-pack action, even though those change who's
+  // favorited. Reshuffling the whole list under someone's cursor while
+  // they're still deciding which stations to pick is more disruptive than
+  // useful; the reward (seeing your picks grouped together) shows up the
+  // NEXT time the panel is opened instead.
+  let radioBrowseFrozenOrder = null;
+
+  function computeRadioBrowseOrder() {
+    const favorites = getFavoriteStationNames();
+    const favSet = {};
+    favorites.forEach(function(n) { favSet[n] = true; });
+    const byNameAlpha = function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); };
+    const favNames = radioStations.filter(function(s) { return favSet[s.displayName]; })
+      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
+    const otherNames = radioStations.filter(function(s) { return !favSet[s.displayName]; })
+      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
+    return favNames.concat(otherNames);
+  }
+
+  // Applies the frozen order to whatever the current radioStations list
+  // is, appending anything not present in that frozen order (e.g. new
+  // now-playing data that arrived after the panel opened, or a station
+  // added to RADIO_STATIONS mid-session) at the end alphabetically -
+  // keeps everything visible even for edge cases, rather than silently
+  // dropping a station that wasn't part of the original snapshot.
+  function getOrderedRadioStations() {
+    if (!radioBrowseFrozenOrder) return radioStations.slice();
+    const byName = {};
+    radioStations.forEach(function(s) { byName[s.displayName] = s; });
+    const ordered = radioBrowseFrozenOrder.map(function(name) { return byName[name]; }).filter(Boolean);
+    const seen = {};
+    ordered.forEach(function(s) { seen[s.displayName] = true; });
+    const extras = radioStations.filter(function(s) { return !seen[s.displayName]; })
+      .sort(function(a, b) { return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()); });
+    return ordered.concat(extras);
+  }
+
+  function buildFavoriteStarSvg(isFav) {
+    return '<svg viewBox="0 0 24 24" fill="' + (isFav ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>' +
+      '</svg>';
+  }
+
+  // Rebuilds the header ticker immediately after a favorites change.
+  // Deliberately bypasses renderRadioTicker's normal signature-check/
+  // deferred-swap logic entirely - that logic exists to protect an
+  // in-progress scroll from being jarringly interrupted by a passive
+  // background poll, but toggling a favorite is a deliberate action the
+  // person is actively looking at right now, so instant feedback is what
+  // teaches them the mechanic (star it -> see it show up immediately).
+  function refreshRadioTickerForFavoritesChange() {
+    if (radioStations && radioStations.length) {
+      applyRadioTickerContent(radioStations);
+    }
+  }
+
+  function showRadioBrowseStarterMsg(text) {
+    const el = document.getElementById('radioBrowseStarterMsg');
+    el.textContent = text;
+    el.style.display = 'block';
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(function() { el.style.display = 'none'; }, 4000);
+  }
+
+  // mode is 'merge' (add starter picks on top of existing favorites) or
+  // 'replace' (starter picks become the entire list). Order is frozen for
+  // this session already (see radioBrowseFrozenOrder) - a starter-pack
+  // action changes WHICH rows are starred, never re-sorts the list the
+  // person is currently looking at.
+  function applyStarterPack(mode) {
+    document.getElementById('radioBrowseStarterConfirm').style.display = 'none';
+    let updated;
+    if (mode === 'merge') {
+      const current = getFavoriteStationNames();
+      const set = {};
+      current.forEach(function(n) { set[n] = true; });
+      RADIO_STARTER_PACK_NAMES.forEach(function(n) { set[n] = true; });
+      updated = Object.keys(set);
+    } else {
+      updated = RADIO_STARTER_PACK_NAMES.slice();
+    }
+    setFavoriteStationNames(updated);
+    renderRadioBrowsePanel();
+    refreshRadioTickerForFavoritesChange();
+    showRadioBrowseStarterMsg(mode === 'merge' ? 'Added the starter stations to your list.' : 'Replaced your list with the starter selection.');
+  }
+
+  function renderRadioBrowsePanel() {
+    const listEl = document.getElementById('radioBrowseList');
+    const favCountEl = document.getElementById('radioBrowseFavCount');
+    if (!radioStations || !radioStations.length) {
+      listEl.innerHTML = '<div class="radio-browse-empty">Loading stations...</div>';
+      favCountEl.textContent = '';
+      return;
+    }
+
+    const favorites = getFavoriteStationNames();
+    favCountEl.textContent = favorites.length ? ('\u2605 ' + favorites.length + ' in your ticker') : '';
+
+    const ordered = getOrderedRadioStations();
+    const query = radioBrowseSearchQuery.trim().toLowerCase();
+    const filtered = query
+      ? ordered.filter(function(s) { return s.displayName.toLowerCase().indexOf(query) !== -1; })
+      : ordered;
+
+    if (!filtered.length) {
+      listEl.innerHTML = '<div class="radio-browse-empty">No stations match "' + escapeHtml(radioBrowseSearchQuery) + '".</div>';
+      return;
+    }
+
+    listEl.innerHTML = filtered.map(function(s) {
+      const isFav = favorites.indexOf(s.displayName) !== -1;
+      return '<div class="radio-browse-row" data-station-name="' + escapeHtml(s.displayName) + '">' +
+        '<div class="radio-browse-row-info">' +
+          '<div class="radio-browse-row-name">' + escapeHtml(s.displayName) + '</div>' +
+          '<div class="radio-browse-row-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
+        '</div>' +
+        '<button type="button" class="radio-browse-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
+          buildFavoriteStarSvg(isFav) +
+        '</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function openRadioBrowsePanel() {
+    document.getElementById('radioBrowsePanel').style.display = 'flex';
+    document.getElementById('radioBrowseStarterConfirm').style.display = 'none';
+    document.getElementById('radioBrowseStarterMsg').style.display = 'none';
+    // Freeze the display order for this viewing session - see
+    // radioBrowseFrozenOrder's comment above for why this only happens
+    // here, not on every re-render while the panel stays open.
+    radioBrowseFrozenOrder = computeRadioBrowseOrder();
+    renderRadioBrowsePanel();
+  }
+
+  document.getElementById('btnRadioBrowse').addEventListener('click', openRadioBrowsePanel);
+  document.getElementById('closeRadioBrowseBtn').addEventListener('click', function() {
+    document.getElementById('radioBrowsePanel').style.display = 'none';
+  });
+  document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
+    radioBrowseSearchQuery = e.target.value;
+    renderRadioBrowsePanel();
+  });
+  document.getElementById('radioBrowseList').addEventListener('click', function(e) {
+    const starBtn = e.target.closest('.radio-browse-star');
+    if (starBtn) {
+      // Star button click: toggle favorite only, don't also start playback
+      // (the row itself is a separate, larger click target for that).
+      toggleStationFavorite(starBtn.getAttribute('data-fav-name'));
+      renderRadioBrowsePanel();
+      refreshRadioTickerForFavoritesChange();
+      return;
+    }
+    const row = e.target.closest('.radio-browse-row');
+    if (row) {
+      const station = radioStations.find(function(s) { return s.displayName === row.getAttribute('data-station-name'); });
+      if (station) playStation(station);
+    }
+  });
+
+  document.getElementById('radioBrowseStarterLink').addEventListener('click', function(e) {
+    e.preventDefault();
+    // No ambiguity to resolve if they have nothing to lose - apply
+    // immediately rather than asking a question with only one sensible
+    // answer.
+    if (!getFavoriteStationNames().length) {
+      applyStarterPack('replace');
+    } else {
+      document.getElementById('radioBrowseStarterConfirm').style.display = 'flex';
+    }
+  });
+  document.getElementById('radioBrowseStarterMerge').addEventListener('click', function() { applyStarterPack('merge'); });
+  document.getElementById('radioBrowseStarterReplace').addEventListener('click', function() { applyStarterPack('replace'); });
+  document.getElementById('radioBrowseStarterCancel').addEventListener('click', function() {
+    document.getElementById('radioBrowseStarterConfirm').style.display = 'none';
+  });
 
   function handleRadioTickerActivate(e) {
     const item = e.target.closest('.radio-item');

@@ -1181,21 +1181,21 @@ const RADIO_STATIONS = [
     streamUrl: 'https://lunar.citrus3.com:8034/stream'
   },
   {
-    displayName: 'EQUIP FM',
+    displayName: 'EQUIP FM (VA)',
     provider: 'securenetsystems',
     subdomain: 'streamdb9web.securenetsystems.net',
     callSign: 'EQUIPFM',
     streamUrl: 'https://ice66.securenetsystems.net/EQUIPFM'
   },
   {
-    displayName: 'WIAM',
+    displayName: 'WIAM (TN)',
     provider: 'securenetsystems',
     subdomain: 'streamdb3web.securenetsystems.net',
     callSign: 'WIAM',
     streamUrl: 'https://ice42.securenetsystems.net/WIAM'
   },
   {
-    displayName: 'DOVE FM',
+    displayName: 'DOVE FM (PA)',
     provider: 'securenetsystems',
     subdomain: 'streamdb7web.securenetsystems.net',
     callSign: 'DOVEMAIN',
