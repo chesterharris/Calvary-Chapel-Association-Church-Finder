@@ -1336,6 +1336,14 @@ const RADIO_STATIONS = [
     host: 'streaming.live365.com',
     stationId: 'a10665',
     streamUrl: 'https://streaming.live365.com/a10665'
+  },
+  {
+    displayName: 'WLEB',
+    cityState: 'Lebanon, PA',
+    homePage: 'https://truthmedianetwork.org/',
+    provider: 'shoutcast',
+    host: 'broadcast.shoutcheap.com/proxy/wleblpt1',
+    streamUrl: 'https://broadcast.shoutcheap.com/proxy/wleblpt1/stream'
   }
 ];
 
@@ -1620,6 +1628,39 @@ function parseLive365HlsPlaylist(m3u8Text) {
   };
 }
 
+// Extracts now-playing info from a Shoutcast v2 server's native status
+// endpoint. Distinct from `icecast` above - Shoutcast and Icecast are
+// different streaming server software with different native formats, even
+// though shared hosts like shoutcheap.com can host either kind. Confirmed
+// via a real response that some shoutcheap.com proxies serve the audio
+// stream itself (not JSON) at the Icecast-style `status-json.xsl` path -
+// worth checking whether a "shoutcheap.com" station is actually Icecast or
+// Shoutcast under the hood before assuming which provider applies.
+//
+// Response shape (confirmed via a real response):
+//   { "songtitle": "Chris Falson - I See the Lord", "servertitle": "...", ... }
+// `songtitle` follows the same "Artist - Track" convention as Icecast, so
+// the split logic is identical.
+function parseShoutcastJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Shoutcast JSON response');
+  }
+
+  const combined = typeof data.songtitle === 'string' ? data.songtitle.trim() : '';
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+  return {
+    artist: combined.slice(0, sepIndex).trim(),
+    title: combined.slice(sepIndex + 3).trim(),
+    coverUrl: null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1679,6 +1720,12 @@ const RADIO_PROVIDERS = {
       return station.streamUrl + '/metadata';
     },
     parse: parseRadioMastSse
+  },
+  shoutcast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/stats?json=1';
+    },
+    parse: parseShoutcastJson
   }
 };
 
