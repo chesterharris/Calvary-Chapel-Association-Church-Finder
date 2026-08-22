@@ -847,7 +847,14 @@ async function checkAllChurchesLive(env) {
       const churchCheckStartedAt = Date.now();
       const status = await checkChurchLive(c.youtubeUrl);
       const churchCheckMs = Date.now() - churchCheckStartedAt;
-      results.push(Object.assign({ churchId: c.id, name: c.name }, status));
+      // channelUrl is the fallback the frontend links to when videoId is
+      // null (confirmed in production: YouTube can serve a stripped page
+      // to our datacenter-IP requests that has the isLive:true signal but
+      // omits videoId/title/everything else). A generic "go watch on their
+      // channel" link is far better than a dead, unclickable card - the
+      // visitor can still reach the actual stream even when WE can't
+      // extract the specific video.
+      results.push(Object.assign({ churchId: c.id, name: c.name, channelUrl: buildLiveCheckUrl(c.youtubeUrl) }, status));
       debugResults.push({ churchId: c.id, name: c.name, isLive: status.isLive, status: status.status || null, startDate: status.startDate || null, checkMs: churchCheckMs, error: null });
     } catch (err) {
       // Both the original fetch and the retry failed - fall back to the

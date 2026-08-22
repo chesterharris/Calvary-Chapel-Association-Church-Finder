@@ -1628,11 +1628,16 @@
         ? '<img class="live-now-thumb" src="' + escapeHtml(buildThumbnailUrl(l.videoId)) + '" alt="" loading="lazy" ' +
           'onerror="this.onerror=null;this.removeAttribute(\'src\');this.classList.add(\'live-now-thumb-fallback\')">'
         : '<div class="live-now-thumb live-now-thumb-fallback"></div>';
-      return '<div class="live-now-card" data-church-id="' + escapeHtml(l.churchId) + '" data-video-id="' + escapeHtml(l.videoId || '') + '">' +
+      // Confirmed in production: YouTube can serve our (datacenter-IP)
+      // requests a stripped page that still signals isLive:true but omits
+      // videoId/title/everything else - rather than a blank, dead-looking
+      // card in that case, say plainly that it's live and clickable.
+      const titleText = l.title || (l.videoId ? '' : 'Live now - tap to watch on YouTube');
+      return '<div class="live-now-card" data-church-id="' + escapeHtml(l.churchId) + '" data-video-id="' + escapeHtml(l.videoId || '') + '" data-channel-url="' + escapeHtml(l.channelUrl || '') + '">' +
         thumbHtml +
         '<div class="live-now-info">' +
           '<div class="live-now-channel">' + escapeHtml(l.author || l.name || '') + '</div>' +
-          '<div class="live-now-title">' + escapeHtml(l.title || '') + '</div>' +
+          '<div class="live-now-title">' + escapeHtml(titleText) + '</div>' +
           '<div class="live-now-desc">' + escapeHtml(truncateText(l.description, 120)) + '</div>' +
           '<div class="live-now-meta">' +
             '<span class="duration" data-start="' + escapeHtml(l.startDate || '') + '">' + escapeHtml(durationText) + '</span>' +
@@ -2024,6 +2029,7 @@
     if (!card) return;
     const churchId = Number(card.getAttribute('data-church-id'));
     const videoId = card.getAttribute('data-video-id');
+    const channelUrl = card.getAttribute('data-channel-url');
     const c = findChurchById(churchId);
     if (c) {
       document.getElementById('liveNowPanel').style.display = 'none';
@@ -2033,6 +2039,13 @@
     }
     if (videoId) {
       window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId), '_blank', 'noopener');
+    } else if (channelUrl) {
+      // We know they're live but couldn't extract which specific video -
+      // confirmed in production this can happen when YouTube serves a
+      // stripped page to our server-side request. A generic link to their
+      // channel's own /live page still gets the visitor to the actual
+      // stream, rather than the click silently doing nothing.
+      window.open(channelUrl, '_blank', 'noopener');
     }
   });
 
