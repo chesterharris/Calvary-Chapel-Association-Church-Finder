@@ -2170,11 +2170,25 @@
     zoomControl: true
   }).setView([39.5, -98.35], 4);
 
-  L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png', {
+  const baseLayerLight = L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     maxZoom: 19,
     subdomains: 'abcd'
   }).addTo(map);
+
+  // Esri's tile scheme uses {z}/{y}/{x} order (note: reversed x/y from most
+  // other providers, including the CARTO layer above) - a well-known quirk
+  // of ArcGIS REST tile services specifically, easy to get backwards if
+  // ever copy-pasting this URL pattern elsewhere.
+  const baseLayerStreets = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012',
+    maxZoom: 19
+  });
+
+  L.control.layers({
+    'Light': baseLayerLight,
+    'Streets': baseLayerStreets
+  }, null, { position: 'topright' }).addTo(map);
 
   const markers = L.markerClusterGroup({
     iconCreateFunction: function(cluster) {
