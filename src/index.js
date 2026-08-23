@@ -1918,7 +1918,18 @@ const AIIR_WS_TIMEOUT_MS = 5000;
 // may not be present. If song data ends up looking wrong once a music
 // block airs, revisit this function first.
 async function fetchAiirNowPlaying(station) {
-  const res = await fetch(station.wsUrl, {
+  // Cloudflare Workers' fetch()-based WebSocket upgrade (the pattern this
+  // function uses, since it needs res.webSocket + accept()) requires an
+  // http:/https: URL scheme, even though the connection ends up being a
+  // WebSocket - wss:/ws: is only valid with the separate `new WebSocket(url)`
+  // constructor, NOT with fetch(). Confirmed in production: passing the
+  // literal wss:// URL straight to fetch() throws "Fetch API cannot load:
+  // wss://...". station.wsUrl is kept as the real wss:// URL in the config
+  // (that's what it actually is, and what you'd see in DevTools), and
+  // rewritten to https:// right here, only for the fetch() call itself.
+  const httpUrl = station.wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+
+  const res = await fetch(httpUrl, {
     headers: {
       Upgrade: 'websocket',
       Connection: 'Upgrade'
