@@ -2276,6 +2276,10 @@
     });
   }
 
+  function findLiveEntryForChurch(churchId) {
+    return liveStatusData.live.find(function(l) { return l.churchId === churchId; });
+  }
+
   function buildPopupHtml(c) {
     let popup = '<div class="popup-name">' + escapeHtml(c.name) + '</div>';
 
@@ -2311,7 +2315,28 @@
     if (c.youtubeUrl) {
       let ytUrl = c.youtubeUrl.trim();
       if (ytUrl && !/^https?:\/\//i.test(ytUrl)) ytUrl = 'https://' + ytUrl;
-      popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">Watch on YouTube</a></div>';
+      let ytLabel = 'Watch on YouTube';
+      // Same videoId-first, channelUrl-fallback pattern already used by
+      // the Live Now panel's own click handler (see the liveNowList click
+      // listener above) - a single click should land on the actual live
+      // broadcast, not just the channel's front page, whenever we know
+      // specifically which video that is.
+      if (liveChurchIds.has(c.id)) {
+        const liveEntry = findLiveEntryForChurch(c.id);
+        if (liveEntry && liveEntry.videoId) {
+          ytUrl = 'https://www.youtube.com/watch?v=' + encodeURIComponent(liveEntry.videoId);
+          ytLabel = 'Watch live on YouTube';
+        } else if (liveEntry && liveEntry.channelUrl) {
+          // Known live, but couldn't extract a specific videoId (e.g. a
+          // stripped page from YouTube on our server-side check) - a
+          // generic /live-style channel link still gets them to the
+          // actual broadcast, just without skipping straight to the exact
+          // video.
+          ytUrl = liveEntry.channelUrl;
+          ytLabel = 'Watch live on YouTube';
+        }
+      }
+      popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
     }
     if (window.isAdmin) {
       popup += '<div class="popup-admin-actions">' +
