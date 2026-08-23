@@ -1463,6 +1463,15 @@ const RADIO_STATIONS = [
     provider: 'futuri',
     mount: '7087_24k',
     streamUrl: 'https://ais-sa1.streamon.fm/7087_24k.aac'
+  },
+  {
+    displayName: 'KVNG',
+    cityState: 'Casa Grande, AZ',
+    homePage: 'https://grace911.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb8web.securenetsystems.net',
+    callSign: 'KVNG',
+    streamUrl: 'https://ice8.securenetsystems.net/KVNG'
   }
 ];
 
