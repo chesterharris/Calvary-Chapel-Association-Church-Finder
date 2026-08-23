@@ -1219,6 +1219,15 @@ const RADIO_CACHE_VERSION = 1;
 //                 unreachable (e.g. bot-blocked). Now-playing has no
 //                 separate title/artist fields - see parseElasticPlayerJson
 //                 for why the whole "meta" string is kept as title as-is.
+//
+//   streamingrad.io stations also need:
+//   idPlayer    - numeric player ID on streamingrad.io (e.g. "9"), found
+//                 in the station's own embedded player page source as
+//                 id_player= in the MRP.insert(...) config and the
+//                 live.php?action=metadata&id_player= calls it makes.
+//                 Now-playing IS a single clean object (not an array like
+//                 ElasticPlayer) with separate title/artist fields already
+//                 split out - see parseStreamingRadIoJson.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1472,6 +1481,14 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb8web.securenetsystems.net',
     callSign: 'KVNG',
     streamUrl: 'https://ice8.securenetsystems.net/KVNG'
+  },
+  {
+    displayName: 'KFLK',
+    cityState: 'Minot, ND',
+    homePage: 'https://calvarychapelminot.org/kflk-home',
+    provider: 'streamingradio',
+    idPlayer: '9',
+    streamUrl: 'https://server02.streamingrad.io:8443/listen/kflk_the_flock_95.9_fm/radio'
   }
 ];
 
@@ -1847,6 +1864,34 @@ function parseElasticPlayerJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from streamingrad.io's metadata endpoint
+// (https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player={id}).
+// Confirmed response shape - a single object (not an array, unlike
+// ElasticPlayer), with title/artist as separate fields already:
+//   {"state":"1","metadata":{"title":"GREEDY","artist":"","imageDefault":
+//    "img.php?...","image":"https://is1-ssl.mzstatic.com/...400x400bb.jpg",
+//    "trackViewUrl":"https://music.apple.com/..."}}
+// artist was empty in the one response seen so far - kept as-is rather
+// than assumed broken, same principle as other providers with
+// talk/instrumental content that legitimately has no artist.
+function parseStreamingRadIoJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid streamingrad.io JSON response');
+  }
+
+  const meta = data && data.metadata;
+  const rawCover = meta && typeof meta.image === 'string' ? meta.image.trim() : '';
+
+  return {
+    title: meta && typeof meta.title === 'string' ? meta.title.trim() : '',
+    artist: meta && typeof meta.artist === 'string' ? meta.artist.trim() : '',
+    coverUrl: rawCover || null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1937,6 +1982,12 @@ const RADIO_PROVIDERS = {
       return 'https://www.elasticplayer.xyz/api/v1/radio/' + station.radioId + '/history?ts=' + Date.now();
     },
     parse: parseElasticPlayerJson
+  },
+  streamingradio: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player=' + station.idPlayer;
+    },
+    parse: parseStreamingRadIoJson
   }
 };
 
