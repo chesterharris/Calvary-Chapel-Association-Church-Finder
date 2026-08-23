@@ -1207,6 +1207,18 @@ const RADIO_CACHE_VERSION = 1;
 //                 while the player page was open. See fetchAiirNowPlaying
 //                 for the full mechanism (subscribe over WebSocket, take
 //                 the first real payload, close - not a polled HTTP URL).
+//
+//   ElasticPlayer stations also need:
+//   radioId     - numeric station ID on elasticplayer.xyz (e.g. "300").
+//                 The SAME id works for both the metadata endpoint
+//                 (.../api/v1/radio/{id}/history) and a plain station-info
+//                 endpoint (.../api/v1/radio/{id}, no "/history") that
+//                 conveniently also returns stream_url, title, and other
+//                 station config in one shot - handy for finding the
+//                 audio stream when the station's own site is otherwise
+//                 unreachable (e.g. bot-blocked). Now-playing has no
+//                 separate title/artist fields - see parseElasticPlayerJson
+//                 for why the whole "meta" string is kept as title as-is.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1427,6 +1439,14 @@ const RADIO_STATIONS = [
     wsUrl: 'wss://metadata.aiir.net/now-playing',
     serviceId: '3628',
     streamUrl: 'https://stream.aiir.com/tmpilbymbrwtv'
+  },
+  {
+    displayName: 'The Voice',
+    cityState: 'Lima, OH',
+    homePage: 'https://wttpfm.com/',
+    provider: 'elasticplayer',
+    radioId: '300',
+    streamUrl: 'https://www.ophanim.net:8444/s/8730'
   }
 ];
 
@@ -1771,6 +1791,37 @@ function parseShoutcastJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from ElasticPlayer's "history" endpoint
+// (https://www.elasticplayer.xyz/api/v1/radio/{id}/history). Returns an
+// array, most-recent-first (by created_at) - index 0 is the current/last
+// item. Unlike Icecast/Shoutcast, there's no separate title/artist -
+// everything is a single freeform "meta" string, and its internal format
+// is inconsistent (some entries look like "Speaker - Series - Episode",
+// others like "260505 THE WATCHMAN CALL - THE TIMELINE OF END TIMES -
+// PART 5 -" where the leading segment is a program/date code, not a
+// person's name). Splitting on " - " would mislabel those as an artist,
+// so - same principle as other inconsistent talk-station formats
+// elsewhere in this file - the whole string is kept as the title with no
+// artist, rather than guessing wrong.
+function parseElasticPlayerJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid ElasticPlayer JSON response');
+  }
+
+  const latest = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  const rawMeta = latest && typeof latest.meta === 'string' ? latest.meta.trim() : '';
+  const rawCover = latest && typeof latest.image_url === 'string' ? latest.image_url.trim() : '';
+
+  return {
+    title: rawMeta,
+    artist: '',
+    coverUrl: rawCover || null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1855,6 +1906,12 @@ const RADIO_PROVIDERS = {
     // Needs fetchAndParse (see live365hls above for the general pattern)
     // since this is nothing like a single buildNowPlayingUrl+parse fetch.
     fetchAndParse: fetchAiirNowPlaying
+  },
+  elasticplayer: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://www.elasticplayer.xyz/api/v1/radio/' + station.radioId + '/history?ts=' + Date.now();
+    },
+    parse: parseElasticPlayerJson
   }
 };
 
