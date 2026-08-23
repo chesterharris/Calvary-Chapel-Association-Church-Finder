@@ -678,8 +678,14 @@ async function checkChurchLive(youtubeUrl) {
   const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
 
   const videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
-  const title = titleMetaMatch ? titleMetaMatch[1] : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : null);
-  const description = descriptionMetaMatch ? descriptionMetaMatch[1] : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
+  // The og: meta tags are raw HTML attribute content, so they can contain
+  // entities like &amp; or &#39; that need decoding before display -
+  // confirmed in production (a church's description showed literal
+  // "&amp;" and "&#39;" instead of "&" and "'"). The JSON fallback path
+  // already handled this correctly via decodeJsonString; this meta-tag
+  // path just hadn't been given the same treatment.
+  const title = titleMetaMatch ? decodeEntities(titleMetaMatch[1]) : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : null);
+  const description = descriptionMetaMatch ? decodeEntities(descriptionMetaMatch[1]) : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
   const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : null);
   const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
 
