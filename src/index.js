@@ -1228,6 +1228,17 @@ const RADIO_CACHE_VERSION = 1;
 //                 Now-playing IS a single clean object (not an array like
 //                 ElasticPlayer) with separate title/artist fields already
 //                 split out - see parseStreamingRadIoJson.
+//
+//   Radio.co stations also need:
+//   stationId   - Radio.co's station ID (e.g. "s914ba6b9a"), found in the
+//                 embed config's "stream":{"station ":"..."} field (note:
+//                 that key has a trailing space in their own JS - a typo
+//                 on their end, harmless, just surprising if you go
+//                 looking for it) or directly in the streaming_url.
+//                 IMPORTANT: current_track has no separate artist field -
+//                 see parseRadioCoJson for why the whole title string is
+//                 kept as-is rather than split (mixes two inconsistent
+//                 internal formats: real songs vs. station liners/promos).
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1489,6 +1500,14 @@ const RADIO_STATIONS = [
     provider: 'streamingradio',
     idPlayer: '9',
     streamUrl: 'https://server02.streamingrad.io:8443/listen/kflk_the_flock_95.9_fm/radio'
+  },
+  {
+    displayName: 'KLYT',
+    cityState: 'Albuquerque, NM',
+    homePage: 'https://klyt.fm/',
+    provider: 'radioco',
+    stationId: 's914ba6b9a',
+    streamUrl: 'https://s5.radio.co/s914ba6b9a'
   }
 ];
 
@@ -1892,6 +1911,47 @@ function parseStreamingRadIoJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from Radio.co's official public status API
+// (https://public.radio.co/stations/{stationId}/status) - a well-
+// documented platform, unlike most other providers in this file which
+// had to be reverse-engineered.
+//
+// Confirmed response shape (real, live data - KLYT-FM):
+//   {"current_track":{"title":"The Love I Have For You  Colton Dixon",
+//    "artwork_url":"https://images.radio.co/...jpg", ...}, ...}
+//
+// IMPORTANT: current_track has NO separate artist field at all - just one
+// "title" string. Confirmed via real production data that this platform
+// mixes TWO different internal conventions within that single field,
+// inconsistently:
+//   - actual songs: "{Track Title}  {Artist}" (note: double space, not a
+//     dash like Icecast/Shoutcast's "{Artist} - {Track}" convention)
+//   - station liners/promos/vignettes: "{Description} BY {Attribution}"
+//     (sometimes with nothing after "BY" at all)
+// Since these two formats are mixed together in the same feed with no
+// reliable way to tell which is which before parsing, splitting on either
+// pattern risks mangling the other category. Per the same principle used
+// for other inconsistent-format stations elsewhere in this file, the
+// whole string is kept as-is as the title with an empty artist, rather
+// than guess wrong.
+function parseRadioCoJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Radio.co JSON response');
+  }
+
+  const track = data && data.current_track;
+  const rawCover = track && typeof track.artwork_url === 'string' ? track.artwork_url.trim() : '';
+
+  return {
+    title: track && typeof track.title === 'string' ? track.title.trim() : '',
+    artist: '',
+    coverUrl: rawCover || null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -1988,6 +2048,12 @@ const RADIO_PROVIDERS = {
       return 'https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player=' + station.idPlayer;
     },
     parse: parseStreamingRadIoJson
+  },
+  radioco: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://public.radio.co/stations/' + station.stationId + '/status';
+    },
+    parse: parseRadioCoJson
   }
 };
 
