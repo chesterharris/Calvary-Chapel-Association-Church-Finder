@@ -1388,6 +1388,14 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb7web.securenetsystems.net',
     callSign: 'WXMB',
     streamUrl: 'https://ice25.securenetsystems.net/WXMB'
+  },
+  {
+    displayName: 'WRDJ',
+    cityState: 'Merritt Island, FL',
+    homePage: 'http://www.wrdj.com',
+    provider: 'live365json',
+    mountId: 'a96507',
+    streamUrl: 'https://streaming.live365.com/a96507'
   }
 ];
 
@@ -1407,6 +1415,33 @@ function parseSecureNetSystemsXml(xml) {
     title: titleMatch ? decodeEntities(titleMatch[1]).trim() : '',
     artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : '',
     coverUrl: coverUrl || null
+  };
+}
+
+// Extracts now-playing info from Live365's public station JSON endpoint
+// (https://api.live365.com/station/{mountId}). Undocumented but stable -
+// same shape confirmed by station page inspection. Talk/spoken segments
+// report a real title with an empty artist string (e.g. "Revival_Radio"),
+// which is expected, not a failure - only treat completely missing data as
+// absent. The "art" field always points at a static Live365 placeholder
+// image (".../blankart.jpg") when no real cover exists, so that specific
+// URL is filtered out to null rather than shown as if it were real artwork.
+function parseLive365Json(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Live365 JSON response');
+  }
+
+  const track = data && data['current-track'];
+  const rawCover = track && typeof track.art === 'string' ? track.art.trim() : '';
+  const isPlaceholderArt = /blankart\.jpg$/i.test(rawCover);
+
+  return {
+    title: track && typeof track.title === 'string' ? track.title.trim() : '',
+    artist: track && typeof track.artist === 'string' ? track.artist.trim() : '',
+    coverUrl: rawCover && !isPlaceholderArt ? rawCover : null
   };
 }
 
@@ -1744,6 +1779,12 @@ const RADIO_PROVIDERS = {
       return station.npUrl;
     },
     parse: parseWpShowPlayingHtml
+  },
+  live365json: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://api.live365.com/station/' + station.mountId;
+    },
+    parse: parseLive365Json
   },
   live365hls: {
     // Deliberately named distinctly from a hypothetical future
