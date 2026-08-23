@@ -1185,6 +1185,28 @@ const RADIO_CACHE_VERSION = 1;
 //                 containing "Played earlier" / "Now playing" / "Up next"
 //                 sections, each line formatted as "{title} by {artist}".
 //                 We only care about the bolded "Now playing" line.
+//
+//   Live365 (live365json) stations also need:
+//   mountId     - Live365's mount ID, e.g. "a96507" (from the station's
+//                 streamUrl or its live365.com/station/{slug}-{mountId}
+//                 URL). Now-playing comes from a single clean fetch to
+//                 api.live365.com/station/{mountId} - see the provider
+//                 notes doc for why this is preferred over live365hls.
+//
+//   Aiir stations also need:
+//   wsUrl       - always "wss://metadata.aiir.net/now-playing" so far
+//                 (shared across all Aiir-hosted stations, not station-
+//                 specific) - kept as a per-station field rather than
+//                 hardcoded in case that ever changes.
+//   serviceId   - Aiir's numeric station ID (e.g. "3628"). Found in the
+//                 station's player.aiir.com page source as
+//                 data-station-metadata-id-value or gm.properties.service_id.
+//                 NOT discoverable via a plain HTTP fetch of any kind -
+//                 the actual data source is a WebSocket, only found by
+//                 watching the browser's own Network > Socket traffic
+//                 while the player page was open. See fetchAiirNowPlaying
+//                 for the full mechanism (subscribe over WebSocket, take
+//                 the first real payload, close - not a polled HTTP URL).
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1396,6 +1418,15 @@ const RADIO_STATIONS = [
     provider: 'live365json',
     mountId: 'a96507',
     streamUrl: 'https://streaming.live365.com/a96507'
+  },
+  {
+    displayName: 'The Bridge',
+    cityState: 'Old Bridge, NJ',
+    homePage: 'https://www.bridgeradio.org',
+    provider: 'aiir',
+    wsUrl: 'wss://metadata.aiir.net/now-playing',
+    serviceId: '3628',
+    streamUrl: 'https://stream.aiir.com/tmpilbymbrwtv'
   }
 ];
 
@@ -1811,6 +1842,19 @@ const RADIO_PROVIDERS = {
       return 'https://' + station.host + '/stats?json=1';
     },
     parse: parseShoutcastJson
+  },
+  aiir: {
+    // Aiir's now-playing data isn't served over plain HTTP at all - the
+    // player's own JS subscribes over a WebSocket and gets pushed a
+    // snapshot immediately, then just heartbeats every few minutes to
+    // keep the connection alive (confirmed via the browser's own
+    // Network > Socket traffic: subscribe -> full nowPlaying payload in
+    // well under a second -> {"action":"heartbeat"} every ~4 min after
+    // that). So we don't poll on our own schedule - we open a fresh
+    // connection, subscribe, take the first real payload, and close.
+    // Needs fetchAndParse (see live365hls above for the general pattern)
+    // since this is nothing like a single buildNowPlayingUrl+parse fetch.
+    fetchAndParse: fetchAiirNowPlaying
   }
 };
 
@@ -1842,6 +1886,92 @@ async function fetchLive365NowPlaying(station) {
   const mediaText = await mediaRes.text();
 
   return parseLive365HlsPlaylist(mediaText);
+}
+
+const AIIR_WS_TIMEOUT_MS = 5000;
+
+// Aiir's frontend player connects to a single shared WebSocket endpoint
+// (wss://metadata.aiir.net/now-playing) and subscribes per-station via a
+// {"action":"subscribe","serviceId":"..."} message - "serviceId" is the
+// same numeric ID Aiir's page HTML exposes as
+// data-station-metadata-id-value (found by inspecting the station's
+// player.aiir.com page source, NOT discoverable from a plain HTTP fetch
+// since the actual endpoint only lives in the compiled player JS bundle).
+//
+// Cloudflare Workers can speak plain outbound WebSocket via fetch() with
+// an Upgrade header - the response comes back with a `webSocket` property
+// once the server accepts (HTTP 101), which we then .accept() and use
+// like a normal WebSocket object.
+//
+// Confirmed response shape (captured live from a real subscribe):
+//   {"serviceId":"3628","nowProgramme":{...},"nowPlaying":{"type":"programme",
+//    "name":"Bridge Bible Talk","description":"","imageUrl":"https://...jpg",
+//    ...},"previouslyPlayed":[]}
+// followed by periodic {"action":"heartbeat"} pings (~every 4 min) with no
+// station data - those are keepalives, not now-playing updates, and must
+// be ignored rather than mistaken for "no data."
+//
+// NOTE: only ever observed this during a talk programme block (empty
+// "artist", "type":"programme"). Never confirmed what shape a real music
+// track takes (e.g. whether it's "type":"track" with a populated "artist"
+// field, or something else) - built defensively assuming "artist" may or
+// may not be present. If song data ends up looking wrong once a music
+// block airs, revisit this function first.
+async function fetchAiirNowPlaying(station) {
+  const res = await fetch(station.wsUrl, {
+    headers: {
+      Upgrade: 'websocket',
+      Connection: 'Upgrade'
+    }
+  });
+
+  const ws = res.webSocket;
+  if (res.status !== 101 || !ws) {
+    throw new Error('Station ' + station.displayName + ' WebSocket upgrade failed (status ' + res.status + ')');
+  }
+  ws.accept();
+
+  return new Promise(function(resolve, reject) {
+    const timeout = setTimeout(function() {
+      ws.close();
+      reject(new Error('Station ' + station.displayName + ' timed out waiting for aiir now-playing data'));
+    }, AIIR_WS_TIMEOUT_MS);
+
+    ws.addEventListener('message', function(event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (err) {
+        return; // ignore anything unparseable rather than fail the whole fetch
+      }
+
+      // Heartbeats and any message without a nowPlaying payload aren't
+      // real updates - keep waiting for the actual subscribe response.
+      if (!data || !data.nowPlaying) return;
+
+      clearTimeout(timeout);
+      ws.close();
+
+      const np = data.nowPlaying;
+      resolve({
+        title: typeof np.name === 'string' ? np.name.trim() : '',
+        artist: typeof np.artist === 'string' ? np.artist.trim() : '',
+        coverUrl: typeof np.imageUrl === 'string' && np.imageUrl.trim() ? np.imageUrl.trim() : null
+      });
+    });
+
+    ws.addEventListener('close', function() {
+      clearTimeout(timeout);
+      reject(new Error('Station ' + station.displayName + ' aiir WebSocket closed before any data arrived'));
+    });
+
+    ws.addEventListener('error', function() {
+      clearTimeout(timeout);
+      reject(new Error('Station ' + station.displayName + ' aiir WebSocket error'));
+    });
+
+    ws.send(JSON.stringify({ action: 'subscribe', serviceId: station.serviceId }));
+  });
 }
 
 async function fetchStationNowPlaying(station) {
