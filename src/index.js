@@ -1455,6 +1455,14 @@ const RADIO_STATIONS = [
     provider: 'shoutcast',
     host: 'broadcast.shoutcheap.com/proxy/jossco00',
     streamUrl: 'https://broadcast.shoutcheap.com/proxy/jossco00/;stream.mp3'
+  },
+  {
+    displayName: 'The Lamp',
+    cityState: 'Fredericksburg, VA',
+    homePage: 'https://ccfred.org/the-lamp-radio',
+    provider: 'futuri',
+    mount: '7087_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7087_24k.aac'
   }
 ];
 
