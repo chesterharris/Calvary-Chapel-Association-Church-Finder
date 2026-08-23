@@ -1447,6 +1447,14 @@ const RADIO_STATIONS = [
     provider: 'elasticplayer',
     radioId: '300',
     streamUrl: 'https://www.ophanim.net:8444/s/8730'
+  },
+  {
+    displayName: 'WLXM',
+    cityState: 'Lexington, SC',
+    homePage: 'https://cclexington.org/radio-and-tv/',
+    provider: 'shoutcast',
+    host: 'broadcast.shoutcheap.com/proxy/jossco00',
+    streamUrl: 'https://broadcast.shoutcheap.com/proxy/jossco00/;stream.mp3'
   }
 ];
 
