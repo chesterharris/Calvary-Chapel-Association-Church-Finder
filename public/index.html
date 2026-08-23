@@ -1602,6 +1602,12 @@
   // ---- YouTube live status (read-only - the Cron Trigger does the actual
   // checking server-side; this just reads whatever it last cached) ----
 
+  // Backend's own live-check cron runs roughly every 10 min (see
+  // scheduled() in src/index.js) - this just needs to be frequent enough
+  // to pick up a newly-completed cycle reasonably promptly without
+  // hammering the endpoint. Same pattern as RADIO_POLL_MS above.
+  const LIVE_STATUS_POLL_MS = 120000; // 2 min
+
   async function loadLiveStatus() {
     try {
       const res = await fetch('/api/live-status', { cache: 'no-store' });
@@ -3543,6 +3549,7 @@
     await loadChurchesFromServer();
     updateSyncStatus();
     await loadLiveStatus();
+    setInterval(loadLiveStatus, LIVE_STATUS_POLL_MS);
   }
 
   function updateSyncStatus() {
