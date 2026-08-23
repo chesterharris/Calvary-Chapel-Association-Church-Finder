@@ -1200,6 +1200,12 @@ const RADIO_CACHE_VERSION = 1;
 //                 URL). Now-playing comes from a single clean fetch to
 //                 api.live365.com/station/{mountId} - see the provider
 //                 notes doc for why this is preferred over live365hls.
+//   splitCombinedTitle (optional) - set true only for stations CONFIRMED
+//                 to cram "artist - title" into the title field itself
+//                 with artist left empty (e.g. WGLJ), rather than
+//                 populating both fields separately like WRDJ does.
+//                 Defaults to false/absent - most Live365 stations don't
+//                 need this, don't set it speculatively.
 //
 //   Aiir stations also need:
 //   wsUrl       - always "wss://metadata.aiir.net/now-playing" so far
@@ -1530,6 +1536,20 @@ const RADIO_STATIONS = [
     // Artist - Track pair) - without this flag, parseIcecastJson's normal
     // split would misreport "Jeremiah 49" as if it were a musical artist.
     noArtistSplit: true
+  },
+  {
+    displayName: 'WGLJ',
+    cityState: 'Gainesville, FL',
+    homePage: 'https://www.ccgainesville.com/radio/',
+    provider: 'live365json',
+    mountId: 'a81734',
+    streamUrl: 'https://streaming.live365.com/a81734',
+    // This station's automation crams "artist - title" into the title
+    // field as one lowercase string and leaves artist genuinely empty
+    // (e.g. "laura story - who is like our god"), unlike WRDJ which
+    // populates both fields separately - see parseLive365Json for why
+    // this needs an explicit opt-in rather than being the default.
+    splitCombinedTitle: true
   }
 ];
 
@@ -1560,7 +1580,7 @@ function parseSecureNetSystemsXml(xml) {
 // absent. The "art" field always points at a static Live365 placeholder
 // image (".../blankart.jpg") when no real cover exists, so that specific
 // URL is filtered out to null rather than shown as if it were real artwork.
-function parseLive365Json(rawJson) {
+function parseLive365Json(rawJson, station) {
   let data;
   try {
     data = JSON.parse(rawJson);
@@ -1572,9 +1592,32 @@ function parseLive365Json(rawJson) {
   const rawCover = track && typeof track.art === 'string' ? track.art.trim() : '';
   const isPlaceholderArt = /blankart\.jpg$/i.test(rawCover);
 
+  let title = track && typeof track.title === 'string' ? track.title.trim() : '';
+  let artist = track && typeof track.artist === 'string' ? track.artist.trim() : '';
+
+  // Opt-in escape hatch: confirmed in production that not every Live365
+  // station populates title/artist as genuinely separate fields the way
+  // WRDJ does - WGLJ's automation instead crams "artist - title" into the
+  // title field itself as one lowercase string, leaving artist genuinely
+  // empty (e.g. title:"laura story - who is like our god", artist:"").
+  // Only attempt the split when a station is flagged for it AND artist is
+  // actually empty (so a station's own already-correct artist - like a
+  // station-ID entry that happens to have "IID" as a real artist value -
+  // is never overwritten by a guessed split). Also intentionally does NOT
+  // attempt to fix the lowercase casing - guessing correct title-case for
+  // arbitrary artist names (apostrophes, ampersands, initials) risks
+  // introducing new wrong-looking mistakes, so it's displayed as-is.
+  if (station && station.splitCombinedTitle && !artist) {
+    const sepIndex = title.indexOf(' - ');
+    if (sepIndex !== -1) {
+      artist = title.slice(0, sepIndex).trim();
+      title = title.slice(sepIndex + 3).trim();
+    }
+  }
+
   return {
-    title: track && typeof track.title === 'string' ? track.title.trim() : '',
-    artist: track && typeof track.artist === 'string' ? track.artist.trim() : '',
+    title: title,
+    artist: artist,
     coverUrl: rawCover && !isPlaceholderArt ? rawCover : null
   };
 }
