@@ -1142,6 +1142,14 @@ const RADIO_CACHE_VERSION = 1;
 //   host        - the host:port serving the station's status-json.xsl feed.
 //   mount       - the mount point (without leading slash) identifying this
 //                 station's stream on that Icecast server.
+//   noArtistSplit (optional) - set true only for talk/teaching stations
+//                 whose real titles have been CONFIRMED to contain " - "
+//                 without meaning "Artist - Track" (e.g. KQIP's scripture
+//                 references like "Jeremiah 49 - Jeremiah") - skips
+//                 parseIcecastJson's normal split so the first half isn't
+//                 misreported as an artist name. Defaults to false/absent
+//                 for every other Icecast station - don't set this
+//                 speculatively, only after seeing a real bad split.
 //
 //   Futuri/streamon.fm stations also need:
 //   mount       - identifies this station on yp.cdnstream1.com's metadata
@@ -1508,6 +1516,20 @@ const RADIO_STATIONS = [
     provider: 'radioco',
     stationId: 's914ba6b9a',
     streamUrl: 'https://s5.radio.co/s914ba6b9a'
+  },
+  {
+    displayName: 'KQIP',
+    cityState: 'Chico, CA',
+    homePage: 'https://ccchico.com/1071',
+    provider: 'icecast',
+    host: 'kqip-streamt.ccchico.com',
+    mount: 'stream.mp3',
+    streamUrl: 'https://kqip-streamt.ccchico.com/stream.mp3',
+    // This station's teaching/talk content reports titles like
+    // "Jeremiah 49 - Jeremiah" (a scripture reference, not an
+    // Artist - Track pair) - without this flag, parseIcecastJson's normal
+    // split would misreport "Jeremiah 49" as if it were a musical artist.
+    noArtistSplit: true
   }
 ];
 
@@ -1564,7 +1586,7 @@ function parseLive365Json(rawJson) {
 // on the first " - " to recover both. If a station's title doesn't follow
 // that convention, we fall back to treating the whole string as the title
 // with no artist, rather than guessing wrong.
-function parseIcecastJson(rawJson) {
+function parseIcecastJson(rawJson, station) {
   let data;
   try {
     data = JSON.parse(rawJson);
@@ -1581,6 +1603,18 @@ function parseIcecastJson(rawJson) {
 
   const rawTitle = source && typeof source.title === 'string' ? source.title.trim() : '';
   if (!rawTitle) return { title: '', artist: '', coverUrl: null };
+
+  // Opt-in escape hatch for talk/teaching stations whose titles legitimately
+  // contain " - " but aren't an "Artist - Track" pair at all (confirmed in
+  // production - KQIP reports scripture references like "Jeremiah 49 -
+  // Jeremiah", which the split below would otherwise misreport as if
+  // "Jeremiah 49" were a musical artist's name). Defaults to the normal
+  // split behavior for every other Icecast station - only set
+  // noArtistSplit: true on a station when its real titles have been
+  // confirmed to need this.
+  if (station && station.noArtistSplit) {
+    return { title: rawTitle, artist: '', coverUrl: null };
+  }
 
   const sepIndex = rawTitle.indexOf(' - ');
   if (sepIndex !== -1) {
@@ -2202,7 +2236,7 @@ async function fetchStationNowPlaying(station) {
     });
     if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
     const raw = await res.text();
-    parsed = provider.parse(raw);
+    parsed = provider.parse(raw, station);
   }
 
   return {
