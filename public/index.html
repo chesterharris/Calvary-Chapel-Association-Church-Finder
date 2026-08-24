@@ -1928,7 +1928,21 @@
   // state worth surfacing even while hiding the routine "not live" noise
   // that makes up the vast majority of rows).
   function isDebugRowAnIssue(r) {
-    return !!(r.notChecked || r.error || r.isLive || r.status === 'waiting');
+    return !!(r.notChecked || r.error || r.isLive || isWaitingSoon(r));
+  }
+
+  // A "waiting" (scheduled-future) church is only worth calling out
+  // distinctly once it's close - confirmed in production this list was
+  // getting cluttered with churches scheduled 6+ days out (e.g. "Starts
+  // in 155h 4m"), which isn't actionable/interesting yet. Anything
+  // further out than this just renders as an ordinary "not live" row
+  // instead, same as if it had no scheduled start at all.
+  const WAITING_SOON_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+  function isWaitingSoon(r) {
+    if (r.status !== 'waiting' || !r.startDate) return false;
+    const startTime = new Date(r.startDate).getTime();
+    if (isNaN(startTime)) return false;
+    return (startTime - Date.now()) < WAITING_SOON_WINDOW_MS;
   }
 
   function renderLiveDebugContent(data) {
@@ -1983,12 +1997,12 @@
       const rowsToShow = liveDebugShowIssuesOnly ? cycle.results.filter(isDebugRowAnIssue) : cycle.results;
       html += '<div class="live-debug-section-title">Per-Church Results' +
         '<label class="live-debug-filter-toggle"><input type="checkbox" id="liveDebugIssuesOnlyToggle"' +
-        (liveDebugShowIssuesOnly ? ' checked' : '') + '> Show issues only</label></div>';
+        (liveDebugShowIssuesOnly ? ' checked' : '') + '> Show only notable results</label></div>';
 
       if (rowsToShow.length) {
         html += '<table class="live-debug-table" id="liveDebugPerChurchTable">' +
           '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
-          '<thead><tr><th>Church</th><th>Status</th><th>Time</th><th>Error</th></tr></thead><tbody>';
+          '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
         rowsToShow.forEach(function(r) {
           let badge;
           if (r.notChecked) {
@@ -1998,7 +2012,7 @@
               (r.usedStaleData ? 'stale' : 'failed') + '</span>';
           } else if (r.status === 'live') {
             badge = '<span class="live-debug-badge live">live</span>';
-          } else if (r.status === 'waiting') {
+          } else if (r.status === 'waiting' && isWaitingSoon(r)) {
             badge = '<span class="live-debug-badge waiting">waiting</span>';
           } else {
             // Fallback for entries from before the 3-state status field
@@ -2020,7 +2034,7 @@
 
           html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
             '<td>' + timeText + '</td>' +
-            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (r.status === 'waiting' && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
+            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (isWaitingSoon(r) && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
         });
         html += '</tbody></table>';
       } else {
