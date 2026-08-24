@@ -639,6 +639,61 @@ async function checkChurchLive(youtubeUrl) {
   // signal is the internal videoDetails JSON field below, which was
   // verified via actual diffed LIVE vs NOT-LIVE test files to be
   // completely ABSENT (not just false) on a genuinely not-live page.
+  // IMPORTANT: "isLive":true (checked below) is present on BOTH a
+  // genuinely-airing page AND a "waiting for the stream to start" page -
+  // confirmed via real diffed test files (see YOUTUBE_LIVE_PAGE_WAITING
+  // vs YOUTUBE_LIVE_PAGE_NOT_WAITING) that it appears inside the SAME
+  // videoViewCountRenderer block either way. The one reliable difference
+  // is what that block's viewer-count text actually SAYS:
+  //   genuinely live:  "runs":[{"text":"36"},{"text":" watching now"}]
+  //   waiting/scheduled: "runs":[{"text":"1 waiting"}]
+  // So this check runs FIRST, ahead of the generic isLive gate below,
+  // and short-circuits to 'waiting' on its own terms rather than relying
+  // on isLive to have already ruled it out (it can't - both say true).
+  // Confirmed in production this was leaking scheduled-but-not-yet-started
+  // churches into the public Live Now list as if they were genuinely
+  // airing (e.g. Calvary Chapel OKC, matched against a real listener
+  // waiting-room count of 1, not actual concurrent viewers).
+  const waitingViewCountMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[\{"text":"\d+\s*waiting"\}\]/);
+  if (waitingViewCountMatch) {
+    // scheduledStartTime is Unix epoch SECONDS as a string (confirmed in
+    // production, inside a playerOverlayVideoDetailsRenderer/
+    // StreamOfflineSlateRenderer block) - NOT the same format as the
+    // itemprop="startDate"/liveBroadcastDetails ISO-string sources used
+    // as a fallback below, so it needs converting to line up with how
+    // startDate is used elsewhere (new Date(startDate)).
+    const scheduledStartTimeMatch = html.match(/"scheduledStartTime":"(\d+)"/);
+    let waitingStartDate = null;
+    if (scheduledStartTimeMatch) {
+      const asDate = new Date(Number(scheduledStartTimeMatch[1]) * 1000);
+      if (!isNaN(asDate.getTime())) waitingStartDate = asDate.toISOString();
+    }
+    if (!waitingStartDate) {
+      // Fall back to the same sources the below-the-fold "isLive:true in
+      // the future" branch uses, in case a waiting page ever lacks its
+      // own slateRenderer for some reason.
+      const fallbackStartDateMetaMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+      const fallbackStartDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
+      waitingStartDate = fallbackStartDateMetaMatch ? fallbackStartDateMetaMatch[1] : (fallbackStartDateJsonMatch ? fallbackStartDateJsonMatch[1] : null);
+    }
+
+    const waitingCanonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
+    const waitingVideoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+    const waitingTitleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
+    const waitingDescriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
+    const waitingAuthorMatch = html.match(/"author":"([^"]*)"/);
+
+    return {
+      isLive: false,
+      status: 'waiting',
+      videoId: waitingCanonicalMatch ? waitingCanonicalMatch[1] : (waitingVideoIdJsonMatch ? waitingVideoIdJsonMatch[1] : null),
+      startDate: waitingStartDate,
+      title: waitingTitleMetaMatch ? decodeEntities(waitingTitleMetaMatch[1]) : null,
+      description: waitingDescriptionMetaMatch ? decodeEntities(waitingDescriptionMetaMatch[1]) : null,
+      author: waitingAuthorMatch ? waitingAuthorMatch[1] : null
+    };
+  }
+
   const isLive = html.includes('"isLive":true');
   if (!isLive) return { isLive: false, status: 'not_live' };
 
@@ -666,16 +721,22 @@ async function checkChurchLive(youtubeUrl) {
   // climbs indefinitely across a broadcast - one church showed 549 there
   // while the real concurrent audience was 23). The actual live
   // concurrent-viewer count lives in a completely different, deeper part
-  // of the page - videoPrimaryInfoRenderer's own viewCount block - and
-  // this is confirmed via real production HTML to look like:
-  //   "viewCount":{"videoViewCountRenderer":{"viewCount":{"runs":
-  //   [{"text":"1 watching now"}]},"isLive":true,"originalViewCount":"1"}}
-  // Anchored on the "isLive":true co-occurring in the SAME nested object
-  // (not just "originalViewCount" alone) specifically to avoid matching a
-  // similar-looking renderer for an unrelated recommended/sidebar video
-  // elsewhere on the page - same anchoring discipline already used for
-  // the videoId match above, for the same reason.
-  const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[\{"text":"[^"]*"\}\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
+  // of the page - videoPrimaryInfoRenderer's own viewCount block.
+  //
+  // The "runs" array's internal shape varies between videos/sessions -
+  // confirmed in production BOTH of these are real:
+  //   "runs":[{"text":"1 watching now"}]              (one combined run)
+  //   "runs":[{"text":"36"},{"text":" watching now"}]  (split into two)
+  // An earlier version of this regex assumed exactly one run and silently
+  // failed to match the split-run shape at all, leaving viewCount null
+  // for a genuinely live, real church. Matching one-or-more
+  // {"text":"..."} entries (rather than assuming a fixed count) handles
+  // both. Anchored on the "isLive":true co-occurring in the SAME nested
+  // object (not just "originalViewCount" alone) specifically to avoid
+  // matching a similar-looking renderer for an unrelated recommended/
+  // sidebar video elsewhere on the page - same anchoring discipline
+  // already used for the videoId match above, for the same reason.
+  const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[(?:\{"text":"[^"]*"\},?)+\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
 
   // Fallback source: the page's embedded videoDetails/microformat JSON.
   // Confirmed via a real production case (Calvary Chapel Gresham) where the
