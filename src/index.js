@@ -658,8 +658,24 @@ async function checkChurchLive(youtubeUrl) {
   const titleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
   const descriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
   const authorMatch = html.match(/"author":"([^"]*)"/);
-  const viewCountMatch = html.match(/"viewCount":"(\d+)"/);
   const uploadDateMetaMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
+
+  // IMPORTANT: this is NOT the same field as a bare "viewCount":"N" match
+  // would find - that pattern hits videoDetails.viewCount, which is the
+  // video's lifetime/cumulative view count (confirmed in production: it
+  // climbs indefinitely across a broadcast - one church showed 549 there
+  // while the real concurrent audience was 23). The actual live
+  // concurrent-viewer count lives in a completely different, deeper part
+  // of the page - videoPrimaryInfoRenderer's own viewCount block - and
+  // this is confirmed via real production HTML to look like:
+  //   "viewCount":{"videoViewCountRenderer":{"viewCount":{"runs":
+  //   [{"text":"1 watching now"}]},"isLive":true,"originalViewCount":"1"}}
+  // Anchored on the "isLive":true co-occurring in the SAME nested object
+  // (not just "originalViewCount" alone) specifically to avoid matching a
+  // similar-looking renderer for an unrelated recommended/sidebar video
+  // elsewhere on the page - same anchoring discipline already used for
+  // the videoId match above, for the same reason.
+  const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[\{"text":"[^"]*"\}\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
 
   // Fallback source: the page's embedded videoDetails/microformat JSON.
   // Confirmed via a real production case (Calvary Chapel Gresham) where the
@@ -737,7 +753,7 @@ async function checkChurchLive(youtubeUrl) {
     title: title,
     description: description,
     author: authorMatch ? authorMatch[1] : null,
-    viewCount: viewCountMatch ? Number(viewCountMatch[1]) : null
+    viewCount: concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null
   };
 }
 
