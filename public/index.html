@@ -502,6 +502,57 @@
     justify-content: flex-end;
   }
   .form-actions.left-align { justify-content: space-between; }
+  .feedback-thankyou {
+    text-align: center;
+  }
+  .feedback-thankyou-title {
+    margin: 4px 0 10px;
+    color: var(--evergreen);
+  }
+  .feedback-thankyou-copy {
+    font-size: 13.5px;
+    color: var(--ink);
+    opacity: 0.8;
+    margin: 0 0 16px;
+  }
+  .feedback-thankyou-video-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    max-width: 320px;
+    margin: 0 auto;
+    transition: opacity 0.15s ease;
+  }
+  .feedback-thankyou-video-link:hover {
+    opacity: 0.85;
+  }
+  .feedback-thankyou-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .feedback-thankyou-video-caption {
+    display: block;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: var(--evergreen);
+    color: var(--paper);
+  }
+  .feedback-thankyou-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 18px;
+  }
+  .feedback-thankyou-countdown {
+    font-size: 12px;
+    color: var(--ink);
+    opacity: 0.6;
+  }
   .modal .btn-outline, .modal .btn-danger {
     color: var(--evergreen);
     border-color: var(--line);
@@ -1483,7 +1534,20 @@
         <button type="submit" class="btn btn-ember" id="submitFeedbackBtn">Send Feedback</button>
       </div>
     </form>
+    <div id="feedbackThankYou" class="feedback-thankyou" style="display: none;">
+      <h3 class="feedback-thankyou-title">Thank you for helping us improve CCA Finder!</h3>
+      <p class="feedback-thankyou-copy">Your feedback means a lot to us. While you're here, enjoy a little something:</p>
+      <a id="feedbackThankYouVideoLink" class="feedback-thankyou-video-link" href="#" target="_blank" rel="noopener">
+        <img id="feedbackThankYouThumb" class="feedback-thankyou-thumb" src="" alt="">
+        <span class="feedback-thankyou-video-caption" id="feedbackThankYouCaption"></span>
+      </a>
+      <div class="feedback-thankyou-footer">
+        <span id="feedbackThankYouCountdown" class="feedback-thankyou-countdown"></span>
+        <button type="button" id="closeFeedbackThankYouBtn" class="btn btn-outline">Close now</button>
+      </div>
+    </div>
   </div>
+
 </div>
 
 <div id="managePanel" class="side-panel" style="display: none;">
@@ -2598,19 +2662,74 @@
     const feedbackForm = document.getElementById('feedbackForm');
     const feedbackStatus = document.getElementById('feedbackStatus');
     const submitFeedbackBtn = document.getElementById('submitFeedbackBtn');
+    const feedbackThankYou = document.getElementById('feedbackThankYou');
+    const feedbackThankYouVideoLink = document.getElementById('feedbackThankYouVideoLink');
+    const feedbackThankYouThumb = document.getElementById('feedbackThankYouThumb');
+    const feedbackThankYouCaption = document.getElementById('feedbackThankYouCaption');
+    const feedbackThankYouCountdown = document.getElementById('feedbackThankYouCountdown');
+    const closeFeedbackThankYouBtn = document.getElementById('closeFeedbackThankYouBtn');
+
+    // A little "thank you" video shown after a successful submission - one
+    // picked at random each time, so this naturally starts rotating the
+    // moment more entries are added here with zero other code changes.
+    const FEEDBACK_THANKYOU_VIDEOS = [
+      { videoId: 'jQ8j8r0ZiCU', caption: 'The Jesus Movement Music (with lyrics)' }
+    ];
+
+    const FEEDBACK_THANKYOU_CLOSE_SECONDS = 5;
+    let feedbackThankYouTimer = null;
+
+    function stopFeedbackThankYouTimer() {
+      if (feedbackThankYouTimer) {
+        clearInterval(feedbackThankYouTimer);
+        feedbackThankYouTimer = null;
+      }
+    }
+
+    function showFeedbackThankYou() {
+      const pick = FEEDBACK_THANKYOU_VIDEOS[Math.floor(Math.random() * FEEDBACK_THANKYOU_VIDEOS.length)];
+      feedbackThankYouVideoLink.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(pick.videoId);
+      // hqdefault is available for essentially any public video (unlike
+      // maxresdefault, which not every upload has a high-res version of),
+      // and gets reduced to fit the dialog via CSS regardless.
+      feedbackThankYouThumb.src = 'https://img.youtube.com/vi/' + encodeURIComponent(pick.videoId) + '/hqdefault.jpg';
+      feedbackThankYouThumb.alt = pick.caption;
+      feedbackThankYouCaption.textContent = pick.caption;
+
+      feedbackForm.style.display = 'none';
+      feedbackThankYou.style.display = 'block';
+
+      let secondsLeft = FEEDBACK_THANKYOU_CLOSE_SECONDS;
+      feedbackThankYouCountdown.textContent = 'Closing in ' + secondsLeft + 's...';
+      stopFeedbackThankYouTimer();
+      feedbackThankYouTimer = setInterval(function() {
+        secondsLeft--;
+        if (secondsLeft <= 0) {
+          closeFeedbackModal();
+          return;
+        }
+        feedbackThankYouCountdown.textContent = 'Closing in ' + secondsLeft + 's...';
+      }, 1000);
+    }
 
     function openFeedbackModal() {
+      stopFeedbackThankYouTimer();
       feedbackForm.reset();
+      feedbackForm.style.display = 'block';
+      feedbackThankYou.style.display = 'none';
       feedbackStatus.textContent = '';
       feedbackModal.style.display = 'flex';
     }
 
+
     function closeFeedbackModal() {
+      stopFeedbackThankYouTimer();
       feedbackModal.style.display = 'none';
     }
 
     document.getElementById('btnFeedback').addEventListener('click', openFeedbackModal);
     document.getElementById('cancelFeedbackBtn').addEventListener('click', closeFeedbackModal);
+    closeFeedbackThankYouBtn.addEventListener('click', closeFeedbackModal);
     feedbackModal.addEventListener('click', function(e) {
       if (e.target === feedbackModal) closeFeedbackModal();
     });
@@ -2637,9 +2756,8 @@
         const data = await res.json().catch(function() { return {}; });
 
         if (res.ok && data.success) {
-          feedbackStatus.textContent = 'Thanks! Your feedback was sent.';
           feedbackForm.reset();
-          setTimeout(closeFeedbackModal, 1500);
+          showFeedbackThankYou();
         } else {
           feedbackStatus.textContent = data.error || 'Something went wrong. Please try again.';
         }
