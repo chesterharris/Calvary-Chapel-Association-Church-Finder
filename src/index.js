@@ -1515,14 +1515,6 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice8.securenetsystems.net/KVNG'
   },
   {
-    displayName: 'KFLK',
-    cityState: 'Minot, ND',
-    homePage: 'https://calvarychapelminot.org/kflk-home',
-    provider: 'streamingradio',
-    idPlayer: '9',
-    streamUrl: 'https://server02.streamingrad.io:8443/listen/kflk_the_flock_95.9_fm/radio'
-  },
-  {
     displayName: 'KLYT',
     cityState: 'Albuquerque, NM',
     homePage: 'https://klyt.fm/',
