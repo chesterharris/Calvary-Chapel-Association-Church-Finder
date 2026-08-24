@@ -1330,6 +1330,19 @@ const RADIO_CACHE_VERSION = 1;
 //                 see parseRadioCoJson for why the whole title string is
 //                 kept as-is rather than split (mixes two inconsistent
 //                 internal formats: real songs vs. station liners/promos).
+//
+//   RadioKing stations also need:
+//   slug        - RadioKing's station slug (e.g. "calvary-chapel-radio"),
+//                 found in the embedded iframe's src
+//                 (player.radioking.io/{slug}/...) or directly in the
+//                 metadata API URL itself. Now-playing has title/artist
+//                 already properly split into separate fields - no
+//                 combined-string parsing needed, unlike most other
+//                 providers in this file. streamUrl is NOT the metadata
+//                 API's own domain - it's a separate redirect chain
+//                 (play.radioking.io/{slug} -> listen.radioking.com/...),
+//                 only found by watching actual Network > Media traffic
+//                 while the embedded player was playing.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -1610,6 +1623,14 @@ const RADIO_STATIONS = [
     // populates both fields separately - see parseLive365Json for why
     // this needs an explicit opt-in rather than being the default.
     splitCombinedTitle: true
+  },
+  {
+    displayName: 'CC UK Radio',
+    cityState: 'United Kingdom',
+    homePage: 'https://www.calvarychapel.uk/radio',
+    provider: 'radioking',
+    slug: 'calvary-chapel-radio',
+    streamUrl: 'https://listen.radioking.com/radio/482243/stream/538778'
   }
 ];
 
@@ -2089,6 +2110,38 @@ function parseRadioCoJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from RadioKing's public widget API
+// (https://api.radioking.io/widget/radio/{slug}/track/current) - a clean,
+// well-documented single-object response with title/artist already
+// properly split into separate fields, no combined-string parsing needed
+// at all (unlike Icecast/Shoutcast's "{Artist} - {Track}" convention, or
+// Live365/ElasticPlayer's occasional single-field quirks elsewhere in
+// this file). Confirmed real response shape:
+//   {"id":95994476,"artist":"Lloyd Pulley","title":"BRIDGING THE GAP",
+//    "album":"...","is_live":false,"cover":"https://image.radioking.io/...",
+//    "default_cover":true, ...}
+// "default_cover":true means "cover" is just a generic station logo
+// placeholder rather than real per-track artwork - filtered out the same
+// way Live365's blankart.jpg placeholder is, rather than shown as if it
+// were genuine cover art.
+function parseRadioKingJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid RadioKing JSON response');
+  }
+
+  const rawCover = data && typeof data.cover === 'string' ? data.cover.trim() : '';
+  const isDefaultCover = !!(data && data.default_cover);
+
+  return {
+    title: data && typeof data.title === 'string' ? data.title.trim() : '',
+    artist: data && typeof data.artist === 'string' ? data.artist.trim() : '',
+    coverUrl: rawCover && !isDefaultCover ? rawCover : null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -2191,6 +2244,12 @@ const RADIO_PROVIDERS = {
       return 'https://public.radio.co/stations/' + station.stationId + '/status';
     },
     parse: parseRadioCoJson
+  },
+  radioking: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://api.radioking.io/widget/radio/' + station.slug + '/track/current';
+    },
+    parse: parseRadioKingJson
   }
 };
 
