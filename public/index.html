@@ -2019,6 +2019,10 @@
     try {
       await saveChurchToServer(Object.assign({}, church, { featured: !church.featured }));
       if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+      // saveChurchToServer's own refresh already rebuilt every marker/
+      // popup (see reopenPopupForChurchId's comment above) - bring this
+      // one's popup back so the toggle reads as an in-place update.
+      reopenPopupForChurchId(id);
     } catch (err) {
       alert('Sorry, updating Featured status failed. Please check your connection and try again.');
     }
@@ -2990,6 +2994,10 @@
 
       const marker = L.marker([lat, lng], { icon: scoreIcon(c) });
       marker.bindPopup(buildPopupHtml(c), { maxWidth: 260 });
+      // Tagged so a popup that gets destroyed by this same clearLayers()/
+      // rebuild (e.g. from a favorite or Featured toggle inside it) can be
+      // found again and reopened - see reopenPopupForChurchId() below.
+      marker._churchId = c.id;
       markers.addLayer(marker);
       bounds.push([lat, lng]);
       plotted++;
@@ -3019,6 +3027,26 @@
     );
   }
 
+  // A favorite/Featured toggle clicked from inside an open popup often
+  // triggers a renderMarkers() (directly, or via saveChurchToServer's own
+  // refresh) - that destroys every marker/popup, including the one the
+  // person's looking at, and rebuilds fresh ones from scratch. Without
+  // this, the popup they were just interacting with silently vanishes.
+  // Re-finding the rebuilt marker by the id tag above and reopening its
+  // (freshly-built, so already showing the updated state) popup makes the
+  // toggle feel like an in-place update instead of the popup closing on
+  // them. If the church got filtered out of view by the toggle itself
+  // (e.g. unfavoriting while "Favorites only" is active), there's nothing
+  // to reopen - it's supposed to disappear in that case.
+  function reopenPopupForChurchId(id) {
+    const numericId = Number(id);
+    let target = null;
+    markers.eachLayer(function(m) {
+      if (m._churchId === numericId) target = m;
+    });
+    if (target) target.openPopup();
+  }
+
   // Handle clicks on the "Edit Location" / "Delete Location" buttons inside
   // any open popup - lets an admin jump straight into editing a pin without
   // first having to search for it again in the Manage Locations panel.
@@ -3038,25 +3066,33 @@
     const favStarBtn = el.querySelector('[data-fav-church-id]');
     if (favStarBtn) {
       favStarBtn.addEventListener('click', function() {
-        // Purely local - update this button in place rather than closing
-        // and reopening the whole popup for a one-icon change.
-        const updated = toggleChurchFavorite(favStarBtn.getAttribute('data-fav-church-id'));
-        const nowFav = updated.indexOf(Number(favStarBtn.getAttribute('data-fav-church-id'))) !== -1;
-        favStarBtn.classList.toggle('favorited', nowFav);
-        favStarBtn.innerHTML = buildFavoriteStarSvg(nowFav);
-        favStarBtn.title = nowFav ? 'Remove from your favorites' : 'Add to your favorites';
+        const churchIdAttr = favStarBtn.getAttribute('data-fav-church-id');
+        const updated = toggleChurchFavorite(churchIdAttr);
+        const nowFav = updated.indexOf(Number(churchIdAttr)) !== -1;
+        // Only renderMarkers() (which destroys/rebuilds every marker and
+        // popup, including this one) when the Favorites filter is active -
+        // otherwise just patch this button in place, since nothing else on
+        // the map needs to change. When the rebuild does happen, reopen
+        // this popup afterward so it doesn't just vanish on the person -
+        // and if the church itself got filtered out by unfavoriting it
+        // while the filter is on, there's correctly nothing to reopen.
+        if (favoritesFilterActive) {
+          renderMarkers();
+          reopenPopupForChurchId(churchIdAttr);
+        } else {
+          favStarBtn.classList.toggle('favorited', nowFav);
+          favStarBtn.innerHTML = buildFavoriteStarSvg(nowFav);
+          favStarBtn.title = nowFav ? 'Remove from your favorites' : 'Add to your favorites';
+        }
         if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
-        if (favoritesFilterActive) renderMarkers();
       });
     }
     const featuredBtn = el.querySelector('[data-featured-church-id]');
     if (featuredBtn) {
       featuredBtn.addEventListener('click', function() {
-        // This one round-trips to the server (see toggleChurchFeatured),
-        // which refreshes churches + re-renders markers - that rebuilds
-        // this popup's marker, so the popup itself will close. Acceptable
-        // tradeoff for a rare admin action vs. the complexity of patching
-        // a popup out from under Leaflet mid-render.
+        // Round-trips to the server (see toggleChurchFeatured) which
+        // rebuilds every marker/popup - that function reopens this popup
+        // itself afterward once the save completes.
         toggleChurchFeatured(featuredBtn.getAttribute('data-featured-church-id'));
       });
     }
