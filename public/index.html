@@ -1171,6 +1171,26 @@
     color: #f2c76e;
     text-decoration: underline;
   }
+  /* The Radio ticker's label is a <button> (it opens the browse panel /
+     mobile picker) rather than a real hyperlink like the Conference
+     ticker's, so it needs its native button chrome stripped back to
+     match .ticker-label's look exactly. */
+  .ticker-label-btn {
+    font: inherit;
+    cursor: pointer;
+  }
+  .ticker-label-short { display: none; }
+  /* ---- Mobile: RADIO becomes the primary CTA on the ticker row ---- */
+  @media (max-width: 600px) {
+    .ticker-label-full { display: none; }
+    #radioTickerLabel .ticker-label-short {
+      display: inline;
+      color: #f6f4ee;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+  }
   .ticker-track-wrap {
     flex: 1;
     overflow: hidden;
@@ -1350,6 +1370,168 @@
     padding: 4px 6px;
   }
   .radio-player-close:hover { opacity: 1; color: var(--ember); }
+
+  /* ---- Mobile station picker (phones only, see #mobileRadioPicker) ---- */
+  .mp-picker {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1700;
+    background: var(--paper);
+    flex-direction: column;
+  }
+  /* Full takeover on phones: while the picker is open, the header, both
+     tickers, the score filter bar, the map, and the desktop mini-player
+     all step aside so nothing competes with it for a driver's glance. The
+     picker's own top bar (with its "‹ Map" button) is the only way back. */
+  body.mobile-picker-open header,
+  body.mobile-picker-open #conferenceTicker,
+  body.mobile-picker-open #radioTicker,
+  body.mobile-picker-open #filterBar,
+  body.mobile-picker-open #map,
+  body.mobile-picker-open #countBadge,
+  body.mobile-picker-open #radioPlayerBar {
+    display: none !important;
+  }
+  body.mobile-picker-open .mp-picker {
+    display: flex;
+  }
+  .mp-topbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px 14px;
+    background: var(--evergreen);
+    color: var(--paper);
+    border-bottom: 3px solid var(--brass);
+  }
+  .mp-back-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--paper);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 8px 10px;
+    margin: -8px -10px;
+    cursor: pointer;
+  }
+  .mp-topbar-title {
+    font-family: 'Georgia', serif;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    opacity: 0.95;
+  }
+  /* Balances the back button's width so the title reads as centered. */
+  .mp-topbar-spacer { width: 52px; flex-shrink: 0; }
+  .mp-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 12px 24px;
+  }
+  .mp-empty {
+    padding: 40px 8px;
+    text-align: center;
+    opacity: 0.6;
+    font-size: 14px;
+  }
+  .mp-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+    cursor: pointer;
+  }
+  .mp-row:active { background: rgba(0,0,0,0.03); }
+  /* The playing/paused station's frame - visually distinct so a driver
+     recognizes the active station without reading any text. */
+  .mp-row.mp-row-active {
+    border-color: var(--evergreen);
+    border-width: 3px;
+    background: rgba(47,75,60,0.06);
+    padding: 13px; /* compensate for the +1px border so rows don't jump size */
+  }
+  .mp-playbtn {
+    flex-shrink: 0;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--evergreen);
+  }
+  .mp-playbtn.is-playing { background: var(--ember); }
+  .mp-playbtn svg { width: 24px; height: 24px; }
+  .mp-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .mp-name {
+    font-family: 'Georgia', serif;
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--evergreen);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mp-nowplaying {
+    margin-top: 3px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14.5px;
+    color: var(--ink);
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* A short rule, not a border, so it reads as "separator between two
+     distinct facts" rather than a wrapped continuation of the now-playing
+     line above it. */
+  .mp-meta-divider {
+    width: 28px;
+    height: 2px;
+    background: var(--line);
+    margin: 7px 0 6px;
+  }
+  .mp-meta {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--brass);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mp-star {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--line);
+  }
+  .mp-star.favorited { color: var(--brass); }
+  .mp-star svg { width: 24px; height: 24px; }
 </style>
 </head>
 <body class="">
@@ -1404,7 +1586,10 @@
   </div>
 
   <div id="radioTicker" class="ticker-bar ticker-loading">
-    <span class="ticker-label">RADIO STATIONS</span>
+    <button type="button" id="radioTickerLabel" class="ticker-label ticker-label-btn">
+      <span class="ticker-label-full">RADIO STATIONS</span>
+      <span class="ticker-label-short">RADIO</span>
+    </button>
     <div class="ticker-track-wrap">
       <div id="radioTickerTrack" class="ticker-track">
         <span class="ticker-item">Loading radio stations…</span>
@@ -1571,6 +1756,18 @@
   </div>
   <audio id="radioAudio" preload="none"></audio>
   <button type="button" id="radioPlayerCloseBtn" class="radio-player-close" title="Stop and close player" aria-label="Stop and close player">×</button>
+</div>
+
+<!-- Mobile-only full-screen station picker. Replaces the map area on
+     phones (see body.mobile-picker-open in <style>) - opened by tapping
+     the "RADIO" ticker label, closed via the "‹ Map" button below. -->
+<div id="mobileRadioPicker" class="mp-picker">
+  <div class="mp-topbar">
+    <button type="button" id="mpBackBtn" class="mp-back-btn">&lsaquo; Map</button>
+    <div class="mp-topbar-title">Radio Stations</div>
+    <div class="mp-topbar-spacer" aria-hidden="true"></div>
+  </div>
+  <div id="mpList" class="mp-list"></div>
 </div>
 
 <div id="liveNowPanel" class="side-panel" style="display: none;">
@@ -3245,6 +3442,12 @@
       renderRadioBrowsePanel();
     }
 
+    // Same idea for the mobile station picker - now-playing text for every
+    // visible row should stay live while it's open, not just the active one.
+    if (document.body.classList.contains('mobile-picker-open')) {
+      renderMobileRadioPicker();
+    }
+
     if (!stations || !stations.length) {
       // An empty/error state is worth showing right away, not worth queuing.
       pendingRadioStations = null;
@@ -3626,10 +3829,15 @@
   radioAudio.addEventListener('play', function() {
     radioPlayPauseBtn.textContent = '⏸';
     radioPlayPauseBtn.setAttribute('aria-label', 'Pause');
+    // Keep the mobile picker's active-row icon (play vs. pause) in sync
+    // regardless of which control - the picker row itself, the desktop
+    // mini player, or a lock-screen/hardware media key - triggered it.
+    if (document.body.classList.contains('mobile-picker-open')) renderMobileRadioPicker();
   });
   radioAudio.addEventListener('pause', function() {
     radioPlayPauseBtn.textContent = '▶';
     radioPlayPauseBtn.setAttribute('aria-label', 'Play');
+    if (document.body.classList.contains('mobile-picker-open')) renderMobileRadioPicker();
   });
 
   radioPlayerCloseBtn.addEventListener('click', function() {
@@ -3638,6 +3846,146 @@
     radioAudio.load();
     hideMiniPlayer();
     currentPlayingDisplayName = null;
+  });
+
+  // ---- Mobile station picker (full-screen, phones only) ----
+  //
+  // Reuses the same radioStations data, favorites storage, and playStation()
+  // used everywhere else on the page - this is a different presentation of
+  // the same data, not a separate feature. See computeRadioBrowseOrder()
+  // above for the desktop-panel equivalent of the ordering logic below;
+  // kept as a separate frozen-order variable since the two pickers can, in
+  // principle, be open across different sessions independently.
+  const MOBILE_PICKER_BREAKPOINT = '(max-width: 600px)';
+  function isMobilePickerBreakpoint() {
+    return window.matchMedia(MOBILE_PICKER_BREAKPOINT).matches;
+  }
+
+  const MP_PLAY_SVG = '<svg viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
+  const MP_PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="white"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+
+  let mobilePickerFrozenOrder = null;
+
+  // Favorites first (A-Z), then everything else (A-Z) - same tiering as
+  // the desktop "All Stations" panel. The currently-playing station is
+  // NOT special-cased here; it's pulled to the very front separately in
+  // getMobilePickerOrderedStations() below so it can jump to the top the
+  // instant playback starts without waiting for a re-freeze.
+  function computeMobilePickerBaseOrder() {
+    const favorites = getFavoriteStationNames();
+    const favSet = {};
+    favorites.forEach(function(n) { favSet[n] = true; });
+    const byNameAlpha = function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); };
+    const favNames = radioStations.filter(function(s) { return favSet[s.displayName]; })
+      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
+    const otherNames = radioStations.filter(function(s) { return !favSet[s.displayName]; })
+      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
+    return favNames.concat(otherNames);
+  }
+
+  function getMobilePickerOrderedStations() {
+    if (!mobilePickerFrozenOrder) mobilePickerFrozenOrder = computeMobilePickerBaseOrder();
+    const byName = {};
+    radioStations.forEach(function(s) { byName[s.displayName] = s; });
+    let names = mobilePickerFrozenOrder.filter(function(n) { return byName[n]; });
+    const seen = {};
+    names.forEach(function(n) { seen[n] = true; });
+    // Anything not in the frozen snapshot (added mid-session) - append
+    // alphabetically rather than dropping it silently.
+    const extras = radioStations.filter(function(s) { return !seen[s.displayName]; })
+      .map(function(s) { return s.displayName; })
+      .sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+    names = names.concat(extras);
+    // The playing (or paused-but-active) station always leads, regardless
+    // of favorite status or its position in the frozen order.
+    if (currentPlayingDisplayName && byName[currentPlayingDisplayName]) {
+      names = [currentPlayingDisplayName].concat(names.filter(function(n) { return n !== currentPlayingDisplayName; }));
+    }
+    return names.map(function(n) { return byName[n]; });
+  }
+
+  function renderMobileRadioPicker() {
+    const listEl = document.getElementById('mpList');
+    if (!radioStations || !radioStations.length) {
+      listEl.innerHTML = '<div class="mp-empty">Loading stations…</div>';
+      return;
+    }
+    const favorites = getFavoriteStationNames();
+    const ordered = getMobilePickerOrderedStations();
+    listEl.innerHTML = ordered.map(function(s) {
+      const isFav = favorites.indexOf(s.displayName) !== -1;
+      const isActive = s.displayName === currentPlayingDisplayName;
+      const isAudibly = isActive && !radioAudio.paused;
+      const metaHtml = s.cityState
+        ? '<div class="mp-meta-divider"></div><div class="mp-meta">' + escapeHtml(s.cityState) + '</div>'
+        : '';
+      return '<div class="mp-row' + (isActive ? ' mp-row-active' : '') + '" data-station-name="' + escapeHtml(s.displayName) + '">' +
+        '<button type="button" class="mp-playbtn' + (isAudibly ? ' is-playing' : '') + '" tabindex="-1" aria-label="' + (isAudibly ? 'Pause' : 'Play') + ' ' + escapeHtml(s.displayName) + '">' +
+          (isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG) +
+        '</button>' +
+        '<div class="mp-info">' +
+          '<div class="mp-name">' + escapeHtml(s.displayName) + '</div>' +
+          '<div class="mp-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
+          metaHtml +
+        '</div>' +
+        '<button type="button" class="mp-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
+          buildFavoriteStarSvg(isFav) +
+        '</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function openMobileRadioPicker() {
+    mobilePickerFrozenOrder = computeMobilePickerBaseOrder();
+    renderMobileRadioPicker();
+    document.body.classList.add('mobile-picker-open');
+  }
+
+  function closeMobileRadioPicker() {
+    document.body.classList.remove('mobile-picker-open');
+  }
+
+  document.getElementById('radioTickerLabel').addEventListener('click', function() {
+    if (isMobilePickerBreakpoint()) {
+      openMobileRadioPicker();
+    } else {
+      openRadioBrowsePanel();
+    }
+  });
+
+  document.getElementById('mpBackBtn').addEventListener('click', closeMobileRadioPicker);
+
+  // If the viewport is resized (or rotated) past the phone breakpoint
+  // while the picker is open, don't strand the visitor in a full-screen
+  // view built for a screen size they no longer have.
+  window.matchMedia(MOBILE_PICKER_BREAKPOINT).addEventListener('change', function(e) {
+    if (!e.matches) closeMobileRadioPicker();
+  });
+
+  document.getElementById('mpList').addEventListener('click', function(e) {
+    const starBtn = e.target.closest('.mp-star');
+    if (starBtn) {
+      // Star toggle only - matches the desktop panel's frozen-order
+      // behavior of not reshuffling the list out from under a driver's
+      // thumb just because they starred something.
+      toggleStationFavorite(starBtn.getAttribute('data-fav-name'));
+      renderMobileRadioPicker();
+      refreshRadioTickerForFavoritesChange();
+      return;
+    }
+    const row = e.target.closest('.mp-row');
+    if (!row) return;
+    const name = row.getAttribute('data-station-name');
+    const station = radioStations.find(function(s) { return s.displayName === name; });
+    if (!station) return;
+    if (name === currentPlayingDisplayName) {
+      // Already the active station - the whole row is the play/pause
+      // toggle, not just the icon.
+      if (radioAudio.paused) { radioAudio.play(); } else { radioAudio.pause(); }
+    } else {
+      playStation(station);
+      renderMobileRadioPicker();
+    }
   });
 
   loadRadioTicker();
