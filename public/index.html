@@ -2001,18 +2001,23 @@
     return favMatch || featMatch;
   }
 
-  // Quick admin toggle for c.featured - reuses the existing save endpoint,
-  // sending only {id, featured} since the server merges this into the
-  // existing record (see handleSaveChurch's {...existing, ...incoming}) -
-  // no need to resend the whole church. findChurchById/saveChurchToServer
-  // are defined further down, but as function declarations they're
-  // hoisted and safe to call from here since this function itself isn't
-  // invoked until well after the full script (and those definitions) has run.
+  // Quick admin toggle for c.featured - reuses the existing save endpoint.
+  // handleSaveChurch merges {...existing, ...incoming} server-side, so in
+  // principle a bare {id, featured} patch would be enough - but it ALSO
+  // requires incoming.name to be truthy on every save (even edits), so a
+  // partial payload gets rejected with a 400 before the merge ever runs.
+  // Resending the full known church record (with just .featured flipped)
+  // satisfies that check and is harmless either way, since every other
+  // field round-trips back to its current value. findChurchById/
+  // saveChurchToServer are defined further down, but as function
+  // declarations they're hoisted and safe to call from here since this
+  // function itself isn't invoked until well after the full script (and
+  // those definitions) has run.
   async function toggleChurchFeatured(id) {
     const church = findChurchById(id);
     if (!church) return;
     try {
-      await saveChurchToServer({ id: church.id, featured: !church.featured });
+      await saveChurchToServer(Object.assign({}, church, { featured: !church.featured }));
       if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
     } catch (err) {
       alert('Sorry, updating Featured status failed. Please check your connection and try again.');
