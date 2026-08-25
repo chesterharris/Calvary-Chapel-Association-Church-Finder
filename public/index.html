@@ -2050,6 +2050,11 @@
       // without needing a full refetch.
       church.featured = newFeatured;
       updateSyncStatus();
+      // Rebuilds this marker's actual bound popup content (see
+      // refreshChurchPopup's comment near renderMarkers) so a later
+      // close+reopen doesn't show the pre-toggle state - the same fix
+      // needed for the favorite star, for the same underlying reason.
+      refreshChurchPopup(church.id);
       patchFeaturedToggleButtons(church.id, newFeatured);
       if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
       if (document.getElementById('managePanel').style.display !== 'none') renderManageList();
@@ -3047,6 +3052,10 @@
 
       const marker = L.marker([lat, lng], { icon: scoreIcon(c) });
       marker.bindPopup(buildPopupHtml(c), { maxWidth: 260 });
+      // Tagged so a favorite/Featured toggle can find this exact marker
+      // again afterward and refresh just its popup content - see
+      // refreshChurchPopup() below.
+      marker._churchId = c.id;
       markers.addLayer(marker);
       bounds.push([lat, lng]);
       plotted++;
@@ -3076,11 +3085,11 @@
     );
   }
 
-  // Handle clicks on the "Edit Location" / "Delete Location" buttons inside
-  // any open popup - lets an admin jump straight into editing a pin without
-  // first having to search for it again in the Manage Locations panel.
-  map.on('popupopen', function(e) {
-    const el = e.popup.getElement();
+  // Shared by both the initial popupopen event AND refreshChurchPopup()
+  // below (after a setPopupContent() call on an already-open popup, which
+  // wipes out and replaces the DOM - including whatever listeners were on
+  // the old buttons - without re-firing popupopen itself).
+  function wirePopupButtons(el) {
     if (!el) return;
     const editBtn = el.querySelector('[data-edit-id]');
     if (editBtn) {
@@ -3098,9 +3107,20 @@
         const churchIdAttr = favStarBtn.getAttribute('data-fav-church-id');
         const updated = toggleChurchFavorite(churchIdAttr);
         const nowFav = updated.indexOf(Number(churchIdAttr)) !== -1;
-        // Purely local, no map/marker rebuild involved at all - see
-        // patchFavoriteStarButtons's comment for why this deliberately
-        // never calls renderMarkers() from inside an open popup.
+        // refreshChurchPopup rebuilds this popup's actual bound content
+        // (via buildPopupHtml, which reads the now-updated favorite state)
+        // using Leaflet's setPopupContent - this is the piece that was
+        // missing before: patching just the visible button's DOM updated
+        // what you could SEE in that moment, but never touched the
+        // underlying HTML string Leaflet had cached for this marker's
+        // popup - so closing and reopening it (by any means) kept showing
+        // the pre-toggle state. setPopupContent updates that cached
+        // content directly and, per Leaflet's own design, does this
+        // without closing an already-open popup.
+        refreshChurchPopup(churchIdAttr);
+        // Also patch any OTHER on-screen copy of this same church's star
+        // (e.g. its row in the Live Now list, if currently open) that
+        // isn't inside this popup and so won't be touched by the above.
         patchFavoriteStarButtons(churchIdAttr, nowFav);
         if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
       });
@@ -3108,20 +3128,52 @@
     const featuredBtn = el.querySelector('[data-featured-church-id]');
     if (featuredBtn) {
       featuredBtn.addEventListener('click', function() {
-        // See toggleChurchFeatured's comment - patches this church's
-        // record + button(s) directly after saving, without rebuilding
-        // any markers, so this popup stays open and just updates in place.
+        // toggleChurchFeatured (below) already calls refreshChurchPopup
+        // itself once the save completes, for the same reason as above.
         toggleChurchFeatured(featuredBtn.getAttribute('data-featured-church-id'));
       });
     }
     const deleteBtn = el.querySelector('[data-delete-id]');
-    if (!deleteBtn) return;
-    deleteBtn.addEventListener('click', function() {
-      if (confirm('Remove this location from the map?')) {
-        deleteChurch(deleteBtn.getAttribute('data-delete-id'));
-        map.closePopup();
-      }
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', function() {
+        if (confirm('Remove this location from the map?')) {
+          deleteChurch(deleteBtn.getAttribute('data-delete-id'));
+          map.closePopup();
+        }
+      });
+    }
+  }
+
+  // Refreshes one marker's popup content in place from current data -
+  // used after a favorite/Featured toggle so the popup Leaflet has
+  // cached for that marker is never stale, whether or not it happens to
+  // be open right now. Deliberately does NOT touch any other marker (no
+  // clearLayers()/rebuild), so there's nothing to blink or lose track of.
+  function refreshChurchPopup(churchId) {
+    const numericId = Number(churchId);
+    let target = null;
+    markers.eachLayer(function(m) {
+      if (m._churchId === numericId) target = m;
     });
+    if (!target) return;
+    const church = findChurchById(numericId);
+    if (!church) return;
+    target.setPopupContent(buildPopupHtml(church));
+    // setPopupContent replaces the popup's DOM wholesale, so any buttons
+    // inside it need their click listeners re-attached - but only if this
+    // popup is actually open right now; if it's closed, the normal
+    // popupopen handler below will wire it fresh next time it's opened.
+    if (target.isPopupOpen && target.isPopupOpen()) {
+      wirePopupButtons(target.getPopup().getElement());
+    }
+  }
+
+  // Handle clicks on the "Edit Location" / "Delete Location" buttons (and
+  // the favorite/Featured toggles) inside any open popup - lets an admin
+  // jump straight into editing a pin without first having to search for
+  // it again in the Manage Locations panel.
+  map.on('popupopen', function(e) {
+    wirePopupButtons(e.popup.getElement());
   });
 
   map.addLayer(markers);
