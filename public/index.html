@@ -1174,9 +1174,21 @@
   /* The Radio ticker's label is a <button> (it opens the browse panel /
      mobile picker) rather than a real hyperlink like the Conference
      ticker's, so it needs its native button chrome stripped back to
-     match .ticker-label's look exactly. */
+     match .ticker-label's look exactly.
+     NOTE: deliberately NOT using the `font` shorthand here (font: inherit)
+     - that resets font-size/weight/family all at once from the parent
+       ticker bar, which has no explicit font-size of its own, so it fell
+       through to the page's default (much larger) body font size. That
+       silently overrode .ticker-label's own font-size/weight declared
+       above, since author rules of equal specificity are decided by
+       source order. Bug only showed on desktop because the mobile view
+       swaps in a different element (.ticker-label-short) that has its own
+       explicit font-size set via a more specific selector below,
+       untouched by this. Browser rounded/border defaults on <button> are
+       already low-priority enough that .ticker-label's explicit
+       background/padding/border-right win without needing to reset them
+       here too - only cursor needed adding. */
   .ticker-label-btn {
-    font: inherit;
     cursor: pointer;
   }
   .ticker-label-short { display: none; }
@@ -1767,7 +1779,7 @@
       </div>
       <!-- Honeypot: hidden from real visitors via off-screen positioning
            (not display:none, which some bots detect and skip). Left blank
-           by humans; bots that auto-fill every field trip it.  -->
+           by humans; bots that auto-fill every field trip it. -->
       <div class="form-row" style="position:absolute; left:-9999px; top:-9999px;" aria-hidden="true">
         <label for="fb_website">Website</label>
         <input id="fb_website" tabindex="-1" autocomplete="off">
