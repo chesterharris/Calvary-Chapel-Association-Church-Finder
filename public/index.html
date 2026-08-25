@@ -1532,6 +1532,66 @@
   }
   .mp-star.favorited { color: var(--brass); }
   .mp-star svg { width: 24px; height: 24px; }
+
+  /* ---- Church favorites (personal) + Featured Streams (admin-curated) ---- */
+  .church-fav-star, .church-featured-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--line);
+    vertical-align: middle;
+  }
+  .church-fav-star svg, .church-featured-toggle svg { width: 18px; height: 18px; }
+  .church-fav-star.favorited { color: var(--brass); }
+  .church-featured-toggle.featured { color: var(--evergreen); }
+  .popup-fav-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 0 2px;
+  }
+  .popup-fav-row .church-fav-star svg, .popup-fav-row .church-featured-toggle svg { width: 20px; height: 20px; }
+  .popup-fav-label {
+    font-size: 11px;
+    opacity: 0.65;
+    margin-right: 4px;
+  }
+  .live-now-filters {
+    border-bottom: 1px solid var(--line);
+  }
+  .live-now-clear-filters-msg {
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--ink);
+    background: rgba(193,86,47,0.08);
+    border-bottom: 1px solid var(--line);
+  }
+  .live-now-clear-filters-link {
+    color: var(--ember);
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+  }
+  .live-now-card { position: relative; }
+  .live-now-card-actions {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: rgba(246,244,238,0.9);
+    border-radius: 12px;
+    padding: 1px 2px;
+  }
 </style>
 </head>
 <body class="">
@@ -1775,10 +1835,21 @@
     <h2>🔴 Live Now</h2>
     <button id="closeLiveNowBtn" class="btn-close">×</button>
   </div>
-  <label id="liveOnlyFilterRow" class="live-only-filter-row">
-    <input type="checkbox" id="liveOnlyFilterCb" disabled>
-    <span>Show only live churches on the map</span>
-  </label>
+  <div id="liveNowFilters" class="live-now-filters">
+    <label id="liveOnlyFilterRow" class="live-only-filter-row">
+      <input type="checkbox" id="liveOnlyFilterCb" disabled>
+      <span>Show only live churches on the map</span>
+    </label>
+    <label id="featuredFilterRow" class="live-only-filter-row">
+      <input type="checkbox" id="featuredFilterCb">
+      <span>Featured Streams only</span>
+    </label>
+    <label id="favoritesFilterRow" class="live-only-filter-row">
+      <input type="checkbox" id="favoritesFilterCb">
+      <span>Favorites only</span>
+    </label>
+  </div>
+  <div id="liveNowClearFiltersMsg" class="live-now-clear-filters-msg" style="display:none;"></div>
   <div id="liveNowList" class="live-now-list"></div>
 </div>
 
@@ -1903,6 +1974,11 @@
     const liveOnlyCb = document.getElementById('liveOnlyFilterCb');
     const liveOnlyRow = document.getElementById('liveOnlyFilterRow');
 
+    // The red alert always reflects the true total, regardless of the
+    // Featured/Favorites filters below - those only ever narrow what's
+    // shown inside the pane once opened, never the header count, so
+    // someone with an over-restrictive filter still gets nudged that more
+    // streams exist.
     if (count === 0) {
       btn.style.display = 'none';
       // Nothing left to filter to - force the toggle off rather than
@@ -1936,13 +2012,64 @@
     return text.slice(0, maxLen).trim() + '…';
   }
 
+  // Favorites first (A-Z), then Featured (A-Z), then everything else
+  // (already alphabetical from loadLiveStatus's own sort) - a church that
+  // is BOTH favorited and featured counts only once, in the Favorites
+  // tier, so it doesn't show up twice.
+  function getOrderedLiveList() {
+    function tier(l) {
+      const church = findChurchById(l.churchId);
+      if (church && isChurchFavorite(church.id)) return 0;
+      if (church && church.featured) return 1;
+      return 2;
+    }
+    return liveStatusData.live.slice().sort(function(a, b) {
+      const ta = tier(a), tb = tier(b);
+      if (ta !== tb) return ta - tb;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }
+
+  // A live entry with no matching church record (shouldn't normally
+  // happen, but the live-status feed and the churches list are two
+  // separate data sources) is only shown when no filter is narrowing the
+  // list - can't confirm it matches a filter it might not satisfy.
+  function liveEntryPassesFilter(l) {
+    const church = findChurchById(l.churchId);
+    if (!church) return !(featuredFilterActive || favoritesFilterActive);
+    return matchesFeaturedOrFavoritesFilter(church);
+  }
+
   function renderLiveNowList() {
     const list = document.getElementById('liveNowList');
-    if (!liveStatusData.live.length) {
+    const msgEl = document.getElementById('liveNowClearFiltersMsg');
+    const totalCount = liveStatusData.live.length;
+
+    if (!totalCount) {
+      msgEl.style.display = 'none';
       list.innerHTML = '<div class="live-now-empty">No churches are currently live.</div>';
       return;
     }
-    list.innerHTML = liveStatusData.live.map(function(l) {
+
+    const ordered = getOrderedLiveList();
+    const visible = ordered.filter(liveEntryPassesFilter);
+    const hiddenCount = totalCount - visible.length;
+
+    if (hiddenCount > 0) {
+      msgEl.style.display = 'block';
+      msgEl.innerHTML = 'Showing ' + visible.length + ' of ' + totalCount + ' live streams &mdash; ' +
+        '<button type="button" id="liveNowClearFiltersLink" class="live-now-clear-filters-link">Clear all filters</button> to see the rest.';
+    } else {
+      msgEl.style.display = 'none';
+      msgEl.innerHTML = '';
+    }
+
+    if (!visible.length) {
+      list.innerHTML = '<div class="live-now-empty">No live streams match your current filters.</div>';
+      return;
+    }
+
+    list.innerHTML = visible.map(function(l) {
       const mins = minutesSince(l.startDate);
       const durationText = (mins === null) ? '' : ('Live for ' + mins + ' min');
       const viewsText = (l.viewCount === null || l.viewCount === undefined) ? '' : (l.viewCount + ' watching');
@@ -1959,7 +2086,21 @@
       // videoId/title/everything else - rather than a blank, dead-looking
       // card in that case, say plainly that it's live and clickable.
       const titleText = l.title || (l.videoId ? '' : 'Live now - tap to watch on YouTube');
+      const church = findChurchById(l.churchId);
+      const isFav = church ? isChurchFavorite(church.id) : false;
+      const isFeatured = church ? !!church.featured : false;
+      const actionsHtml = '<div class="live-now-card-actions">' +
+        '<button type="button" class="church-fav-star' + (isFav ? ' favorited' : '') + '" data-fav-church-id="' + escapeHtml(l.churchId) + '" title="' + (isFav ? 'Remove from your favorites' : 'Add to your favorites') + '">' +
+          buildFavoriteStarSvg(isFav) +
+        '</button>' +
+        (window.isAdmin
+          ? '<button type="button" class="church-featured-toggle' + (isFeatured ? ' featured' : '') + '" data-featured-church-id="' + escapeHtml(l.churchId) + '" title="' + (isFeatured ? 'Remove from Featured Streams' : 'Add to Featured Streams') + '">' +
+              buildFeaturedFlagSvg(isFeatured) +
+            '</button>'
+          : '') +
+        '</div>';
       return '<div class="live-now-card" data-church-id="' + escapeHtml(l.churchId) + '" data-video-id="' + escapeHtml(l.videoId || '') + '" data-channel-url="' + escapeHtml(l.channelUrl || '') + '">' +
+        actionsHtml +
         thumbHtml +
         '<div class="live-now-info">' +
           '<div class="live-now-channel">' + escapeHtml(l.author || l.name || '') + '</div>' +
@@ -1995,6 +2136,21 @@
   document.getElementById('liveOnlyFilterCb').addEventListener('change', function(e) {
     liveOnlyFilterActive = e.target.checked;
     renderMarkers(); // handles both the filtering and the best-fit zoom
+  });
+  // Restore persisted filter state on load, and wire their change handlers.
+  document.getElementById('featuredFilterCb').checked = featuredFilterActive;
+  document.getElementById('favoritesFilterCb').checked = favoritesFilterActive;
+  document.getElementById('featuredFilterCb').addEventListener('change', function(e) {
+    featuredFilterActive = e.target.checked;
+    saveBoolFlag(LIVENOW_FEATURED_FILTER_KEY, featuredFilterActive);
+    renderLiveNowList();
+    renderMarkers();
+  });
+  document.getElementById('favoritesFilterCb').addEventListener('change', function(e) {
+    favoritesFilterActive = e.target.checked;
+    saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, favoritesFilterActive);
+    renderLiveNowList();
+    renderMarkers();
   });
 
   // ---- Live Check Debug panel (admin-only) ----
@@ -2369,6 +2525,20 @@
   });
 
   document.getElementById('liveNowList').addEventListener('click', function(e) {
+    const favBtn = e.target.closest('.church-fav-star');
+    if (favBtn) {
+      const id = favBtn.getAttribute('data-fav-church-id');
+      const updated = toggleChurchFavorite(id);
+      const nowFav = updated.indexOf(Number(id)) !== -1;
+      renderLiveNowList();
+      if (favoritesFilterActive) renderMarkers();
+      return;
+    }
+    const featBtn = e.target.closest('.church-featured-toggle');
+    if (featBtn) {
+      toggleChurchFeatured(featBtn.getAttribute('data-featured-church-id'));
+      return;
+    }
     const card = e.target.closest('.live-now-card');
     if (!card) return;
     const churchId = Number(card.getAttribute('data-church-id'));
@@ -2391,6 +2561,18 @@
       // stream, rather than the click silently doing nothing.
       window.open(channelUrl, '_blank', 'noopener');
     }
+  });
+
+  document.getElementById('liveNowClearFiltersMsg').addEventListener('click', function(e) {
+    if (!e.target.closest('#liveNowClearFiltersLink')) return;
+    featuredFilterActive = false;
+    favoritesFilterActive = false;
+    saveBoolFlag(LIVENOW_FEATURED_FILTER_KEY, false);
+    saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, false);
+    document.getElementById('featuredFilterCb').checked = false;
+    document.getElementById('favoritesFilterCb').checked = false;
+    renderLiveNowList();
+    renderMarkers();
   });
 
   function getEffectiveChurches() {
@@ -2437,6 +2619,91 @@
   function findChurchById(id) {
     const numericId = Number(id);
     return churches.find(function(c) { return c.id === numericId; });
+  }
+
+  // ---- Church favorites (personal, client-side only - mirrors the radio
+  // station favorites pattern above/below) ----
+  const CHURCH_FAVORITES_STORAGE_KEY = 'ccaFinderChurchFavorites';
+
+  function getFavoriteChurchIds() {
+    try {
+      const raw = localStorage.getItem(CHURCH_FAVORITES_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.map(Number).filter(function(n) { return !isNaN(n); }) : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function setFavoriteChurchIds(ids) {
+    try {
+      localStorage.setItem(CHURCH_FAVORITES_STORAGE_KEY, JSON.stringify(ids));
+    } catch (err) {
+      // Ignore - favoriting just won't persist this session.
+    }
+  }
+
+  function isChurchFavorite(id) {
+    return getFavoriteChurchIds().indexOf(Number(id)) !== -1;
+  }
+
+  function toggleChurchFavorite(id) {
+    const numericId = Number(id);
+    const current = getFavoriteChurchIds();
+    const idx = current.indexOf(numericId);
+    if (idx === -1) { current.push(numericId); } else { current.splice(idx, 1); }
+    setFavoriteChurchIds(current);
+    return current;
+  }
+
+  // ---- Live Now filters: "Featured Streams" (admin-curated, stored on the
+  // church record server-side as c.featured) and "Favorites only" (personal,
+  // above). Both persist across visits, same as the favorites list itself. ----
+  const LIVENOW_FEATURED_FILTER_KEY = 'ccaFinderLiveNowFeaturedFilter';
+  const LIVENOW_FAVORITES_FILTER_KEY = 'ccaFinderLiveNowFavoritesFilter';
+
+  function loadBoolFlag(key) {
+    try { return localStorage.getItem(key) === 'true'; } catch (err) { return false; }
+  }
+  function saveBoolFlag(key, val) {
+    try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (err) { /* ignore */ }
+  }
+
+  let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
+  let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
+
+  // Shared by both the map's renderMarkers() and the Live Now list - a
+  // church matches when no filter is on, or when it satisfies whichever
+  // filter(s) are (a plain OR when both are active: favoriting AND
+  // featuring are both reasons to keep something visible, not a stricter
+  // requirement to be both).
+  function matchesFeaturedOrFavoritesFilter(c) {
+    if (!featuredFilterActive && !favoritesFilterActive) return true;
+    const favMatch = favoritesFilterActive && isChurchFavorite(c.id);
+    const featMatch = featuredFilterActive && !!c.featured;
+    return favMatch || featMatch;
+  }
+
+  // Quick admin toggle for c.featured - reuses the existing save endpoint,
+  // sending only {id, featured} since the server merges this into the
+  // existing record (see handleSaveChurch's {...existing, ...incoming}) -
+  // no need to resend the whole church.
+  async function toggleChurchFeatured(id) {
+    const church = findChurchById(id);
+    if (!church) return;
+    try {
+      await saveChurchToServer({ id: church.id, featured: !church.featured });
+      if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+    } catch (err) {
+      alert('Sorry, updating Featured status failed. Please check your connection and try again.');
+    }
+  }
+
+  function buildFeaturedFlagSvg(isFeatured) {
+    return '<svg viewBox="0 0 24 24" fill="' + (isFeatured ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 3v18"/>' +
+      '<path d="M5 4h12l-3.2 4L17 12H5z"/>' +
+      '</svg>';
   }
 
   const map = L.map('map', {
@@ -2632,6 +2899,27 @@
       }
       popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
     }
+    // Favorite star (everyone) and, for the admin, the Featured Streams
+    // toggle - shown for any church that's indicated it streams live
+    // (c.livestreamsEnabled), not gated on whether it happens to be live
+    // at this exact moment. Favoriting is most useful BEFORE a stream
+    // starts (so you get pulled to the top of Live Now once it does), so
+    // requiring it to already be live to favorite it would defeat the point.
+    if (c.livestreamsEnabled) {
+      const isFav = isChurchFavorite(c.id);
+      popup += '<div class="popup-fav-row">' +
+        '<span class="popup-fav-label">This church streams</span>' +
+        '<button type="button" class="church-fav-star' + (isFav ? ' favorited' : '') + '" data-fav-church-id="' + escapeHtml(c.id) + '" title="' + (isFav ? 'Remove from your favorites' : 'Add to your favorites') + '">' +
+          buildFavoriteStarSvg(isFav) +
+        '</button>';
+      if (window.isAdmin) {
+        const isFeatured = !!c.featured;
+        popup += '<button type="button" class="church-featured-toggle' + (isFeatured ? ' featured' : '') + '" data-featured-church-id="' + escapeHtml(c.id) + '" title="' + (isFeatured ? 'Remove from Featured Streams' : 'Add to Featured Streams') + '">' +
+          buildFeaturedFlagSvg(isFeatured) +
+        '</button>';
+      }
+      popup += '</div>';
+    }
     if (window.isAdmin) {
       popup += '<div class="popup-admin-actions">' +
         '<button type="button" class="popup-edit-btn" data-edit-id="' + escapeHtml(c.id) + '">Edit Location</button>' +
@@ -2674,7 +2962,7 @@
     markers.clearLayers();
     const term = searchTerm.trim().toLowerCase();
     const list = getEffectiveChurches().filter(function(c) {
-      return matchesSearch(c, term) && matchesScoreFilter(c) && matchesLiveOnly(c);
+      return matchesSearch(c, term) && matchesScoreFilter(c) && matchesLiveOnly(c) && matchesFeaturedOrFavoritesFilter(c);
     });
     let plotted = 0;
     const bounds = [];
@@ -2692,11 +2980,12 @@
     });
 
     // Best-fit the view any time a filter has actually narrowed the
-    // result set down from "everything" - a search term or the live-only
-    // toggle both qualify. Both can be active together; `bounds` already
-    // reflects whichever subset actually matched both, so no special
-    // combined-case logic is needed here.
-    if (term || liveOnlyFilterActive) {
+    // result set down from "everything" - a search term, the live-only
+    // toggle, or the new Featured/Favorites filters all qualify. Both can
+    // be active together; `bounds` already reflects whichever subset
+    // actually matched both, so no special combined-case logic is needed
+    // here.
+    if (term || liveOnlyFilterActive || featuredFilterActive || favoritesFilterActive) {
       if (bounds.length === 1) {
         map.setView(bounds[0], 14);
         // Auto-open the popup for a single match.
@@ -2709,6 +2998,7 @@
     badge.textContent = plotted + (
       term ? ' match' + (plotted === 1 ? '' : 'es')
       : liveOnlyFilterActive ? ' live church' + (plotted === 1 ? '' : 'es')
+      : (featuredFilterActive || favoritesFilterActive) ? ' church' + (plotted === 1 ? '' : 'es') + ' shown'
       : ' churches mapped'
     );
   }
@@ -2727,6 +3017,31 @@
           map.closePopup();
           openEditModal(c);
         }
+      });
+    }
+    const favStarBtn = el.querySelector('[data-fav-church-id]');
+    if (favStarBtn) {
+      favStarBtn.addEventListener('click', function() {
+        // Purely local - update this button in place rather than closing
+        // and reopening the whole popup for a one-icon change.
+        const updated = toggleChurchFavorite(favStarBtn.getAttribute('data-fav-church-id'));
+        const nowFav = updated.indexOf(Number(favStarBtn.getAttribute('data-fav-church-id'))) !== -1;
+        favStarBtn.classList.toggle('favorited', nowFav);
+        favStarBtn.innerHTML = buildFavoriteStarSvg(nowFav);
+        favStarBtn.title = nowFav ? 'Remove from your favorites' : 'Add to your favorites';
+        if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+        if (favoritesFilterActive) renderMarkers();
+      });
+    }
+    const featuredBtn = el.querySelector('[data-featured-church-id]');
+    if (featuredBtn) {
+      featuredBtn.addEventListener('click', function() {
+        // This one round-trips to the server (see toggleChurchFeatured),
+        // which refreshes churches + re-renders markers - that rebuilds
+        // this popup's marker, so the popup itself will close. Acceptable
+        // tradeoff for a rare admin action vs. the complexity of patching
+        // a popup out from under Leaflet mid-render.
+        toggleChurchFeatured(featuredBtn.getAttribute('data-featured-church-id'));
       });
     }
     const deleteBtn = el.querySelector('[data-delete-id]');
