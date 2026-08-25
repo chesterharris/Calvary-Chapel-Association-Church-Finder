@@ -1930,6 +1930,102 @@
     }
   }
 
+  // ---- Church favorites (personal, client-side only - mirrors the radio
+  // station favorites pattern above/below) ----
+  const CHURCH_FAVORITES_STORAGE_KEY = 'ccaFinderChurchFavorites';
+
+  function getFavoriteChurchIds() {
+    try {
+      const raw = localStorage.getItem(CHURCH_FAVORITES_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.map(Number).filter(function(n) { return !isNaN(n); }) : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function setFavoriteChurchIds(ids) {
+    try {
+      localStorage.setItem(CHURCH_FAVORITES_STORAGE_KEY, JSON.stringify(ids));
+    } catch (err) {
+      // Ignore - favoriting just won't persist this session.
+    }
+  }
+
+  function isChurchFavorite(id) {
+    return getFavoriteChurchIds().indexOf(Number(id)) !== -1;
+  }
+
+  function toggleChurchFavorite(id) {
+    const numericId = Number(id);
+    const current = getFavoriteChurchIds();
+    const idx = current.indexOf(numericId);
+    if (idx === -1) { current.push(numericId); } else { current.splice(idx, 1); }
+    setFavoriteChurchIds(current);
+    return current;
+  }
+
+  // ---- Live Now filters: "Featured Streams" (admin-curated, stored on the
+  // church record server-side as c.featured) and "Favorites only" (personal,
+  // above). Both persist across visits, same as the favorites list itself.
+  //
+  // Declared here (well before anything reads them) rather than further
+  // down near the other church-CRUD helpers - a line further below sets a
+  // checkbox's initial .checked state from featuredFilterActive as a plain
+  // top-level statement (runs immediately during page load, not inside a
+  // callback), so these `let`s must already be past their declaration by
+  // that point or that line throws a "used before initialization" error
+  // that kills the rest of the script (learned this one the hard way). ----
+  const LIVENOW_FEATURED_FILTER_KEY = 'ccaFinderLiveNowFeaturedFilter';
+  const LIVENOW_FAVORITES_FILTER_KEY = 'ccaFinderLiveNowFavoritesFilter';
+
+  function loadBoolFlag(key) {
+    try { return localStorage.getItem(key) === 'true'; } catch (err) { return false; }
+  }
+  function saveBoolFlag(key, val) {
+    try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (err) { /* ignore */ }
+  }
+
+  let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
+  let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
+
+  // Shared by both the map's renderMarkers() and the Live Now list - a
+  // church matches when no filter is on, or when it satisfies whichever
+  // filter(s) are (a plain OR when both are active: favoriting AND
+  // featuring are both reasons to keep something visible, not a stricter
+  // requirement to be both).
+  function matchesFeaturedOrFavoritesFilter(c) {
+    if (!featuredFilterActive && !favoritesFilterActive) return true;
+    const favMatch = favoritesFilterActive && isChurchFavorite(c.id);
+    const featMatch = featuredFilterActive && !!c.featured;
+    return favMatch || featMatch;
+  }
+
+  // Quick admin toggle for c.featured - reuses the existing save endpoint,
+  // sending only {id, featured} since the server merges this into the
+  // existing record (see handleSaveChurch's {...existing, ...incoming}) -
+  // no need to resend the whole church. findChurchById/saveChurchToServer
+  // are defined further down, but as function declarations they're
+  // hoisted and safe to call from here since this function itself isn't
+  // invoked until well after the full script (and those definitions) has run.
+  async function toggleChurchFeatured(id) {
+    const church = findChurchById(id);
+    if (!church) return;
+    try {
+      await saveChurchToServer({ id: church.id, featured: !church.featured });
+      if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+    } catch (err) {
+      alert('Sorry, updating Featured status failed. Please check your connection and try again.');
+    }
+  }
+
+  function buildFeaturedFlagSvg(isFeatured) {
+    return '<svg viewBox="0 0 24 24" fill="' + (isFeatured ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 3v18"/>' +
+      '<path d="M5 4h12l-3.2 4L17 12H5z"/>' +
+      '</svg>';
+  }
+
   // ---- YouTube live status (read-only - the Cron Trigger does the actual
   // checking server-side; this just reads whatever it last cached) ----
 
@@ -2619,91 +2715,6 @@
   function findChurchById(id) {
     const numericId = Number(id);
     return churches.find(function(c) { return c.id === numericId; });
-  }
-
-  // ---- Church favorites (personal, client-side only - mirrors the radio
-  // station favorites pattern above/below) ----
-  const CHURCH_FAVORITES_STORAGE_KEY = 'ccaFinderChurchFavorites';
-
-  function getFavoriteChurchIds() {
-    try {
-      const raw = localStorage.getItem(CHURCH_FAVORITES_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.map(Number).filter(function(n) { return !isNaN(n); }) : [];
-    } catch (err) {
-      return [];
-    }
-  }
-
-  function setFavoriteChurchIds(ids) {
-    try {
-      localStorage.setItem(CHURCH_FAVORITES_STORAGE_KEY, JSON.stringify(ids));
-    } catch (err) {
-      // Ignore - favoriting just won't persist this session.
-    }
-  }
-
-  function isChurchFavorite(id) {
-    return getFavoriteChurchIds().indexOf(Number(id)) !== -1;
-  }
-
-  function toggleChurchFavorite(id) {
-    const numericId = Number(id);
-    const current = getFavoriteChurchIds();
-    const idx = current.indexOf(numericId);
-    if (idx === -1) { current.push(numericId); } else { current.splice(idx, 1); }
-    setFavoriteChurchIds(current);
-    return current;
-  }
-
-  // ---- Live Now filters: "Featured Streams" (admin-curated, stored on the
-  // church record server-side as c.featured) and "Favorites only" (personal,
-  // above). Both persist across visits, same as the favorites list itself. ----
-  const LIVENOW_FEATURED_FILTER_KEY = 'ccaFinderLiveNowFeaturedFilter';
-  const LIVENOW_FAVORITES_FILTER_KEY = 'ccaFinderLiveNowFavoritesFilter';
-
-  function loadBoolFlag(key) {
-    try { return localStorage.getItem(key) === 'true'; } catch (err) { return false; }
-  }
-  function saveBoolFlag(key, val) {
-    try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (err) { /* ignore */ }
-  }
-
-  let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
-  let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
-
-  // Shared by both the map's renderMarkers() and the Live Now list - a
-  // church matches when no filter is on, or when it satisfies whichever
-  // filter(s) are (a plain OR when both are active: favoriting AND
-  // featuring are both reasons to keep something visible, not a stricter
-  // requirement to be both).
-  function matchesFeaturedOrFavoritesFilter(c) {
-    if (!featuredFilterActive && !favoritesFilterActive) return true;
-    const favMatch = favoritesFilterActive && isChurchFavorite(c.id);
-    const featMatch = featuredFilterActive && !!c.featured;
-    return favMatch || featMatch;
-  }
-
-  // Quick admin toggle for c.featured - reuses the existing save endpoint,
-  // sending only {id, featured} since the server merges this into the
-  // existing record (see handleSaveChurch's {...existing, ...incoming}) -
-  // no need to resend the whole church.
-  async function toggleChurchFeatured(id) {
-    const church = findChurchById(id);
-    if (!church) return;
-    try {
-      await saveChurchToServer({ id: church.id, featured: !church.featured });
-      if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
-    } catch (err) {
-      alert('Sorry, updating Featured status failed. Please check your connection and try again.');
-    }
-  }
-
-  function buildFeaturedFlagSvg(isFeatured) {
-    return '<svg viewBox="0 0 24 24" fill="' + (isFeatured ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M5 3v18"/>' +
-      '<path d="M5 4h12l-3.2 4L17 12H5z"/>' +
-      '</svg>';
   }
 
   const map = L.map('map', {
