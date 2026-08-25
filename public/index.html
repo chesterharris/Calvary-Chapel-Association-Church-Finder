@@ -3107,22 +3107,36 @@
         const churchIdAttr = favStarBtn.getAttribute('data-fav-church-id');
         const updated = toggleChurchFavorite(churchIdAttr);
         const nowFav = updated.indexOf(Number(churchIdAttr)) !== -1;
-        // refreshChurchPopup rebuilds this popup's actual bound content
-        // (via buildPopupHtml, which reads the now-updated favorite state)
-        // using Leaflet's setPopupContent - this is the piece that was
-        // missing before: patching just the visible button's DOM updated
-        // what you could SEE in that moment, but never touched the
-        // underlying HTML string Leaflet had cached for this marker's
-        // popup - so closing and reopening it (by any means) kept showing
-        // the pre-toggle state. setPopupContent updates that cached
-        // content directly and, per Leaflet's own design, does this
-        // without closing an already-open popup.
-        refreshChurchPopup(churchIdAttr);
-        // Also patch any OTHER on-screen copy of this same church's star
-        // (e.g. its row in the Live Now list, if currently open) that
-        // isn't inside this popup and so won't be touched by the above.
-        patchFavoriteStarButtons(churchIdAttr, nowFav);
-        if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+        // Deferred to the next tick, unlike the Featured toggle's version
+        // of this same call. The Featured toggle is async (it awaits a
+        // network request before ever touching the popup), so by the time
+        // IT calls refreshChurchPopup, this click has already fully
+        // finished being dispatched/bubbled by the browser - confirmed in
+        // production to be the reason IT never closes the popup while
+        // this handler, doing the equivalent DOM replacement synchronously
+        // (nothing to await, since favoriting is purely local), did.
+        // Replacing a popup's content out from under a click event that's
+        // still actively bubbling is exactly the kind of thing that can
+        // make Leaflet's own "was that click outside the popup?" close
+        // check misfire. setTimeout(0) buys the exact same breathing room
+        // the network request gives the other handler for free, without
+        // actually needing a network request.
+        setTimeout(function() {
+          // refreshChurchPopup rebuilds this popup's actual bound content
+          // (via buildPopupHtml, which reads the now-updated favorite
+          // state) using Leaflet's setPopupContent - this is the piece
+          // that was missing before the previous fix: patching just the
+          // visible button's DOM updated what you could SEE in that
+          // moment, but never touched the underlying HTML string Leaflet
+          // had cached for this marker's popup, so closing and reopening
+          // it (by any means) kept showing the pre-toggle state.
+          refreshChurchPopup(churchIdAttr);
+          // Also patch any OTHER on-screen copy of this same church's
+          // star (e.g. its row in the Live Now list, if currently open)
+          // that isn't inside this popup and so won't be touched above.
+          patchFavoriteStarButtons(churchIdAttr, nowFav);
+          if (document.getElementById('liveNowPanel').style.display !== 'none') renderLiveNowList();
+        }, 0);
       });
     }
     const featuredBtn = el.querySelector('[data-featured-church-id]');
