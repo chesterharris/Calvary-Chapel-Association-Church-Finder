@@ -2795,7 +2795,16 @@
   const map = L.map('map', {
     scrollWheelZoom: true,
     zoomControl: true,
-    // Three options MapLibre GL's Leaflet binding recommends (see
+    // The old CARTO/Esri raster tile layers each declared their own
+    // maxZoom: 19, and Leaflet quietly rolled that up into the map's own
+    // max zoom automatically. L.maplibreGL() layers don't carry that same
+    // property, so without setting it here directly, map.getMaxZoom()
+    // comes back undefined - which leaflet.markercluster treats as a hard
+    // error ("Map has no maxZoom specified") the moment it's added,
+    // rather than assuming a default. Confirmed this is required, not
+    // just good practice, by that exact crash.
+    maxZoom: 19,
+    // Three more options MapLibre GL's Leaflet binding recommends (see
     // maplibre-gl-leaflet's own docs): MapLibre enforces map latitude
     // limits more strictly than Leaflet does on its own, so without these,
     // panning/zooming near the poles can desync the two. maxBoundsViscosity
