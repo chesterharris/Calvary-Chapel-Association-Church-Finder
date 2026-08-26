@@ -2789,11 +2789,19 @@
     zoomControl: true
   }).setView([39.5, -98.35], 4);
 
+  // CARTO's free raster tile service now requires an API key (a change on
+  // their end, introduced without warning - unauthenticated requests get a
+  // watermark instead of failing outright, which is what was showing up as
+  // "API KEY REQUIRED" diagonal text across the map). Rather than sign up
+  // for a key for a service CARTO's own docs say they're deprecating
+  // anyway, Streets (Esri, no key ever required) is now the default -
+  // Light is kept available as a secondary option in the layer switcher in
+  // case a CARTO key gets added down the line and this gets revisited.
   const baseLayerLight = L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     maxZoom: 19,
     subdomains: 'abcd'
-  }).addTo(map);
+  });
 
   // Esri's tile scheme uses {z}/{y}/{x} order (note: reversed x/y from most
   // other providers, including the CARTO layer above) - a well-known quirk
@@ -2802,11 +2810,11 @@
   const baseLayerStreets = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012',
     maxZoom: 19
-  });
+  }).addTo(map);
 
   L.control.layers({
-    'Light': baseLayerLight,
-    'Streets': baseLayerStreets
+    'Streets': baseLayerStreets,
+    'Light': baseLayerLight
   }, null, { position: 'topright' }).addTo(map);
 
   const markers = L.markerClusterGroup({
