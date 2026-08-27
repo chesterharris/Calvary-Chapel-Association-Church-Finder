@@ -695,9 +695,8 @@ async function fetchLivePage(liveUrl) {
   // actual bot traffic.
   const controller = new AbortController();
   const timeoutId = setTimeout(function() { controller.abort(); }, LIVE_CHECK_FETCH_TIMEOUT_MS);
-  let response;
   try {
-    response = await fetch(liveUrl, {
+    const response = await fetch(liveUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -705,6 +704,24 @@ async function fetchLivePage(liveUrl) {
       },
       signal: controller.signal
     });
+    if (!response.ok) {
+      throw new Error('Live page fetch failed with status ' + response.status);
+    }
+    // IMPORTANT: response.text() reads and buffers the ENTIRE response
+    // body - this is a separate operation from fetch() itself resolving,
+    // which only means headers arrived. Confirmed in production: churches
+    // hanging for 5+ minutes at a time, well past the 10s timeout, with
+    // fetch() apparently having already resolved - the previous version
+    // of this function cleared the timeout in a finally block wrapping
+    // ONLY the fetch() call above, which meant the timeout was already
+    // disarmed by the time response.text() ran, leaving the body-read
+    // phase completely unbounded (e.g. a connection that opens fine but
+    // then trickles data in very slowly, or stalls partway through).
+    // Awaiting response.text() inside this same try, with the timeout not
+    // cleared until the finally block below, keeps the ENTIRE
+    // connect-plus-read under one shared budget instead of just the
+    // connect phase.
+    return await response.text();
   } catch (err) {
     // AbortController rejects with a generic "AbortError", not anything
     // that mentions a timeout - rethrow with a clearer message since this
@@ -717,10 +734,6 @@ async function fetchLivePage(liveUrl) {
   } finally {
     clearTimeout(timeoutId);
   }
-  if (!response.ok) {
-    throw new Error('Live page fetch failed with status ' + response.status);
-  }
-  return response.text();
 }
 
 // Wraps fetchLivePage with a single retry after a short backoff. Most
