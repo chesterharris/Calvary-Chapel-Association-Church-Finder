@@ -600,6 +600,44 @@ function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
 
+// Records a visible marker in the debug history when the overlap guard
+// (see LIVE_CHECK_OVERLAP_GUARD_MS below) decides a previous cycle has
+// been running too long to plausibly still be legitimate, and is about
+// to let a fresh cycle start anyway. Without this, an overridden stall
+// just leaves a silent, unexplained gap in the "Recent Cycles" trend -
+// exactly the kind of gap that made earlier stalls hard to diagnose from
+// the debug panel alone. This makes the event itself show up as its own
+// row instead of something that has to be inferred from timestamps.
+// Best-effort: a failed write here should never block the new cycle from
+// starting - see the try/catch at the call site.
+async function recordStalledCycleNote(env, progress, elapsedMs) {
+  const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  let debugPrevious = { history: [] };
+  if (debugRaw) {
+    try {
+      const parsed = JSON.parse(debugRaw);
+      if (parsed) debugPrevious = parsed;
+    } catch (err) {
+      // Fall through to the empty default above.
+    }
+  }
+  const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
+  history.push({
+    checkedAt: new Date().toISOString(),
+    stalledPreviousCycle: true,
+    previousStartedAt: progress.startedAt,
+    previousCompletedCount: typeof progress.completedCount === 'number' ? progress.completedCount : null,
+    previousTotalCandidates: typeof progress.totalCandidates === 'number' ? progress.totalCandidates : null,
+    stuckForMs: elapsedMs
+  });
+  while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+  // Object.assign preserves latestCycle (the last real completed cycle's
+  // full summary) untouched - this note only ever appends to history,
+  // never overwrites the "what actually happened last" section the rest
+  // of the debug panel reads from.
+  await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify(Object.assign({}, debugPrevious, { history: history })));
+}
+
 async function loadStaggerState(env) {
   const raw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
   if (!raw) return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
@@ -949,9 +987,23 @@ async function checkAllChurchesLive(env) {
       const progress = JSON.parse(progressRaw);
       if (progress && progress.running && progress.startedAt) {
         const startedAtMs = new Date(progress.startedAt).getTime();
-        if (!isNaN(startedAtMs) && (Date.now() - startedAtMs) < LIVE_CHECK_OVERLAP_GUARD_MS) {
-          console.log('Skipping live-check cycle - previous cycle still in progress (started ' + progress.startedAt + ')');
-          return;
+        if (!isNaN(startedAtMs)) {
+          const elapsedMs = Date.now() - startedAtMs;
+          if (elapsedMs < LIVE_CHECK_OVERLAP_GUARD_MS) {
+            console.log('Skipping live-check cycle - previous cycle still in progress (started ' + progress.startedAt + ')');
+            return;
+          }
+          // Past the guard window - this looks stuck rather than just
+          // slow. Record a visible note before proceeding, so the "Recent
+          // Cycles" trend shows what actually happened here instead of an
+          // unexplained gap.
+          console.log('Previous live-check cycle appears stalled (started ' + progress.startedAt + ', ' + Math.round(elapsedMs / 1000) + 's ago) - starting a new cycle and recording a note.');
+          try {
+            await recordStalledCycleNote(env, progress, elapsedMs);
+          } catch (noteErr) {
+            // Swallow - this is a visibility nice-to-have, not worth
+            // blocking the new cycle over.
+          }
         }
       }
     }
