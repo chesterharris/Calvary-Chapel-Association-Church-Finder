@@ -567,6 +567,22 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // once, then falls back to last-known-good data) - see fetchLivePage below.
 const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 
+// ============================================================
+// TEMPORARY EXPERIMENT - remove this constant and its one use
+// below (in checkAllChurchesLive) once the experiment is done.
+// ============================================================
+// Caps how many churches get checked per cycle, without touching any
+// church's actual data. Set to a number (e.g. 150) to test whether
+// staying under that count avoids the cycles stalling out around
+// 154-162 churches that's been observed in production every cycle,
+// all night, even after fixing the malformed-URL and response.text()
+// timeout bugs - i.e. testing whether something (our code, or YouTube
+// throttling us) breaks down specifically as candidate COUNT grows,
+// independent of which specific churches are involved. Set back to
+// null to check every eligible church again, with no other changes
+// needed anywhere else - this is the only place this constant is read.
+const LIVE_CHECK_DEBUG_CANDIDATE_CAP = 150;
+
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
 // than starting a second, overlapping invocation on top of it. There is
@@ -1040,7 +1056,17 @@ async function checkAllChurchesLive(env) {
   }
 
   const churches = await loadChurches(env);
-  const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
+  let candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
+  // TEMPORARY EXPERIMENT - see LIVE_CHECK_DEBUG_CANDIDATE_CAP above.
+  // Takes the first N eligible churches in list order rather than
+  // touching any church's actual livestreamsEnabled/youtubeUrl data, so
+  // it's a single flip to remove: set the constant back to null (or
+  // delete this if-block) and every eligible church is checked again,
+  // no per-church cleanup needed either direction.
+  if (LIVE_CHECK_DEBUG_CANDIDATE_CAP != null && candidates.length > LIVE_CHECK_DEBUG_CANDIDATE_CAP) {
+    console.log('TEMP EXPERIMENT: capping candidates from ' + candidates.length + ' to ' + LIVE_CHECK_DEBUG_CANDIDATE_CAP + ' for this cycle.');
+    candidates = candidates.slice(0, LIVE_CHECK_DEBUG_CANDIDATE_CAP);
+  }
 
   const previousRaw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
   // Guarded the same way loadStaggerState() guards its own parse: if this
