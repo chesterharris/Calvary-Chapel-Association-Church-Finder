@@ -936,8 +936,13 @@ async function checkAllChurchesLive(env) {
   // admin debug view reads from, since "nobody's live" and "everything's
   // 429ing" look identical from the public list alone.
   const debugResults = [];
+  // Tracked purely as a safety net for the finally block below - if the
+  // cycle throws partway through, this is how far it actually got.
+  let lastCompletedCount = 0;
+  let completedNormally = false;
 
-  for (let i = 0; i < candidates.length; i++) {
+  try {
+    for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
 
     if (hitSubrequestLimit) {
@@ -960,6 +965,7 @@ async function checkAllChurchesLive(env) {
         results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
       }
       await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
+      lastCompletedCount = i + 1;
       continue;
     }
 
@@ -1006,6 +1012,7 @@ async function checkAllChurchesLive(env) {
     }
 
     await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
+    lastCompletedCount = i + 1;
 
     // Stagger requests to YouTube instead of firing them all at once.
     // Skip the delay after the last item, or once we've already hit the
@@ -1096,7 +1103,26 @@ async function checkAllChurchesLive(env) {
     }
   }
 
-  await writeProgress(candidates.length, null, false);
+    await writeProgress(candidates.length, null, false);
+    completedNormally = true;
+  } finally {
+    // Confirmed in production: without this, a cycle that throws anywhere
+    // above leaves the progress record permanently stuck at running:true
+    // (whatever completedCount it last reached), since the ONLY other
+    // write that ever sets running:false was the one directly above -
+    // never reached if something threw first. From the debug panel, a
+    // stuck record like that reads as "permanently running, no progress,"
+    // even though what actually happened is a crash, possibly several
+    // cycles' worth of them stacking as each new cron tick resets the
+    // counter and crashes again. This doesn't change what caused the
+    // throw or swallow it - it still propagates normally after this block
+    // (see the scheduled() handler's own try/catch for where that error
+    // actually gets recorded) - it just guarantees the progress display
+    // always reflects reality instead of getting stuck.
+    if (!completedNormally) {
+      await writeProgress(lastCompletedCount, null, false);
+    }
+  }
 }
 
 // Public, read-only endpoint - just returns whatever the last cron run
