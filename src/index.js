@@ -673,12 +673,25 @@ function nextStaggerMs(currentMs, checked, errored) {
 }
 
 // Accepts whatever format an admin pasted into youtubeUrl - a bare
-// @handle URL, a /streams URL, a /videos URL, or a /channel/UC... URL -
-// and returns the correct "/live" URL to check.
+// @handle URL, a /streams URL, a /videos URL, a /live URL, or a
+// /channel/UC... URL - and returns the correct "/live" URL to check.
+//
+// Confirmed in production: an admin-entered URL that already ended in
+// /live (e.g. https://m.youtube.com/@somechannel/live) wasn't recognized
+// by the strip list below, which only handled /streams, /videos,
+// /featured, /community, /about - so it fell through untouched and then
+// got a SECOND /live appended, producing a malformed
+// .../live/live path. That one church consistently behaved differently
+// from every other candidate in the list (the same church stalling out
+// repeatedly, rather than a rotating cast) - a strong sign this was about
+// its specific stored URL, not scale or list position. Adding "live" to
+// the strip list makes this function idempotent - safe to call on a URL
+// that's already correctly formatted, not just ones that need a /live
+// suffix added.
 function buildLiveCheckUrl(youtubeUrl) {
   let url = youtubeUrl.trim();
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-  url = url.replace(/\/(streams|videos|featured|community|about)\/?$/i, '');
+  url = url.replace(/\/(streams|videos|featured|community|about|live)\/?$/i, '');
   url = url.replace(/\/+$/, '');
   return url + '/live';
 }
