@@ -517,6 +517,12 @@ const LIVE_CHECK_PROGRESS_KV_KEY = 'live-check-progress';
 // an admin can actually read it, instead of only ever being visible as an
 // opaque red dot in a dashboard table.
 const LIVE_CHECK_LAST_ERROR_KV_KEY = 'live-check-last-error';
+// TEMPORARY debugging key only - see the capture block in checkChurchLive.
+// Holds the raw HTML of the most recent "isLive:true but no videoId"
+// fallback page seen, so it can be pulled from KV and diffed against a
+// normal full response. Remove this key's writer (and, once done, the key
+// itself) after we've captured and reviewed a real example.
+const LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY = 'live-check-fallback-capture-DEBUG';
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -663,7 +669,10 @@ async function fetchLivePageWithRetry(liveUrl) {
   }
 }
 
-async function checkChurchLive(youtubeUrl) {
+// env is optional and only used for the temporary fallback-page capture
+// below (see LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY) - checkChurchLive still
+// works exactly as before if called without it.
+async function checkChurchLive(youtubeUrl, env) {
   const liveUrl = buildLiveCheckUrl(youtubeUrl);
   const html = await fetchLivePageWithRetry(liveUrl);
 
@@ -843,6 +852,33 @@ async function checkChurchLive(youtubeUrl) {
     }
   }
 
+  // TEMPORARY - debugging capture only. Confirmed in production that
+  // YouTube sometimes serves a reduced page that still signals
+  // isLive:true (and still carries the live viewer count, since that's
+  // part of the same general page-render data used to draw the page
+  // itself) but omits videoId/title/canonical link entirely (that data
+  // instead lives in the player-metadata/SEO portions of the page,
+  // which are what appear to get stripped). We don't yet have a saved
+  // real example of one of these to inspect - this writes the first one
+  // seen in a cycle to KV so it can be pulled and diffed against a
+  // normal full response. Best-effort: a failed KV write here should
+  // never affect the actual live-check result. REMOVE once we've
+  // captured and reviewed a real example - this is not meant to be a
+  // permanent feature (storing full YouTube page HTML in KV long-term
+  // isn't something we want).
+  if (!videoId && env) {
+    try {
+      await env.CHURCHES_KV.put(LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY, JSON.stringify({
+        capturedAt: new Date().toISOString(),
+        liveUrl: liveUrl,
+        html: html
+      }));
+    } catch (err) {
+      // Swallow - this is a nice-to-have debug capture, not worth
+      // failing the actual live-check result over.
+    }
+  }
+
   return {
     isLive: true,
     status: 'live',
@@ -984,7 +1020,7 @@ async function checkAllChurchesLive(env) {
 
     try {
       const churchCheckStartedAt = Date.now();
-      const status = await checkChurchLive(c.youtubeUrl);
+      const status = await checkChurchLive(c.youtubeUrl, env);
       const churchCheckMs = Date.now() - churchCheckStartedAt;
       // channelUrl is the fallback the frontend links to when videoId is
       // null (confirmed in production: YouTube can serve a stripped page
