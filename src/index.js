@@ -581,7 +581,30 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // independent of which specific churches are involved. Set back to
 // null to check every eligible church again, with no other changes
 // needed anywhere else - this is the only place this constant is read.
-const LIVE_CHECK_DEBUG_CANDIDATE_CAP = 150;
+const LIVE_CHECK_DEBUG_CANDIDATE_CAP = null;
+
+// ============================================================
+// TEMPORARY EXPERIMENT (paired with the cap above) - remove this
+// constant and its two uses below once the experiment is done.
+// ============================================================
+// Manually pins the stagger delay for this experiment, bypassing the
+// normal adaptive system (see nextStaggerMs/LIVE_CHECK_STAGGER_MIN_MS
+// etc.) entirely. That system only ever adjusts at the end of a cycle
+// that reaches a normal finish - every stall seen so far got caught by
+// the overlap guard instead, which abandons the cycle before it ever
+// gets there. So the adaptive system has never actually had a chance to
+// react to the real problem; it's been sitting at its 1000ms floor
+// throughout, not because 1000ms is fine, but because the mechanism that
+// would raise it was never triggered. Testing "no cap" at that same
+// untouched 1000ms would just repeat a configuration already confirmed
+// to fail 100% of the time overnight - not a new experiment. Pinning a
+// wider value by hand is what actually tests whether pace helps.
+// Set back to null to return to the normal adaptive system with no other
+// changes needed anywhere else - this is the only place this constant is
+// read (besides skipping the write-back below while it's active, so the
+// pin isn't quietly overwritten by a cycle's own adaptive adjustment
+// mid-experiment).
+const LIVE_CHECK_DEBUG_FORCED_STAGGER_MS = 1800;
 
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
@@ -644,6 +667,7 @@ async function recordStalledCycleNote(env, progress, elapsedMs) {
     previousStartedAt: progress.startedAt,
     previousCompletedCount: typeof progress.completedCount === 'number' ? progress.completedCount : null,
     previousTotalCandidates: typeof progress.totalCandidates === 'number' ? progress.totalCandidates : null,
+    previousChurchName: progress.currentChurchName || null,
     stuckForMs: elapsedMs
   });
   while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
@@ -1087,7 +1111,11 @@ async function checkAllChurchesLive(env) {
   previous.live.forEach(function(r) { previousById[r.churchId] = r; });
 
   const staggerState = await loadStaggerState(env);
-  const staggerMs = staggerState.staggerMs;
+  let staggerMs = staggerState.staggerMs;
+  if (LIVE_CHECK_DEBUG_FORCED_STAGGER_MS != null) {
+    console.log('TEMP EXPERIMENT: pinning stagger to ' + LIVE_CHECK_DEBUG_FORCED_STAGGER_MS + 'ms (adaptive value was ' + staggerMs + 'ms).');
+    staggerMs = LIVE_CHECK_DEBUG_FORCED_STAGGER_MS;
+  }
 
   const cycleStartedAt = Date.now();
 
@@ -1306,7 +1334,7 @@ async function checkAllChurchesLive(env) {
   // that failure mode reflects a platform limit no amount of delay can
   // fix, not YouTube's actual rate-limiting behavior, and a truncated
   // cycle isn't a representative sample of the real error rate anyway.
-  if (!hitSubrequestLimit) {
+  if (!hitSubrequestLimit && LIVE_CHECK_DEBUG_FORCED_STAGGER_MS == null) {
     const updatedStaggerMs = nextStaggerMs(staggerMs, candidates.length, erroredCount);
     if (updatedStaggerMs !== staggerMs) {
       await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({

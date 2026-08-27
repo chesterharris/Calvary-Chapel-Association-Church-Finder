@@ -2491,10 +2491,14 @@
   // as "15m 10s" than "910.4s".
   function formatDurationMs(ms) {
     if (ms == null || isNaN(ms)) return '-';
-    const totalSec = ms / 1000;
-    if (totalSec < 60) return totalSec.toFixed(1) + 's';
+    // Rounds total seconds FIRST, then splits into minutes/seconds -
+    // rounding each part separately (the old approach) could produce a
+    // seconds remainder of 60 after rounding (e.g. 599.6s -> floor(9.99)=9m,
+    // round(59.6)=60s -> "9m 60s" instead of "10m 0s").
+    const totalSec = Math.round(ms / 1000);
+    if (totalSec < 60) return totalSec + 's';
     const min = Math.floor(totalSec / 60);
-    const sec = Math.round(totalSec - min * 60);
+    const sec = totalSec - min * 60;
     return min + 'm ' + sec + 's';
   }
 
@@ -2695,11 +2699,12 @@
         // otherwise show a run of blank/dash cells with no explanation.
         if (h.stalledPreviousCycle) {
           const stuckText = formatDurationMs(h.stuckForMs);
-          const progressText = (h.previousCompletedCount != null && h.previousTotalCandidates != null)
-            ? (h.previousCompletedCount + '/' + h.previousTotalCandidates + ' churches')
-            : 'unknown progress';
-          html += '<tr><td colspan="6" style="color:var(--ember);">⚠️ Previous cycle appeared stuck (' +
-            escapeHtmlDebug(progressText) + ', stuck ' + stuckText + ') - a new cycle started anyway ' +
+          const churchText = h.previousChurchName ? escapeHtmlDebug(h.previousChurchName) : 'unknown church';
+          const countText = (h.previousCompletedCount != null && h.previousTotalCandidates != null)
+            ? (h.previousCompletedCount + '/' + h.previousTotalCandidates)
+            : '?/?';
+          html += '<tr><td colspan="6" style="color:var(--ember);">⚠️ Stuck on ' + churchText +
+            ' (' + countText + '), ' + stuckText + ' - restarted ' +
             formatRelativeTime(h.checkedAt) + '</td></tr>';
           return;
         }
