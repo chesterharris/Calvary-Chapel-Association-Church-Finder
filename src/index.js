@@ -567,6 +567,35 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // once, then falls back to last-known-good data) - see fetchLivePage below.
 const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 
+// If a previous cycle's progress record still says running:true and was
+// started more recently than this, a new cron tick skips its run rather
+// than starting a second, overlapping invocation on top of it. There is
+// no actual overlap-prevention lock in this codebase (confirmed and
+// intentionally ruled out early in this debugging effort, when the
+// working theory was a STUCK lock silently blocking every future tick -
+// see Live-Check-Debug.md step #5). The problem turned out to be the
+// opposite: with no lock of any kind, nothing stops Cloudflare's cron
+// (which starts each scheduled() invocation independently, without
+// waiting for the previous one to finish - confirmed via Cloudflare's
+// own docs) from piling a second full cycle on top of a first one that's
+// still legitimately in progress, especially if a cycle runs anywhere
+// close to the full 10-minute gap between ticks. Set comfortably above
+// the ~5 minute duration a normal clean cycle actually takes (see the
+// debug panel's own "Recent Cycles" history), but below the 10-minute
+// cron interval, so a second tick only ever skips while the first is
+// plausibly still doing real work - not indefinitely. If a cycle is
+// still marked running past this window, it's more likely genuinely
+// wedged than legitimately slow, and a fresh attempt is allowed to start
+// rather than leaving things blocked forever.
+//
+// This is a best-effort heuristic, not a hard distributed lock - KV
+// doesn't offer atomic compare-and-swap, so two invocations checking this
+// within the same instant could theoretically still both proceed. That's
+// an acceptable, rare edge case; it doesn't need to be airtight to fix
+// the actual pattern being seen (every-10-minutes pileup), just to stop
+// the common case.
+const LIVE_CHECK_OVERLAP_GUARD_MS = 8 * 60 * 1000; // 8 minutes
+
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
@@ -910,6 +939,28 @@ async function checkChurchLive(youtubeUrl, env) {
 //    means slightly stale data for that one church, not a false "nobody
 //    is live" result for everyone.
 async function checkAllChurchesLive(env) {
+  // Overlap guard - see LIVE_CHECK_OVERLAP_GUARD_MS above for the full
+  // reasoning. Skip this entire invocation if the progress record left
+  // by a previous cycle still says running:true and was started recently
+  // enough to plausibly still be legitimately in progress.
+  try {
+    const progressRaw = await env.CHURCHES_KV.get(LIVE_CHECK_PROGRESS_KV_KEY);
+    if (progressRaw) {
+      const progress = JSON.parse(progressRaw);
+      if (progress && progress.running && progress.startedAt) {
+        const startedAtMs = new Date(progress.startedAt).getTime();
+        if (!isNaN(startedAtMs) && (Date.now() - startedAtMs) < LIVE_CHECK_OVERLAP_GUARD_MS) {
+          console.log('Skipping live-check cycle - previous cycle still in progress (started ' + progress.startedAt + ')');
+          return;
+        }
+      }
+    }
+  } catch (err) {
+    // If we can't tell whether a previous cycle is still running (bad
+    // JSON, missing key, etc.), err on the side of proceeding rather than
+    // silently skipping every future cycle over an unreadable guard.
+  }
+
   const churches = await loadChurches(env);
   const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
 
