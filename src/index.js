@@ -509,6 +509,14 @@ const LIVE_CHECK_HISTORY_MAX_CYCLES = 50;
 // and ETA instead of a simulated one - the panel polls this key while
 // `running` is true.
 const LIVE_CHECK_PROGRESS_KV_KEY = 'live-check-progress';
+// Cloudflare's own Cron Events log only shows a status ("Internal Error")
+// and CPU time per invocation - no way to see the actual thrown error or
+// stack trace, and no click-through to one either. This key exists so an
+// uncaught exception from the SCHEDULED path specifically (see the
+// scheduled() handler at the bottom of this file) gets written somewhere
+// an admin can actually read it, instead of only ever being visible as an
+// opaque red dot in a dashboard table.
+const LIVE_CHECK_LAST_ERROR_KV_KEY = 'live-check-last-error';
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -1136,8 +1144,10 @@ async function handleDebugLiveCheckStatus(request, env) {
   }
   const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
   const staggerRaw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
+  const lastErrorRaw = await env.CHURCHES_KV.get(LIVE_CHECK_LAST_ERROR_KV_KEY);
   const data = raw ? JSON.parse(raw) : { latestCycle: null, history: [] };
   data.currentStaggerState = staggerRaw ? JSON.parse(staggerRaw) : { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  data.lastCronError = lastErrorRaw ? JSON.parse(lastErrorRaw) : null;
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
@@ -2627,7 +2637,43 @@ export default {
   // (proposed schedule: every 10 minutes). Not tied to any visitor
   // request - runs on Cloudflare's own schedule regardless of site
   // traffic.
+  //
+  // The try/catch here matters: an uncaught rejection inside a waitUntil()
+  // promise is what makes Cloudflare mark the whole invocation "Internal
+  // Error" in the Cron Events log, with zero detail beyond that - confirmed
+  // in production as a real dead end (the dashboard doesn't even let you
+  // click into those rows for more). Catching it here does two things:
+  // stops future ticks from showing that same opaque failure for whatever
+  // this turns out to be, and - more importantly - actually records what
+  // the error was, so it's visible in the admin debug panel instead of
+  // requiring someone to sit there live-tailing logs waiting to catch the
+  // next tick in the act. The success path clears that same record, so a
+  // fixed bug doesn't leave a stale error banner showing forever.
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(checkAllChurchesLive(env));
+    ctx.waitUntil((async function() {
+      try {
+        await checkAllChurchesLive(env);
+        try {
+          await env.CHURCHES_KV.delete(LIVE_CHECK_LAST_ERROR_KV_KEY);
+        } catch (deleteErr) {
+          // Not worth failing the invocation over - worst case, a
+          // resolved error banner lingers until the next successful tick
+          // tries (and succeeds) again.
+        }
+      } catch (err) {
+        try {
+          await env.CHURCHES_KV.put(LIVE_CHECK_LAST_ERROR_KV_KEY, JSON.stringify({
+            message: err && err.message ? err.message : String(err),
+            stack: err && err.stack ? err.stack : null,
+            occurredAt: new Date().toISOString()
+          }));
+        } catch (writeErr) {
+          // If even writing the error record fails, there's nothing
+          // further to do from here - the original error is lost to the
+          // opaque Cloudflare status again, but that's the same as
+          // before this change, not worse.
+        }
+      }
+    })());
   }
 };

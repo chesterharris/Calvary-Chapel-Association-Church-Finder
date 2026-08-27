@@ -1002,6 +1002,39 @@
     font-weight: 600;
     margin-bottom: 10px;
   }
+  .live-debug-error-banner code {
+    display: inline-block;
+    margin-top: 4px;
+    font-weight: 400;
+    font-family: 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .live-debug-error-banner details {
+    margin-top: 6px;
+    font-weight: 400;
+  }
+  .live-debug-error-banner summary {
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .live-debug-error-banner pre {
+    margin: 6px 0 0;
+    padding: 6px;
+    background: rgba(255,255,255,0.6);
+    border-radius: 3px;
+    font-size: 10.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .live-debug-error-note {
+    margin-top: 6px;
+    font-weight: 400;
+    font-size: 11px;
+    opacity: 0.85;
+  }
   .live-now-empty {
     color: var(--ink);
     opacity: 0.7;
@@ -2471,15 +2504,32 @@
     liveDebugLastData = data;
     updateToolbarStatus(data);
 
+    let errorBannerHtml = '';
+    if (data && data.lastCronError) {
+      // Shown regardless of whether a cycle has ever completed - this is
+      // exactly the case that used to be invisible: every SCHEDULED (cron)
+      // invocation erroring out before ever reaching a final write, with
+      // nothing to show for it beyond an opaque "Internal Error" dot in
+      // Cloudflare's own dashboard (which, confirmed in production,
+      // doesn't even support clicking into a row for more detail).
+      const err = data.lastCronError;
+      errorBannerHtml += '<div class="live-debug-warning-banner live-debug-error-banner">' +
+        '🔴 The scheduled (cron) check hit an uncaught error ' + formatRelativeTime(err.occurredAt) + ':<br>' +
+        '<code>' + escapeHtmlDebug(err.message) + '</code>' +
+        (err.stack ? '<details><summary>Stack trace</summary><pre>' + escapeHtmlDebug(err.stack) + '</pre></details>' : '') +
+        '<div class="live-debug-error-note">This clears itself automatically the next time a scheduled check succeeds - it doesn\'t mean every attempt since ' + formatRelativeTime(err.occurredAt) + ' failed, just that one did.</div>' +
+        '</div>';
+    }
+
     if (!data || !data.latestCycle) {
-      liveDebugContent.innerHTML = '<p>No cycle data yet - the Cron Trigger may not have run since deploy. Try "Run Check Now".</p>';
+      liveDebugContent.innerHTML = errorBannerHtml + '<p>No cycle data yet - the Cron Trigger may not have run since deploy. Try "Run Check Now".</p>';
       return;
     }
 
     const cycle = data.latestCycle;
     const staggerMs = data.currentStaggerState ? data.currentStaggerState.staggerMs : null;
 
-    let html = '';
+    let html = errorBannerHtml;
     if (cycle.hitSubrequestLimit) {
       html += '<div class="live-debug-warning-banner">' +
         '⚠️ Hit Cloudflare\'s subrequest limit this cycle - not every church could be checked. ' +
