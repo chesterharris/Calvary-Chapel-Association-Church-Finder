@@ -541,6 +541,18 @@ const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
 // after a short pause before giving up on that church for this cycle.
 const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 
+// Checks run strictly one at a time in a loop (see checkAllChurchesLive),
+// so a single slow-to-respond page stalls every church behind it, not just
+// itself - confirmed in production with an international channel (Calvary
+// Chapel West Tokyo) that hung far longer than the ~0.3-1.3s every other
+// church's fetch was taking, holding up the whole cycle. Nothing was
+// bounding how long a single fetch() was allowed to hang, so this caps it -
+// well above any real successful response seen so far, but short enough
+// that one slow church can't meaningfully delay everyone else's freshness.
+// A timeout here is treated exactly like any other fetch failure (retried
+// once, then falls back to last-known-good data) - see fetchLivePage below.
+const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
+
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
@@ -600,13 +612,30 @@ async function fetchLivePage(liveUrl) {
   // deceive anyone about what this is - it's a publicly viewable page - it
   // just avoids opting INTO a reduced-content path that only exists for
   // actual bot traffic.
-  const response = await fetch(liveUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9'
+  const controller = new AbortController();
+  const timeoutId = setTimeout(function() { controller.abort(); }, LIVE_CHECK_FETCH_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(liveUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: controller.signal
+    });
+  } catch (err) {
+    // AbortController rejects with a generic "AbortError", not anything
+    // that mentions a timeout - rethrow with a clearer message since this
+    // error can end up in the debug panel where "aborted" alone wouldn't
+    // tell an admin what actually happened.
+    if (err.name === 'AbortError') {
+      throw new Error('Live page fetch timed out after ' + LIVE_CHECK_FETCH_TIMEOUT_MS + 'ms');
     }
-  });
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     throw new Error('Live page fetch failed with status ' + response.status);
   }
