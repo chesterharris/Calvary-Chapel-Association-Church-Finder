@@ -178,6 +178,60 @@
   .popup-row a:hover {
     text-decoration: underline;
   }
+  .popup-row a:hover .popup-live-badge {
+    text-decoration: none;
+  }
+  /* "LIVE NOW" badge shown in a church's map popup when it's currently
+     streaming - styled after the two-tone LIVE/NOW pill reference image,
+     recolored to the site's own brick red (var(--ember)) instead of a
+     generic red, and sized down to fit inline in a small popup rather
+     than as a standalone graphic. The dot's pulse is a plain opacity+scale
+     keyframe animation (no JS) - cheap, and pauses automatically for
+     anyone with reduced-motion preferences set (see the media query
+     below), which a GIF/PNG version couldn't do. */
+  .popup-live-badge {
+    display: inline-flex;
+    vertical-align: middle;
+    align-items: stretch;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1.5px solid var(--ember);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .popup-live-badge-live {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--ember);
+    color: #fff;
+    padding: 4px 8px 4px 6px;
+  }
+  .popup-live-badge-now {
+    display: flex;
+    align-items: center;
+    background: #fff;
+    color: var(--ember);
+    padding: 4px 8px;
+  }
+  .popup-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #fff;
+    flex-shrink: 0;
+    animation: popupLivePulse 2.2s ease-in-out infinite;
+  }
+  @keyframes popupLivePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .popup-live-dot { animation: none; }
+  }
   .score-pin {
     width: 22px;
     height: 22px;
@@ -3050,11 +3104,11 @@
       // listener above) - a single click should land on the actual live
       // broadcast, not just the channel's front page, whenever we know
       // specifically which video that is.
-      if (liveChurchIds.has(c.id)) {
+      const isCurrentlyLive = liveChurchIds.has(c.id);
+      if (isCurrentlyLive) {
         const liveEntry = findLiveEntryForChurch(c.id);
         if (liveEntry && liveEntry.videoId) {
           ytUrl = 'https://www.youtube.com/watch?v=' + encodeURIComponent(liveEntry.videoId);
-          ytLabel = 'Watch live on YouTube';
         } else if (liveEntry && liveEntry.channelUrl) {
           // Known live, but couldn't extract a specific videoId (e.g. a
           // stripped page from YouTube on our server-side check) - a
@@ -3062,10 +3116,19 @@
           // actual broadcast, just without skipping straight to the exact
           // video.
           ytUrl = liveEntry.channelUrl;
-          ytLabel = 'Watch live on YouTube';
         }
+        // In place of the plain "Watch live on YouTube" text, the link's
+        // content becomes the pulsing LIVE NOW badge itself - same row,
+        // same icon, same click target, just a more attention-getting
+        // label than static text for a church that's live right now.
+        ytLabel = '<span class="popup-live-badge" role="status" aria-label="Live now">' +
+          '<span class="popup-live-badge-live"><span class="popup-live-dot" aria-hidden="true"></span>Live</span>' +
+          '<span class="popup-live-badge-now">Now</span>' +
+          '</span>';
+        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
+      } else {
+        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
       }
-      popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
     }
     // Favorite star (everyone) and, for the admin, the Featured Streams
     // toggle - shown for any church that's indicated it streams live
