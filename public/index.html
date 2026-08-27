@@ -3138,8 +3138,13 @@
     // requiring it to already be live to favorite it would defeat the point.
     if (c.livestreamsEnabled) {
       const isFav = isChurchFavorite(c.id);
+      // Gated the same as before (c.livestreamsEnabled, not gated on
+      // whether it's live right now) - only the label text itself changes
+      // based on favorite status, so a favorited church's popup confirms
+      // that state instead of repeating a generic prompt to favorite it.
+      const favLabel = isFav ? 'Favorited' : 'Favorite this church';
       popup += '<div class="popup-fav-row">' +
-        '<span class="popup-fav-label">This church streams</span>' +
+        '<span class="popup-fav-label">' + favLabel + '</span>' +
         '<button type="button" class="church-fav-star' + (isFav ? ' favorited' : '') + '" data-fav-church-id="' + escapeHtml(c.id) + '" title="' + (isFav ? 'Remove from your favorites' : 'Add to your favorites') + '">' +
           buildFavoriteStarSvg(isFav) +
         '</button>';
