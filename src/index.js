@@ -582,7 +582,7 @@ async function loadStaggerState(env) {
 
 // Adjusts the stagger delay based on how the just-finished cycle went, and
 // persists it for the next cron run to read. Errs on the side of caution:
-// growth is faster (1.6x) than decay (0.9x), so a single bad cycle raises
+// growth is faster (2x) than decay (0.9x), so a single bad cycle raises
 // the delay noticeably, while trust is rebuilt gradually only after
 // several fully clean cycles in a row.
 function nextStaggerMs(currentMs, checked, errored) {
@@ -878,7 +878,20 @@ async function checkAllChurchesLive(env) {
   const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
 
   const previousRaw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
-  const previous = previousRaw ? JSON.parse(previousRaw) : { live: [] };
+  // Guarded the same way loadStaggerState() guards its own parse: if this
+  // KV value is ever malformed for any reason, fall back to an empty
+  // previous-status list rather than letting a bad parse crash the entire
+  // cycle (and, since this runs before the per-church loop, take down
+  // every church's check for the cycle rather than just one).
+  let previous = { live: [] };
+  if (previousRaw) {
+    try {
+      const parsed = JSON.parse(previousRaw);
+      if (parsed && Array.isArray(parsed.live)) previous = parsed;
+    } catch (err) {
+      // Fall through to the empty default above.
+    }
+  }
   const previousById = {};
   previous.live.forEach(function(r) { previousById[r.churchId] = r; });
 
@@ -1052,7 +1065,19 @@ async function checkAllChurchesLive(env) {
   // trend (e.g. error rate climbing over the course of an evening) is
   // visible, not just the latest cycle in isolation.
   const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
-  const debugPrevious = debugRaw ? JSON.parse(debugRaw) : { history: [] };
+  // Same guard as previousRaw above: this key is normally only ever written
+  // by this same function, so it shouldn't be malformed - but if it ever
+  // is, losing rolling history is a lot better than crashing the cycle
+  // (and blocking every future write to this key) over unparseable old data.
+  let debugPrevious = { history: [] };
+  if (debugRaw) {
+    try {
+      const parsed = JSON.parse(debugRaw);
+      if (parsed) debugPrevious = parsed;
+    } catch (err) {
+      // Fall through to the empty default above.
+    }
+  }
   const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
   history.push({
     checkedAt: new Date().toISOString(),
