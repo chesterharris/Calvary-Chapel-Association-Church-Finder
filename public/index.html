@@ -2771,7 +2771,14 @@
           const countText = (h.previousCompletedCount != null && h.previousTotalCandidates != null)
             ? (h.previousCompletedCount + '/' + h.previousTotalCandidates)
             : '?/?';
-          html += '<tr><td colspan="7" style="color:var(--ember);">⚠️ Stuck on ' + churchText +
+          // Older stall notes (written before previousBatchIndex/
+          // previousBatchCount existed) won't have these fields - fall
+          // back to a plain dash pair rather than showing "undefined/
+          // undefined" until they age out of the rolling history.
+          const stalledBatchText = (h.previousBatchIndex != null && h.previousBatchCount != null)
+            ? '(' + (h.previousBatchIndex + 1) + '/' + h.previousBatchCount + ') '
+            : '';
+          html += '<tr><td colspan="7" style="color:var(--ember);">⚠️ ' + stalledBatchText + 'Stuck on ' + churchText +
             ' (' + countText + '), ' + stuckText + ' - restarted ' +
             formatRelativeTime(h.checkedAt) + '</td></tr>';
           return;

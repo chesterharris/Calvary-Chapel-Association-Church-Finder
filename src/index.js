@@ -673,6 +673,8 @@ async function recordStalledCycleNote(env, progress, elapsedMs) {
     previousCompletedCount: typeof progress.completedCount === 'number' ? progress.completedCount : null,
     previousTotalCandidates: typeof progress.totalCandidates === 'number' ? progress.totalCandidates : null,
     previousChurchName: progress.currentChurchName || null,
+    previousBatchIndex: typeof progress.batchIndex === 'number' ? progress.batchIndex : null,
+    previousBatchCount: typeof progress.batchCount === 'number' ? progress.batchCount : null,
     stuckForMs: elapsedMs
   });
   while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
