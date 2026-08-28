@@ -1937,6 +1937,15 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice41.securenetsystems.net/KOUJ'
   },
   {
+    displayName: 'KEPT',
+    cityState: 'Hayward, CA',
+    homePage: 'https://www.keptfm.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'KEPT',
+    streamUrl: 'https://ice9.securenetsystems.net/KEPT'
+  },
+  {
     displayName: 'WRDJ',
     cityState: 'Merritt Island, FL',
     homePage: 'http://www.wrdj.com',
