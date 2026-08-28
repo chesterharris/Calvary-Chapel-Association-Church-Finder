@@ -1919,6 +1919,15 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice8.securenetsystems.net/KCHG'
   },
   {
+    displayName: 'KCPV',
+    cityState: 'Pahrump, NV',
+    homePage: 'https://justforjesus.us/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'KCPVLP',
+    streamUrl: 'https://ice25.securenetsystems.net/KCPVLP'
+  },
+  {
     displayName: 'WRDJ',
     cityState: 'Merritt Island, FL',
     homePage: 'http://www.wrdj.com',
