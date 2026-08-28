@@ -950,18 +950,31 @@
     gap: 8px;
   }
   .live-debug-section-title:first-child { margin-top: 0; }
-  .live-debug-filter-toggle {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-weight: 400;
-    font-size: 11.5px;
-    color: var(--ink);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-    white-space: nowrap;
+  .live-debug-group {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    margin: 6px 0;
+    background: rgba(0,0,0,0.02);
   }
-  .live-debug-filter-toggle input { cursor: pointer; }
+  .live-debug-group summary {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 700;
+    font-size: 12.5px;
+    color: var(--evergreen);
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .live-debug-group summary::-webkit-details-marker { display: none; }
+  .live-debug-group summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.15s ease;
+  }
+  .live-debug-group[open] summary::before { transform: rotate(90deg); }
+  .live-debug-group table.live-debug-table { margin-top: 0; }
+  .live-debug-group p { padding: 0 10px 8px; margin: 0; }
   .live-debug-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1016,11 +1029,14 @@
   /* Per-church table: name gets breathing room, badge stays compact,
      error text gets the rest and wraps instead of forcing horizontal
      scroll (previously the widest offender). */
-  #liveDebugPerChurchTable col.col-church { width: 34%; }
-  #liveDebugPerChurchTable col.col-live { width: 14%; }
-  #liveDebugPerChurchTable col.col-time { width: 12%; }
-  #liveDebugPerChurchTable col.col-error { width: 40%; }
-  #liveDebugPerChurchTable td.church-name {
+  /* Per-church tables (Live/Waiting/Not-Live groups): name gets breathing
+     room, badge stays compact, error text gets the rest and wraps instead
+     of forcing horizontal scroll (previously the widest offender). */
+  .live-debug-group table.live-debug-table col.col-church { width: 34%; }
+  .live-debug-group table.live-debug-table col.col-live { width: 14%; }
+  .live-debug-group table.live-debug-table col.col-time { width: 12%; }
+  .live-debug-group table.live-debug-table col.col-error { width: 40%; }
+  .live-debug-group table.live-debug-table td.church-name {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2448,7 +2464,9 @@
   let liveDebugPollTimer = null;
   let liveDebugWatchingRun = false;
   let liveDebugLastData = null;
-  let liveDebugShowIssuesOnly = true;
+  // (Formerly liveDebugShowIssuesOnly - removed along with the "Show only
+  // notable results" checkbox now that results are grouped into their own
+  // Live/Waiting/Not-Live sections instead of one filterable flat list.)
 
   function escapeHtmlDebug(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -2548,13 +2566,9 @@
     liveDebugRunNowBtn.innerHTML = isRunning ? '<span class="live-debug-spinner"></span>Running...' : 'Run Check Now';
   }
 
-  // "Issue" = anything worth a second look when filtering: not checked
-  // this cycle, an actual error, or currently live (a positive, notable
-  // state worth surfacing even while hiding the routine "not live" noise
-  // that makes up the vast majority of rows).
-  function isDebugRowAnIssue(r) {
-    return !!(r.notChecked || r.error || r.isLive || isWaitingSoon(r));
-  }
+  // (Formerly isDebugRowAnIssue, used by the "Show only notable results"
+  // filter - removed along with that checkbox. Rows are now grouped by
+  // actual status below instead of filtered.)
 
   // A "waiting" (scheduled-future) church is only worth calling out
   // distinctly once it's close - confirmed in production this list was
@@ -2568,6 +2582,63 @@
     const startTime = new Date(r.startDate).getTime();
     if (isNaN(startTime)) return false;
     return (startTime - Date.now()) < WAITING_SOON_WINDOW_MS;
+  }
+
+  // Builds one <tr> for a single church's result row - same markup/badges
+  // that used to live inline in the old flat-table renderer, just pulled
+  // out so all three status groups (Live/Waiting/Not-Live) can share it.
+  function buildDebugRow(r) {
+    let badge;
+    if (r.notChecked) {
+      badge = '<span class="live-debug-badge notchecked">not checked</span>';
+    } else if (r.error) {
+      badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
+        (r.usedStaleData ? 'stale' : 'failed') + '</span>';
+    } else if (r.status === 'live') {
+      badge = '<span class="live-debug-badge live">live</span>';
+    } else if (r.status === 'waiting') {
+      badge = '<span class="live-debug-badge waiting">waiting</span>';
+    } else {
+      // Fallback for entries from before the 3-state status field
+      // existed (see checkChurchLive) - falls back to the old
+      // isLive-only distinction rather than showing nothing.
+      badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
+    }
+
+    // Highlights an outlier at a glance rather than making someone scan
+    // every row for a slow one - thresholds are a starting guess (typical
+    // fetches land well under 1s), not a claim about where "slow"
+    // objectively begins.
+    let timeText = '-';
+    if (typeof r.checkMs === 'number') {
+      const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
+      const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
+      timeText = '<span' + timeClass + '>' + timeSec + '</span>';
+    }
+
+    return '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
+      '<td>' + timeText + '</td>' +
+      '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (isWaitingSoon(r) && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
+  }
+
+  // Wraps one status group (Live/Waiting/Not-Live) in a native <details>
+  // element - collapsed by default (no "open" attribute), so opening one
+  // of 150+ rows' worth of detail is an explicit choice rather than
+  // something you have to scroll past every time the panel opens. Native
+  // <details>/<summary> needs no extra JS to expand/collapse and is
+  // keyboard-accessible for free.
+  function buildDebugResultsGroup(label, rows) {
+    if (!rows.length) {
+      return '<details class="live-debug-group"><summary>' + escapeHtmlDebug(label) + ' - 0</summary>' +
+        '<p style="opacity:0.6;">None right now.</p></details>';
+    }
+    let html = '<details class="live-debug-group"><summary>' + escapeHtmlDebug(label) + ' - ' + rows.length + '</summary>';
+    html += '<table class="live-debug-table">' +
+      '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
+      '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
+    rows.forEach(function(r) { html += buildDebugRow(r); });
+    html += '</tbody></table></details>';
+    return html;
   }
 
   function renderLiveDebugContent(data) {
@@ -2636,52 +2707,30 @@
     }
 
     if (cycle.results && cycle.results.length) {
-      const rowsToShow = liveDebugShowIssuesOnly ? cycle.results.filter(isDebugRowAnIssue) : cycle.results;
-      html += '<div class="live-debug-section-title">Per-Church Results' +
-        '<label class="live-debug-filter-toggle"><input type="checkbox" id="liveDebugIssuesOnlyToggle"' +
-        (liveDebugShowIssuesOnly ? ' checked' : '') + '> Show only notable results</label></div>';
+      html += '<div class="live-debug-section-title">Per-Church Results</div>';
 
-      if (rowsToShow.length) {
-        html += '<table class="live-debug-table" id="liveDebugPerChurchTable">' +
-          '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
-          '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
-        rowsToShow.forEach(function(r) {
-          let badge;
-          if (r.notChecked) {
-            badge = '<span class="live-debug-badge notchecked">not checked</span>';
-          } else if (r.error) {
-            badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
-              (r.usedStaleData ? 'stale' : 'failed') + '</span>';
-          } else if (r.status === 'live') {
-            badge = '<span class="live-debug-badge live">live</span>';
-          } else if (r.status === 'waiting' && isWaitingSoon(r)) {
-            badge = '<span class="live-debug-badge waiting">waiting</span>';
-          } else {
-            // Fallback for entries from before the 3-state status field
-            // existed (see checkChurchLive) - falls back to the old
-            // isLive-only distinction rather than showing nothing.
-            badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
-          }
+      // Single pass, three buckets - a row that's errored or not-checked
+      // still needs a home even though it's neither "live" nor "waiting",
+      // so it falls into Not-Live by default. Its badge/error text inside
+      // the row itself still shows the real status - this grouping is
+      // just for finding things quickly, not a claim that "not-live" and
+      // "errored" mean the same thing.
+      const liveRows = [];
+      const waitingRows = [];
+      const notLiveRows = [];
+      cycle.results.forEach(function(r) {
+        if (!r.notChecked && !r.error && (r.status === 'live' || (r.status == null && r.isLive))) {
+          liveRows.push(r);
+        } else if (!r.notChecked && !r.error && r.status === 'waiting') {
+          waitingRows.push(r);
+        } else {
+          notLiveRows.push(r);
+        }
+      });
 
-          // Highlights an outlier at a glance rather than making someone
-          // scan every row for a slow one - thresholds are a starting
-          // guess (typical fetches land well under 1s), not a claim about
-          // where "slow" objectively begins.
-          let timeText = '-';
-          if (typeof r.checkMs === 'number') {
-            const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
-            const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
-            timeText = '<span' + timeClass + '>' + timeSec + '</span>';
-          }
-
-          html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
-            '<td>' + timeText + '</td>' +
-            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (isWaitingSoon(r) && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
-        });
-        html += '</tbody></table>';
-      } else {
-        html += '<p style="opacity:0.6;">No issues right now.</p>';
-      }
+      html += buildDebugResultsGroup('Live', liveRows);
+      html += buildDebugResultsGroup('Waiting', waitingRows);
+      html += buildDebugResultsGroup('Not-Live', notLiveRows);
     }
 
     if (data.history && data.history.length) {
@@ -2726,14 +2775,6 @@
     }
 
     liveDebugContent.innerHTML = html;
-
-    const toggleEl = document.getElementById('liveDebugIssuesOnlyToggle');
-    if (toggleEl) {
-      toggleEl.addEventListener('change', function() {
-        liveDebugShowIssuesOnly = toggleEl.checked;
-        renderLiveDebugContent(liveDebugLastData);
-      });
-    }
   }
 
   async function loadLiveDebugStatus() {
