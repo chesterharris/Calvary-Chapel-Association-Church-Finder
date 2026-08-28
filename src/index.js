@@ -2004,6 +2004,14 @@ const RADIO_STATIONS = [
     streamUrl: 'https://s5.radio.co/s914ba6b9a'
   },
   {
+    displayName: 'KPTG',
+    cityState: 'Adelanto, CA',
+    homePage: 'https://www.ccadelanto.com/radio',
+    provider: 'radiocov2',
+    stationId: 'sf4a5da436',
+    streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
+  },
+  {
     displayName: 'KQIP',
     cityState: 'Chico, CA',
     homePage: 'https://ccchico.com/1071',
@@ -2517,6 +2525,41 @@ function parseRadioCoJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from Radio.co's newer v2 public track API
+// (https://public.radio.co/api/v2/{stationId}/track/current) - unlike the
+// older /stations/{id}/status endpoint above (which only returns a single
+// combined "title" string with no artist field), this v2 endpoint returns
+// track_artist and track_title as clean, already-split fields - no
+// guessing/parsing needed at all.
+//
+// Confirmed real response shape (KPTG):
+//   {"data":{"title":"Raul Ries - Somebody Loves You","start_time":"...",
+//    "artwork_urls":{"standard":"https://images.radio.co/album_art/....jpg",
+//    "large":"...jpg"},"track_artist":"Raul Ries",
+//    "track_title":"Somebody Loves You", ...}}
+//
+// Note: "artwork_urls.standard" is used over "large" per station owner's
+// instruction - both are valid jpg URLs, just different sizes.
+function parseRadioCoV2Json(rawJson) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Radio.co v2 JSON response');
+  }
+
+  const track = parsed && parsed.data;
+  const rawCover = track && track.artwork_urls && typeof track.artwork_urls.standard === 'string'
+    ? track.artwork_urls.standard.trim()
+    : '';
+
+  return {
+    title: track && typeof track.track_title === 'string' ? track.track_title.trim() : '',
+    artist: track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '',
+    coverUrl: rawCover || null
+  };
+}
+
 // Extracts now-playing info from RadioKing's public widget API
 // (https://api.radioking.io/widget/radio/{slug}/track/current) - a clean,
 // well-documented single-object response with title/artist already
@@ -2651,6 +2694,12 @@ const RADIO_PROVIDERS = {
       return 'https://public.radio.co/stations/' + station.stationId + '/status';
     },
     parse: parseRadioCoJson
+  },
+  radiocov2: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://public.radio.co/api/v2/' + station.stationId + '/track/current';
+    },
+    parse: parseRadioCoV2Json
   },
   radioking: {
     buildNowPlayingUrl: function(station) {
