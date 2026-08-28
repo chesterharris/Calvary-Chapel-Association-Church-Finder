@@ -2614,6 +2614,15 @@
       const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
       const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
       timeText = '<span' + timeClass + '>' + timeSec + '</span>';
+    } else if (r.checkedThisCycle === false) {
+      // This church wasn't part of THIS cycle's batch (see
+      // LIVE_CHECK_BATCH_SIZE in index.js) - showing the row's status
+      // still comes from its own last real check, just not this cycle's,
+      // so say so explicitly rather than leaving a bare "-" that could
+      // read as "never checked at all."
+      timeText = r.neverChecked
+        ? '<span style="opacity:0.55;">not yet checked</span>'
+        : '<span style="opacity:0.55;">carried over' + (r.lastCheckedAt ? ' (' + formatRelativeTime(r.lastCheckedAt) + ')' : '') + '</span>';
     }
 
     return '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
@@ -2682,7 +2691,17 @@
     html += '<div class="live-debug-summary">';
     html += '<div><span class="label">Checked</span><span class="value">' + formatRelativeTime(cycle.checkedAt) + '</span></div>';
     html += '<div><span class="label">Duration</span><span class="value">' + formatDurationMs(cycle.durationMs) + '</span></div>';
-    html += '<div><span class="label">Total candidates</span><span class="value">' + cycle.totalCandidates + '</span></div>';
+    if (cycle.batchCount != null && cycle.batchCount > 1) {
+      // Each cycle only checks ONE batch (see LIVE_CHECK_BATCH_SIZE in
+      // index.js) - shown explicitly whenever there's more than one batch,
+      // so "Total candidates" below reads as "this batch" rather than
+      // looking like the whole church list. Omitted entirely when there's
+      // only one batch (batching is a no-op at that church count), so
+      // this row doesn't show up as noise for smaller lists.
+      html += '<div><span class="label">Batch</span><span class="value">' + (cycle.batchIndex + 1) + ' of ' + cycle.batchCount + '</span></div>';
+      html += '<div><span class="label">Total churches</span><span class="value">' + (cycle.totalChurches != null ? cycle.totalChurches : '-') + '</span></div>';
+    }
+    html += '<div><span class="label">' + (cycle.batchCount != null && cycle.batchCount > 1 ? 'Checked this batch' : 'Total candidates') + '</span><span class="value">' + cycle.totalCandidates + '</span></div>';
     html += '<div><span class="label">Actually checked</span><span class="value">' + cycle.actuallyChecked + '</span></div>';
     html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + '</span></div>';
     html += '<div><span class="label">Not checked</span><span class="value' + (cycle.notChecked > 0 ? ' warn' : '') + '">' + cycle.notChecked + '</span></div>';
@@ -2735,7 +2754,7 @@
 
     if (data.history && data.history.length) {
       html += '<div class="live-debug-section-title">Recent Cycles (trend)</div>';
-      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
+      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Batch</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
       // Most recent first - easier to spot a worsening trend at a glance
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
@@ -2752,21 +2771,25 @@
           const countText = (h.previousCompletedCount != null && h.previousTotalCandidates != null)
             ? (h.previousCompletedCount + '/' + h.previousTotalCandidates)
             : '?/?';
-          html += '<tr><td colspan="6" style="color:var(--ember);">⚠️ Stuck on ' + churchText +
+          html += '<tr><td colspan="7" style="color:var(--ember);">⚠️ Stuck on ' + churchText +
             ' (' + countText + '), ' + stuckText + ' - restarted ' +
             formatRelativeTime(h.checkedAt) + '</td></tr>';
           return;
         }
         // Backward compatibility: history entries written before this
-        // field rename (checked -> totalCandidates) and before notChecked
-        // existed at all are still sitting in the rolling 50-cycle
-        // history right after a deploy. Rather than show a raw
-        // "undefined" for those old rows until they naturally age out,
-        // fall back to the old field name (or a plain dash) so the table
-        // reads cleanly either way.
+        // field rename (checked -> totalCandidates), before notChecked
+        // existed, and before batching (batchIndex/batchCount) existed
+        // are still sitting in the rolling 50-cycle history right after a
+        // deploy. Rather than show a raw "undefined" for those old rows
+        // until they naturally age out, fall back to the old field name
+        // (or a plain dash) so the table reads cleanly either way.
         const total = h.totalCandidates != null ? h.totalCandidates : (h.checked != null ? h.checked : '-');
         const notChecked = h.notChecked != null ? h.notChecked : '-';
-        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + total + '</td>' +
+        const batchText = (h.batchIndex != null && h.batchCount != null)
+          ? (h.batchIndex + 1) + '/' + h.batchCount
+          : '-';
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td>' +
+          '<td>' + batchText + '</td><td>' + total + '</td>' +
           '<td' + (h.errored > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
           '<td' + (typeof notChecked === 'number' && notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + notChecked + '</td>' +
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';
@@ -2794,7 +2817,14 @@
     const done = progress.completedCount || 0;
     const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
     liveDebugProgressBar.style.width = pct + '%';
-    liveDebugProgressText.textContent = done + ' / ' + total + ' churches (' + pct + '%)';
+    // "churches" here means this cycle's BATCH (see LIVE_CHECK_BATCH_SIZE
+    // in index.js) - batchCount > 1 means the church list is split across
+    // multiple cycles, so the batch label is included whenever it applies
+    // to avoid this number looking like it covers every church.
+    const batchLabel = (progress.batchCount != null && progress.batchCount > 1)
+      ? ' (batch ' + (progress.batchIndex + 1) + '/' + progress.batchCount + ')'
+      : '';
+    liveDebugProgressText.textContent = done + ' / ' + total + ' churches' + batchLabel + ' (' + pct + '%)';
 
     // ETA from REAL elapsed-time-so-far, not a historical guess - self-
     // corrects live if this particular run is faster or slower than usual.
@@ -2808,7 +2838,7 @@
     }
 
     liveDebugStatusDot.className = 'live-debug-status-dot warn';
-    liveDebugStatusText.textContent = 'Running now' + (progress.currentChurchName ? ' - checking "' + escapeHtmlDebug(progress.currentChurchName) + '"' : '');
+    liveDebugStatusText.textContent = 'Running now' + batchLabel + (progress.currentChurchName ? ' - checking "' + escapeHtmlDebug(progress.currentChurchName) + '"' : '');
   }
 
   function hideProgressUI() {
