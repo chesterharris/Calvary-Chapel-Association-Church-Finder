@@ -1928,6 +1928,15 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice25.securenetsystems.net/KCPVLP'
   },
   {
+    displayName: 'KOUJ',
+    cityState: 'Norman, OK',
+    homePage: 'http://www.kouj.org/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb6web.securenetsystems.net',
+    callSign: 'KOUJ',
+    streamUrl: 'https://ice41.securenetsystems.net/KOUJ'
+  },
+  {
     displayName: 'WRDJ',
     cityState: 'Merritt Island, FL',
     homePage: 'http://www.wrdj.com',
