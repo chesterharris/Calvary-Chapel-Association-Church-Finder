@@ -1983,7 +1983,7 @@
 
 <div id="radioBrowsePanel" class="side-panel" style="display: none;">
   <div class="side-panel-header">
-    <h2>📻 All Radio Stations</h2>
+    <h2 id="radioBrowseTitle">📻 All Radio Stations</h2>
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
   </div>
   <div class="radio-browse-toolbar">
@@ -4408,11 +4408,15 @@
   function renderRadioBrowsePanel() {
     const listEl = document.getElementById('radioBrowseList');
     const favCountEl = document.getElementById('radioBrowseFavCount');
+    const titleEl = document.getElementById('radioBrowseTitle');
     if (!radioStations || !radioStations.length) {
       listEl.innerHTML = '<div class="radio-browse-empty">Loading stations...</div>';
       favCountEl.textContent = '';
+      if (titleEl) titleEl.textContent = '📻 All Radio Stations';
       return;
     }
+
+    if (titleEl) titleEl.textContent = '📻 All ' + radioStations.length + ' Radio Stations';
 
     const favorites = getFavoriteStationNames();
     favCountEl.textContent = favorites.length ? ('\u2605 ' + favorites.length + ' in your ticker') : '';
