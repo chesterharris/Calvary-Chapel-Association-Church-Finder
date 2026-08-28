@@ -604,7 +604,7 @@ const LIVE_CHECK_DEBUG_CANDIDATE_CAP = 150;
 // read (besides skipping the write-back below while it's active, so the
 // pin isn't quietly overwritten by a cycle's own adaptive adjustment
 // mid-experiment).
-const LIVE_CHECK_DEBUG_FORCED_STAGGER_MS = 750;
+const LIVE_CHECK_DEBUG_FORCED_STAGGER_MS = 500;
 
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
