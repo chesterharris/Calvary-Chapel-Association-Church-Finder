@@ -581,7 +581,7 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // independent of which specific churches are involved. Set back to
 // null to check every eligible church again, with no other changes
 // needed anywhere else - this is the only place this constant is read.
-const LIVE_CHECK_DEBUG_CANDIDATE_CAP = null;
+const LIVE_CHECK_DEBUG_CANDIDATE_CAP = 150;
 
 // ============================================================
 // TEMPORARY EXPERIMENT (paired with the cap above) - remove this
@@ -604,7 +604,7 @@ const LIVE_CHECK_DEBUG_CANDIDATE_CAP = null;
 // read (besides skipping the write-back below while it's active, so the
 // pin isn't quietly overwritten by a cycle's own adaptive adjustment
 // mid-experiment).
-const LIVE_CHECK_DEBUG_FORCED_STAGGER_MS = 1800;
+const LIVE_CHECK_DEBUG_FORCED_STAGGER_MS = 750;
 
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
