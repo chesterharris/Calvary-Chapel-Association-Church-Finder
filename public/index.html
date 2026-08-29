@@ -721,15 +721,36 @@
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
   }
-  .radio-browse-search {
+  .radio-browse-search-wrap {
+    position: relative;
     flex: 1;
     min-width: 0;
-    padding: 6px 10px;
+  }
+  .radio-browse-search {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 6px 26px 6px 10px;
     border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 13px;
     font-family: inherit;
   }
+  .radio-browse-search-clear {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--ink);
+    opacity: 0.5;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px 6px;
+  }
+  .radio-browse-search-clear:hover { opacity: 0.85; }
   .radio-browse-fav-count {
     font-size: 11.5px;
     color: var(--brass);
@@ -2000,7 +2021,10 @@
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
   </div>
   <div class="radio-browse-toolbar">
-    <input type="text" id="radioBrowseSearch" class="radio-browse-search" placeholder="Search stations...">
+    <div class="radio-browse-search-wrap">
+      <input type="text" id="radioBrowseSearch" class="radio-browse-search" placeholder="Search stations...">
+      <button id="radioBrowseSearchClear" class="radio-browse-search-clear" style="display: none;" aria-label="Clear search" title="Clear search">&times;</button>
+    </div>
     <span id="radioBrowseFavCount" class="radio-browse-fav-count"></span>
   </div>
   <div class="radio-browse-help-text">Tap station to Listen. Tap ★ to add or remove it from your home page ticker.</div>
@@ -4493,6 +4517,11 @@
     // radioBrowseFrozenOrder's comment above for why this only happens
     // here, not on every re-render while the panel stays open.
     radioBrowseFrozenOrder = computeRadioBrowseOrder();
+    // The search box/query intentionally persist across a close+reopen
+    // (unlike a fresh page load) - this just keeps the clear button's
+    // visibility in sync with whatever query is still sitting there,
+    // rather than only reacting to new typing.
+    document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
     renderRadioBrowsePanel();
   }
 
@@ -4502,7 +4531,16 @@
   });
   document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
     radioBrowseSearchQuery = e.target.value;
+    document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
     renderRadioBrowsePanel();
+  });
+  document.getElementById('radioBrowseSearchClear').addEventListener('click', function() {
+    const input = document.getElementById('radioBrowseSearch');
+    radioBrowseSearchQuery = '';
+    input.value = '';
+    this.style.display = 'none';
+    renderRadioBrowsePanel();
+    input.focus();
   });
   document.getElementById('radioBrowseList').addEventListener('click', function(e) {
     if (e.target.closest('.radio-browse-homepage-link')) {
