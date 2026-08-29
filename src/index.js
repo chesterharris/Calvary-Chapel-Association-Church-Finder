@@ -2003,7 +2003,7 @@ const RADIO_STATIONS = [
     homePage: 'https://klyt.fm/',
     provider: 'radioco',
     stationId: 's914ba6b9a',
-    streamUrl: 'https://s5.radio.co/s914ba6b9a'
+    streamUrl: 'https://s5.radio.co/s914ba6b9a/listen'
   },
   {
     displayName: 'KPTG',
