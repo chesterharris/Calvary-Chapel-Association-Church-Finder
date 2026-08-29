@@ -2673,12 +2673,12 @@
   // something you have to scroll past every time the panel opens. Native
   // <details>/<summary> needs no extra JS to expand/collapse and is
   // keyboard-accessible for free.
-  function buildDebugResultsGroup(label, rows) {
+  function buildDebugResultsGroup(label, rows, openByDefault) {
     if (!rows.length) {
       return '<details class="live-debug-group"><summary>' + escapeHtmlDebug(label) + ' - 0</summary>' +
         '<p style="opacity:0.6;">None right now.</p></details>';
     }
-    let html = '<details class="live-debug-group"><summary>' + escapeHtmlDebug(label) + ' - ' + rows.length + '</summary>';
+    let html = '<details class="live-debug-group"' + (openByDefault ? ' open' : '') + '><summary>' + escapeHtmlDebug(label) + ' - ' + rows.length + '</summary>';
     html += '<table class="live-debug-table">' +
       '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
       '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
@@ -2765,20 +2765,30 @@
     if (cycle.results && cycle.results.length) {
       html += '<div class="live-debug-section-title">Per-Church Results</div>';
 
-      // Single pass, three buckets - a row that's errored or not-checked
-      // still needs a home even though it's neither "live" nor "waiting",
-      // so it falls into Not-Live by default. Its badge/error text inside
-      // the row itself still shows the real status - this grouping is
-      // just for finding things quickly, not a claim that "not-live" and
-      // "errored" mean the same thing.
+      // Single pass, four buckets - a church that's currently erroring or
+      // stuck on stale carried-over data gets its OWN group up front,
+      // rather than being buried inside the (often 100+ row) Not-Live
+      // bucket alongside every ordinary non-live church. Confirmed in
+      // production this was the actual barrier to spotting a recurring
+      // error - the data was always there, it just took expanding
+      // Not-Live and scanning past everything else to find it.
       const liveRows = [];
       const waitingRows = [];
+      const erroredRows = [];
       const notLiveRows = [];
       cycle.results.forEach(function(r) {
         if (!r.notChecked && !r.error && (r.status === 'live' || (r.status == null && r.isLive))) {
           liveRows.push(r);
         } else if (!r.notChecked && !r.error && r.status === 'waiting') {
           waitingRows.push(r);
+        } else if (!r.notChecked && r.error) {
+          // Deliberately excludes notChecked entries (subrequest-budget
+          // skips) even though those also carry an explanatory .error
+          // string - that's an already-understood platform limit (see
+          // the banner above), not a genuine per-church failure, and
+          // mixing the two would dilute the signal this group exists to
+          // surface. Those still land in Not-Live, same as before.
+          erroredRows.push(r);
         } else {
           notLiveRows.push(r);
         }
@@ -2786,6 +2796,7 @@
 
       html += buildDebugResultsGroup('Live', liveRows);
       html += buildDebugResultsGroup('Waiting', waitingRows);
+      html += buildDebugResultsGroup(erroredRows.length ? '⚠️ Errored' : 'Errored', erroredRows, true);
       html += buildDebugResultsGroup('Not-Live', notLiveRows);
     }
 
