@@ -704,6 +704,16 @@
   #radioBrowsePanel {
     width: 420px;
   }
+  /* On phones the fixed 420px above ignores .side-panel's 88vw cap (an ID
+     selector always wins over a class one), which is exactly what pushes
+     this pane wider than the screen and drags its close button off-
+     screen. Capping it back down to 88vw ONLY below the same 600px
+     breakpoint used elsewhere for mobile keeps desktop/tablet untouched. */
+  @media (max-width: 600px) {
+    #radioBrowsePanel {
+      width: 88vw;
+    }
+  }
   .radio-browse-toolbar {
     display: flex;
     align-items: center;
@@ -4429,7 +4439,9 @@
     if (titleEl) titleEl.textContent = '📻 All ' + radioStations.length + ' Radio Stations';
 
     const favorites = getFavoriteStationNames();
-    favCountEl.textContent = favorites.length ? ('\u2605 ' + favorites.length + ' in your ticker') : '';
+    favCountEl.textContent = favorites.length
+      ? ('\u2605 ' + favorites.length + (isMobilePickerBreakpoint() ? ' in ticker' : ' in your ticker'))
+      : '';
 
     const ordered = getOrderedRadioStations();
     const query = radioBrowseSearchQuery.trim().toLowerCase();
