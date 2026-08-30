@@ -17,7 +17,7 @@
 		}
 	],
 	"triggers": {
-		"crons": ["*/10 * * * *"]
+		"crons": ["*/2 * * * *"]
 	},
 	"limits": {
 		"subrequests": 10000
