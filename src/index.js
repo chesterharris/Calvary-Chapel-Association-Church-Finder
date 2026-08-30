@@ -623,14 +623,22 @@ const LIVE_CHECK_BATCH_SIZE = 150;
 // waiting for the previous one to finish - confirmed via Cloudflare's
 // own docs) from piling a second full cycle on top of a first one that's
 // still legitimately in progress, especially if a cycle runs anywhere
-// close to the full 10-minute gap between ticks. Set comfortably above
-// the ~5 minute duration a normal clean cycle actually takes (see the
-// debug panel's own "Recent Cycles" history), but below the 10-minute
-// cron interval, so a second tick only ever skips while the first is
-// plausibly still doing real work - not indefinitely. If a cycle is
-// still marked running past this window, it's more likely genuinely
-// wedged than legitimately slow, and a fresh attempt is allowed to start
-// rather than leaving things blocked forever.
+// close to the full 10-minute gap between ticks.
+//
+// Originally set to 8 minutes, comfortably above the ~5 minute duration a
+// normal clean cycle took in testing - but that testing happened with
+// few or no churches actually live at once. Confirmed in production on a
+// Sunday morning with many churches simultaneously live: real cycles ran
+// long enough to cross 8 minutes (91-96% through the batch, never
+// finishing), so every next cron tick saw "still running" and killed it
+// as presumed-dead, restarting the SAME batch from zero - which then hit
+// the same slowdown and got killed again, forever, all morning, without
+// ever once actually completing. Raised well above the 10-minute cron
+// interval so a cycle that's merely slow (not actually wedged) gets the
+// runway to finish for real. Trade-off: a truly wedged cycle (crashed,
+// hung forever) now takes up to ~2 missed cron ticks to recover instead
+// of ~1 - an acceptable cost against the alternative of never finishing
+// under real Sunday-morning load.
 //
 // This is a best-effort heuristic, not a hard distributed lock - KV
 // doesn't offer atomic compare-and-swap, so two invocations checking this
@@ -638,7 +646,7 @@ const LIVE_CHECK_BATCH_SIZE = 150;
 // an acceptable, rare edge case; it doesn't need to be airtight to fix
 // the actual pattern being seen (every-10-minutes pileup), just to stop
 // the common case.
-const LIVE_CHECK_OVERLAP_GUARD_MS = 8 * 60 * 1000; // 8 minutes
+const LIVE_CHECK_OVERLAP_GUARD_MS = 20 * 60 * 1000; // 20 minutes
 
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
