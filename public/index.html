@@ -1533,6 +1533,153 @@
   }
   .radio-player-close:hover { opacity: 1; color: var(--ember); }
 
+  /* ---- Radio sleep timer ----
+     Icon lives in the mini-player bar itself, so it's reachable on both
+     desktop and mobile any time something is playing (this bar is not
+     actually desktop-exclusive - see the comment on .radio-player-bar
+     above). Idle state is just the clock outline; once armed, the
+     remaining time appears next to it in the gold accent already used
+     elsewhere on the page (the ticker's CTA color) so it reads as "live"
+     without being loud about it. */
+  .radio-player-timer-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    color: var(--paper);
+    opacity: 0.7;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .radio-player-timer-btn:hover { opacity: 1; }
+  .radio-player-timer-btn.is-armed { opacity: 1; color: #f2c76e; }
+  .radio-timer-icon { display: flex; }
+  .radio-timer-icon svg { width: 18px; height: 18px; display: block; }
+  .radio-timer-remaining {
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  /* ---- Radio sleep timer slide-up sheet ---- */
+  .timer-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(28,43,36,0.55);
+    z-index: 2600;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .timer-sheet {
+    background: var(--paper);
+    color: var(--ink);
+    width: 100%;
+    max-width: 420px;
+    border-radius: 12px 12px 0 0;
+    padding: 18px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+    animation: timerSheetUp 0.18s ease-out;
+  }
+  @keyframes timerSheetUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .timer-sheet-title {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--evergreen);
+    text-align: center;
+    margin: 0 0 14px 0;
+  }
+  .timer-sheet-rollers {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    height: 180px;
+  }
+  .timer-sheet-highlight {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 36px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .timer-roller {
+    position: relative;
+    z-index: 1;
+    width: 62px;
+    height: 100%;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .timer-roller::-webkit-scrollbar { display: none; }
+  .timer-roller-pad { height: 72px; }
+  .timer-roller-row {
+    height: 36px;
+    line-height: 36px;
+    text-align: center;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    opacity: 0.35;
+    scroll-snap-align: center;
+    cursor: pointer;
+    transition: opacity 0.15s ease, font-weight 0.15s ease;
+  }
+  .timer-roller-row.is-selected {
+    opacity: 1;
+    font-weight: 700;
+    color: var(--evergreen);
+  }
+  .timer-roller-unit-label {
+    position: relative;
+    z-index: 1;
+    width: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 6px;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+    color: var(--brass);
+  }
+  .timer-sheet-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .timer-sheet-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .timer-sheet-actions .btn-ember[disabled] {
+    opacity: 0.45;
+    cursor: default;
+  }
+
   /* ---- Mobile station picker (phones only, see #mobileRadioPicker) ---- */
   .mp-picker {
     display: none;
@@ -1977,7 +2124,35 @@
     <div id="radioPlayerNowPlaying" class="radio-player-nowplaying"></div>
   </div>
   <audio id="radioAudio" preload="none"></audio>
+  <button type="button" id="radioTimerBtn" class="radio-player-timer-btn" title="Set sleep timer" aria-label="Set sleep timer">
+    <span class="radio-timer-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>
+    <span id="radioTimerRemaining" class="radio-timer-remaining"></span>
+  </button>
   <button type="button" id="radioPlayerCloseBtn" class="radio-player-close" title="Stop and close player" aria-label="Stop and close player">×</button>
+</div>
+
+<!-- Sleep timer slide-up sheet. Opened from the clock icon in the bar above
+     (same control, same sheet, on both desktop and mobile). Two rollers
+     (hours/minutes) styled as an iOS-style picker via CSS scroll-snap - see
+     the timer-roller-* rules above and the roller wiring in the script below. -->
+<div id="radioTimerOverlay" class="timer-sheet-overlay" style="display: none;">
+  <div class="timer-sheet">
+    <h2 class="timer-sheet-title">Timer</h2>
+    <div class="timer-sheet-rollers">
+      <div class="timer-sheet-highlight" aria-hidden="true"></div>
+      <div id="radioTimerHourRoller" class="timer-roller" data-max="12"></div>
+      <div class="timer-roller-unit-label">hr</div>
+      <div id="radioTimerMinuteRoller" class="timer-roller" data-max="59"></div>
+      <div class="timer-roller-unit-label">min</div>
+    </div>
+    <div class="timer-sheet-actions">
+      <button type="button" id="radioTimerCancelActiveBtn" class="btn btn-danger" style="display: none;">Cancel Timer</button>
+      <div class="timer-sheet-actions-right">
+        <button type="button" id="radioTimerDismissBtn" class="btn btn-outline">Cancel</button>
+        <button type="button" id="radioTimerOkBtn" class="btn btn-ember">OK</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Mobile-only full-screen station picker. Replaces the map area on
@@ -4004,6 +4179,14 @@
   const radioPlayPauseBtn = document.getElementById('radioPlayPauseBtn');
   const radioPlayerCloseBtn = document.getElementById('radioPlayerCloseBtn');
   const radioAudio = document.getElementById('radioAudio');
+  const radioTimerBtn = document.getElementById('radioTimerBtn');
+  const radioTimerRemainingEl = document.getElementById('radioTimerRemaining');
+  const radioTimerOverlay = document.getElementById('radioTimerOverlay');
+  const radioTimerHourRoller = document.getElementById('radioTimerHourRoller');
+  const radioTimerMinuteRoller = document.getElementById('radioTimerMinuteRoller');
+  const radioTimerOkBtn = document.getElementById('radioTimerOkBtn');
+  const radioTimerDismissBtn = document.getElementById('radioTimerDismissBtn');
+  const radioTimerCancelActiveBtn = document.getElementById('radioTimerCancelActiveBtn');
 
   const RADIO_POLL_MS = 60000; // matches RADIO_CACHE_SECONDS on the Worker side
   let radioStations = []; // last-loaded station list, indexed for ticker click lookups
@@ -4325,6 +4508,234 @@
     }
   }
 
+  // ---- Radio sleep timer ----
+  //
+  // Lives in the mini-player bar itself (the SAME bar shown on both desktop
+  // and mobile - see the comment on .radio-player-bar in <style> - it isn't
+  // actually desktop-exclusive), so it's reachable any time something is
+  // playing, on either device, without needing the separate full-screen
+  // station picker open.
+  //
+  // Only the last-set duration is remembered across visits (localStorage,
+  // same pattern as radio favorites above). An in-progress countdown itself
+  // is purely in-memory and does not survive a reload - consistent with
+  // playback itself not resuming automatically on reload either.
+  const RADIO_TIMER_LAST_DURATION_KEY = 'ccaFinderRadioTimerLastDuration';
+  const RADIO_TIMER_DEFAULT_HOURS = 0;
+  const RADIO_TIMER_DEFAULT_MINUTES = 30;
+  const RADIO_TIMER_MAX_HOURS = 12;
+  const RADIO_TIMER_MAX_MINUTES = 59;
+  const RADIO_TIMER_ROW_HEIGHT = 36; // must match .timer-roller-row height in <style>
+  // Volume eases out over this many ms right before the timer hits zero,
+  // rather than cutting the stream off mid-word. Only matters while actually
+  // playing - nothing to fade if the listener already paused it themselves.
+  const RADIO_TIMER_FADE_MS = 12000;
+
+  function getLastRadioTimerDuration() {
+    try {
+      const raw = localStorage.getItem(RADIO_TIMER_LAST_DURATION_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed.hours === 'number' && typeof parsed.minutes === 'number') {
+        return {
+          hours: Math.min(Math.max(0, Math.round(parsed.hours)), RADIO_TIMER_MAX_HOURS),
+          minutes: Math.min(Math.max(0, Math.round(parsed.minutes)), RADIO_TIMER_MAX_MINUTES)
+        };
+      }
+    } catch (err) {
+      // Fall through to the default below.
+    }
+    return { hours: RADIO_TIMER_DEFAULT_HOURS, minutes: RADIO_TIMER_DEFAULT_MINUTES };
+  }
+
+  function setLastRadioTimerDuration(hours, minutes) {
+    try {
+      localStorage.setItem(RADIO_TIMER_LAST_DURATION_KEY, JSON.stringify({ hours: hours, minutes: minutes }));
+    } catch (err) {
+      // Ignore - it just won't be remembered next visit.
+    }
+  }
+
+  let radioTimerEndAt = null; // epoch ms the countdown fires at, or null when not armed
+  let radioTimerIntervalId = null;
+
+  function formatRadioTimerRemaining(ms) {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+    const ss = String(s).padStart(2, '0');
+    return h > 0 ? (h + ':' + mm + ':' + ss) : (mm + ':' + ss);
+  }
+
+  function updateRadioTimerButtonDisplay() {
+    if (radioTimerEndAt == null) {
+      radioTimerBtn.classList.remove('is-armed');
+      radioTimerRemainingEl.textContent = '';
+      radioTimerBtn.title = 'Set sleep timer';
+      radioTimerBtn.setAttribute('aria-label', 'Set sleep timer');
+      return;
+    }
+    const remainingText = formatRadioTimerRemaining(radioTimerEndAt - Date.now());
+    radioTimerBtn.classList.add('is-armed');
+    radioTimerRemainingEl.textContent = remainingText;
+    const label = 'Sleep timer: ' + remainingText + ' remaining - tap to change or cancel';
+    radioTimerBtn.title = label;
+    radioTimerBtn.setAttribute('aria-label', label);
+  }
+
+  function stopRadioTimerInterval() {
+    if (radioTimerIntervalId != null) {
+      clearInterval(radioTimerIntervalId);
+      radioTimerIntervalId = null;
+    }
+  }
+
+  // Clears an armed timer without touching playback itself - used both when
+  // the listener explicitly cancels it and as part of a full playback stop
+  // (see stopRadioPlayback below), so the timer never keeps ticking after
+  // there's no bar left to show it on.
+  function cancelRadioTimer() {
+    radioTimerEndAt = null;
+    stopRadioTimerInterval();
+    radioAudio.volume = 1;
+    updateRadioTimerButtonDisplay();
+  }
+
+  function armRadioTimer(hours, minutes) {
+    const durationMs = (hours * 3600 + minutes * 60) * 1000;
+    if (durationMs <= 0) return;
+    radioAudio.volume = 1; // in case a previous timer's fade-out was mid-way through
+    radioTimerEndAt = Date.now() + durationMs;
+    stopRadioTimerInterval();
+    radioTimerIntervalId = setInterval(radioTimerTick, 1000);
+    updateRadioTimerButtonDisplay();
+  }
+
+  function radioTimerTick() {
+    if (radioTimerEndAt == null) { stopRadioTimerInterval(); return; }
+    const remainingMs = radioTimerEndAt - Date.now();
+
+    if (remainingMs <= 0) {
+      stopRadioPlayback();
+      return;
+    }
+    if (remainingMs <= RADIO_TIMER_FADE_MS && !radioAudio.paused) {
+      radioAudio.volume = Math.max(0, Math.min(1, remainingMs / RADIO_TIMER_FADE_MS));
+    }
+    updateRadioTimerButtonDisplay();
+  }
+
+  // Fully stops playback - identical to what the bar's own × close button
+  // has always done - and also clears any armed timer, so both paths (a
+  // manual close, or the countdown hitting zero) leave things in exactly
+  // the same end state.
+  function stopRadioPlayback() {
+    radioAudio.pause();
+    radioAudio.removeAttribute('src');
+    radioAudio.load();
+    hideMiniPlayer();
+    currentPlayingDisplayName = null;
+    cancelRadioTimer();
+  }
+
+  // ---- Sleep timer roller sheet ----
+  function buildRadioTimerRollerRows(rollerEl, max) {
+    let html = '<div class="timer-roller-pad" aria-hidden="true"></div>';
+    for (let i = 0; i <= max; i++) {
+      html += '<div class="timer-roller-row" data-value="' + i + '">' + i + '</div>';
+    }
+    html += '<div class="timer-roller-pad" aria-hidden="true"></div>';
+    rollerEl.innerHTML = html;
+  }
+
+  function setRadioTimerRollerValue(rollerEl, value, smooth) {
+    rollerEl.scrollTo({ top: value * RADIO_TIMER_ROW_HEIGHT, behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  function getRadioTimerRollerValue(rollerEl) {
+    return Math.round(rollerEl.scrollTop / RADIO_TIMER_ROW_HEIGHT);
+  }
+
+  function updateRadioTimerRollerHighlight(rollerEl) {
+    const selected = getRadioTimerRollerValue(rollerEl);
+    rollerEl.querySelectorAll('.timer-roller-row').forEach(function(row) {
+      row.classList.toggle('is-selected', Number(row.getAttribute('data-value')) === selected);
+    });
+  }
+
+  function updateRadioTimerOkState() {
+    const h = getRadioTimerRollerValue(radioTimerHourRoller);
+    const m = getRadioTimerRollerValue(radioTimerMinuteRoller);
+    radioTimerOkBtn.disabled = (h === 0 && m === 0);
+  }
+
+  function wireRadioTimerRoller(rollerEl) {
+    let settleTimeout = null;
+    rollerEl.addEventListener('scroll', function() {
+      updateRadioTimerRollerHighlight(rollerEl);
+      clearTimeout(settleTimeout);
+      settleTimeout = setTimeout(function() {
+        // Snap-correct in case the scroll ended slightly off a row boundary,
+        // then re-derive state from the now-settled position.
+        setRadioTimerRollerValue(rollerEl, getRadioTimerRollerValue(rollerEl), true);
+        updateRadioTimerRollerHighlight(rollerEl);
+        updateRadioTimerOkState();
+      }, 120);
+    });
+    rollerEl.addEventListener('click', function(e) {
+      const row = e.target.closest('.timer-roller-row');
+      if (!row) return;
+      setRadioTimerRollerValue(rollerEl, Number(row.getAttribute('data-value')), true);
+    });
+  }
+
+  buildRadioTimerRollerRows(radioTimerHourRoller, RADIO_TIMER_MAX_HOURS);
+  buildRadioTimerRollerRows(radioTimerMinuteRoller, RADIO_TIMER_MAX_MINUTES);
+  wireRadioTimerRoller(radioTimerHourRoller);
+  wireRadioTimerRoller(radioTimerMinuteRoller);
+
+  function openRadioTimerSheet() {
+    const last = getLastRadioTimerDuration();
+    radioTimerCancelActiveBtn.style.display = radioTimerEndAt != null ? 'inline-block' : 'none';
+    radioTimerOverlay.style.display = 'flex';
+    // Wait a frame so the sheet has real layout before we set scroll
+    // positions on its (until-now-hidden) rollers.
+    requestAnimationFrame(function() {
+      setRadioTimerRollerValue(radioTimerHourRoller, last.hours, false);
+      setRadioTimerRollerValue(radioTimerMinuteRoller, last.minutes, false);
+      updateRadioTimerRollerHighlight(radioTimerHourRoller);
+      updateRadioTimerRollerHighlight(radioTimerMinuteRoller);
+      updateRadioTimerOkState();
+    });
+  }
+
+  function closeRadioTimerSheet() {
+    radioTimerOverlay.style.display = 'none';
+  }
+
+  radioTimerBtn.addEventListener('click', openRadioTimerSheet);
+
+  radioTimerOverlay.addEventListener('click', function(e) {
+    if (e.target === radioTimerOverlay) closeRadioTimerSheet();
+  });
+
+  radioTimerDismissBtn.addEventListener('click', closeRadioTimerSheet);
+
+  radioTimerCancelActiveBtn.addEventListener('click', function() {
+    cancelRadioTimer();
+    closeRadioTimerSheet();
+  });
+
+  radioTimerOkBtn.addEventListener('click', function() {
+    const h = getRadioTimerRollerValue(radioTimerHourRoller);
+    const m = getRadioTimerRollerValue(radioTimerMinuteRoller);
+    if (h === 0 && m === 0) return;
+    setLastRadioTimerDuration(h, m);
+    armRadioTimer(h, m);
+    closeRadioTimerSheet();
+  });
+
   function playStation(station) {
     if (!station.streamUrl) {
       // Configured but its direct stream URL isn't confirmed yet - fail
@@ -4332,6 +4743,11 @@
       alert(station.displayName + ' isn\'t available to play yet.');
       return;
     }
+    // Reset volume in case a still-running sleep timer had faded the
+    // PREVIOUS station out - switching stations keeps the timer armed (it
+    // counts down independent of which station is currently playing), so
+    // the new one should always start at full volume regardless.
+    radioAudio.volume = 1;
     radioAudio.src = station.streamUrl;
     radioAudio.play().catch(function() {
       // Autoplay can be blocked by the browser - the play/pause button still
@@ -4630,11 +5046,7 @@
   });
 
   radioPlayerCloseBtn.addEventListener('click', function() {
-    radioAudio.pause();
-    radioAudio.removeAttribute('src');
-    radioAudio.load();
-    hideMiniPlayer();
-    currentPlayingDisplayName = null;
+    stopRadioPlayback();
   });
 
   // ---- Mobile station picker (full-screen, phones only) ----
