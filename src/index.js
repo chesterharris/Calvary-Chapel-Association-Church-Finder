@@ -595,6 +595,26 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // not a pace/rate one - so the real fix is keeping any single cycle's
 // request count safely under that line, not adjusting speed.
 //
+// IMPORTANT UPDATE: that night-time testing was done with few or no
+// churches actually live. Confirmed in production on a heavy Sunday
+// morning (many churches simultaneously live) that 150 was NOT safe
+// under real load: cycles ran the full length of a generously-raised
+// overlap guard (20 minutes - see LIVE_CHECK_OVERLAP_GUARD_MS) and still
+// only reached 100-128 of 150 churches, never completing, 100% of the
+// time for over an hour straight. So the original 150 ceiling was really
+// "150 not-live/fast churches," not "150 churches regardless of how many
+// are actually live" - an actually-live church's page apparently takes
+// meaningfully longer to fetch/parse than a not-live one, and enough of
+// those clustered in one batch compounds far past what any reasonable
+// guard window can absorb. Cut substantially (150 -> 50) to restore a
+// safe margin under real Sunday-morning load, not just the quiet-night
+// case this was originally tuned for. Trade-off: each church's own
+// freshness cadence stretches from ~2 batches (roughly 20 min full
+// rotation) to ~6 batches (roughly 60 min) at 293 total churches - a
+// real cost, but a live indicator that's an hour stale beats one that
+// hasn't updated all morning because the whole system is stuck retrying
+// batch 1 forever.
+//
 // This is what actually replaces the old single-pass-over-everyone
 // design: instead of one cycle trying to check every eligible church,
 // the eligible list is split into batches of this size, and each cron
@@ -608,8 +628,8 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // churches are added: batch COUNT grows on its own (ceil(total / this
 // value)), so this number shouldn't need to change just because the
 // church list grows - only if the actual safe-count ceiling turns out to
-// be different from ~150.
-const LIVE_CHECK_BATCH_SIZE = 150;
+// be different from ~50 under real live-heavy load.
+const LIVE_CHECK_BATCH_SIZE = 50;
 
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
