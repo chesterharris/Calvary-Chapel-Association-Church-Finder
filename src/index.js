@@ -517,25 +517,6 @@ const LIVE_CHECK_PROGRESS_KV_KEY = 'live-check-progress';
 // an admin can actually read it, instead of only ever being visible as an
 // opaque red dot in a dashboard table.
 const LIVE_CHECK_LAST_ERROR_KV_KEY = 'live-check-last-error';
-// TEMPORARY debugging key only - see the capture block in checkChurchLive.
-// Holds the raw HTML of the most recent "isLive:true but no videoId"
-// fallback page seen, so it can be pulled from KV and diffed against a
-// normal full response. Remove this key's writer (and, once done, the key
-// itself) after we've captured and reviewed a real example.
-const LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY = 'live-check-fallback-capture-DEBUG';
-// Which batch's turn it is next - see LIVE_CHECK_BATCH_SIZE for the full
-// reasoning behind batching itself. Just {batchIndex, updatedAt}.
-const LIVE_CHECK_BATCH_STATE_KV_KEY = 'live-check-batch-state';
-// The persisted source of truth for every church's most recent ACTUAL
-// check result, keyed by churchId. Under batching, only one batch's worth
-// of churches gets freshly checked per cycle - this is what lets every
-// OTHER church still show its last known result (live/not-live/waiting)
-// instead of going blank or reverting to "unknown" between its own
-// batch's turns. Superseded the old approach of reading the previous
-// live-status write's `live` array as the only fallback source (which
-// only ever covered previously-LIVE churches) - this covers every
-// church's full last-known state, live or not.
-const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -554,16 +535,12 @@ const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
 // grows automatically when a cycle sees rate-limit errors, and eases back
 // down slowly during clean runs. Bounds below are the starting guess and
 // the safety ceiling, not a claim about the true threshold.
-// Floor was 1000ms originally; confirmed clean across three separate
-// production tests (500ms/750ms/1000ms, all with a 150-church batch) that
-// pace itself doesn't matter within this range - what actually causes
-// failures is checking too MANY churches in one cycle (see
-// LIVE_CHECK_BATCH_SIZE below), not how fast each request goes. Lowered
-// the floor to the fastest value actually tested clean, rather than
-// leaving the old, now-disproven 1000ms guess in place.
-const LIVE_CHECK_STAGGER_MIN_MS = 500;
+// Three named tiers: 1000ms healthy baseline -> 2000ms after a rough cycle
+// -> 8000ms worst case. Growth doubles each bad cycle (1000 -> 2000 -> 4000
+// -> 8000), so the tiers land on clean, round numbers instead of drifting.
+const LIVE_CHECK_STAGGER_MIN_MS = 1000;
 const LIVE_CHECK_STAGGER_MAX_MS = 8000;
-const LIVE_CHECK_STAGGER_DEFAULT_MS = 500;
+const LIVE_CHECK_STAGGER_DEFAULT_MS = 1000;
 const LIVE_CHECK_STAGGER_GROWTH_FACTOR = 2;   // applied on a bad cycle
 const LIVE_CHECK_STAGGER_DECAY_FACTOR = 0.9;  // applied on a fully clean cycle
 const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
@@ -584,133 +561,8 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // once, then falls back to last-known-good data) - see fetchLivePage below.
 const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 
-// Confirmed in production, across a full night of testing: cycles
-// checking around 155-162+ churches in one invocation fail 100% of the
-// time (one church hangs for many minutes, well past its own per-church
-// timeout budget), regardless of how the stagger delay between churches
-// is tuned - 500ms, 750ms, 1000ms, and 1800ms were all tested. But 150
-// churches in one invocation, at any of those same stagger values, passed
-// 100% of the time across many consecutive cycles. That points at a
-// request-COUNT ceiling (most likely YouTube's own anti-bot detection),
-// not a pace/rate one - so the real fix is keeping any single cycle's
-// request count safely under that line, not adjusting speed.
-//
-// IMPORTANT UPDATE: that night-time testing was done with few or no
-// churches actually live. Confirmed in production on a heavy Sunday
-// morning (many churches simultaneously live) that 150 was NOT safe
-// under real load: cycles ran the full length of a generously-raised
-// overlap guard (20 minutes - see LIVE_CHECK_OVERLAP_GUARD_MS) and still
-// only reached 100-128 of 150 churches, never completing, 100% of the
-// time for over an hour straight. So the original 150 ceiling was really
-// "150 not-live/fast churches," not "150 churches regardless of how many
-// are actually live" - an actually-live church's page apparently takes
-// meaningfully longer to fetch/parse than a not-live one, and enough of
-// those clustered in one batch compounds far past what any reasonable
-// guard window can absorb. Cut substantially (150 -> 50) to restore a
-// safe margin under real Sunday-morning load, not just the quiet-night
-// case this was originally tuned for. Trade-off: each church's own
-// freshness cadence stretches from ~2 batches (roughly 20 min full
-// rotation) to ~6 batches (roughly 60 min) at 293 total churches - a
-// real cost, but a live indicator that's an hour stale beats one that
-// hasn't updated all morning because the whole system is stuck retrying
-// batch 1 forever.
-//
-// This is what actually replaces the old single-pass-over-everyone
-// design: instead of one cycle trying to check every eligible church,
-// the eligible list is split into batches of this size, and each cron
-// tick checks ONE batch, rotating to the next on the following tick (see
-// loadBatchState/LIVE_CHECK_BATCH_STATE_KV_KEY below). A church not in
-// this cycle's batch keeps showing its last known result (see
-// LIVE_CHECK_MERGED_RESULTS_KV_KEY below) rather than going blank, so the
-// public site always reflects every church's most recent real check -
-// just on a rotating cadence (roughly batchCount x 10 minutes per church)
-// instead of every single cycle. This also scales automatically as more
-// churches are added: batch COUNT grows on its own (ceil(total / this
-// value)), so this number shouldn't need to change just because the
-// church list grows - only if the actual safe-count ceiling turns out to
-// be different from ~50 under real live-heavy load.
-const LIVE_CHECK_BATCH_SIZE = 50;
-
-// If a previous cycle's progress record still says running:true and was
-// started more recently than this, a new cron tick skips its run rather
-// than starting a second, overlapping invocation on top of it. There is
-// no actual overlap-prevention lock in this codebase (confirmed and
-// intentionally ruled out early in this debugging effort, when the
-// working theory was a STUCK lock silently blocking every future tick -
-// see Live-Check-Debug.md step #5). The problem turned out to be the
-// opposite: with no lock of any kind, nothing stops Cloudflare's cron
-// (which starts each scheduled() invocation independently, without
-// waiting for the previous one to finish - confirmed via Cloudflare's
-// own docs) from piling a second full cycle on top of a first one that's
-// still legitimately in progress, especially if a cycle runs anywhere
-// close to the full 10-minute gap between ticks.
-//
-// Originally set to 8 minutes, comfortably above the ~5 minute duration a
-// normal clean cycle took in testing - but that testing happened with
-// few or no churches actually live at once. Confirmed in production on a
-// Sunday morning with many churches simultaneously live: real cycles ran
-// long enough to cross 8 minutes (91-96% through the batch, never
-// finishing), so every next cron tick saw "still running" and killed it
-// as presumed-dead, restarting the SAME batch from zero - which then hit
-// the same slowdown and got killed again, forever, all morning, without
-// ever once actually completing. Raised well above the 10-minute cron
-// interval so a cycle that's merely slow (not actually wedged) gets the
-// runway to finish for real. Trade-off: a truly wedged cycle (crashed,
-// hung forever) now takes up to ~2 missed cron ticks to recover instead
-// of ~1 - an acceptable cost against the alternative of never finishing
-// under real Sunday-morning load.
-//
-// This is a best-effort heuristic, not a hard distributed lock - KV
-// doesn't offer atomic compare-and-swap, so two invocations checking this
-// within the same instant could theoretically still both proceed. That's
-// an acceptable, rare edge case; it doesn't need to be airtight to fix
-// the actual pattern being seen (every-10-minutes pileup), just to stop
-// the common case.
-const LIVE_CHECK_OVERLAP_GUARD_MS = 20 * 60 * 1000; // 20 minutes
-
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
-}
-
-// Records a visible marker in the debug history when the overlap guard
-// (see LIVE_CHECK_OVERLAP_GUARD_MS below) decides a previous cycle has
-// been running too long to plausibly still be legitimate, and is about
-// to let a fresh cycle start anyway. Without this, an overridden stall
-// just leaves a silent, unexplained gap in the "Recent Cycles" trend -
-// exactly the kind of gap that made earlier stalls hard to diagnose from
-// the debug panel alone. This makes the event itself show up as its own
-// row instead of something that has to be inferred from timestamps.
-// Best-effort: a failed write here should never block the new cycle from
-// starting - see the try/catch at the call site.
-async function recordStalledCycleNote(env, progress, elapsedMs) {
-  const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
-  let debugPrevious = { history: [] };
-  if (debugRaw) {
-    try {
-      const parsed = JSON.parse(debugRaw);
-      if (parsed) debugPrevious = parsed;
-    } catch (err) {
-      // Fall through to the empty default above.
-    }
-  }
-  const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
-  history.push({
-    checkedAt: new Date().toISOString(),
-    stalledPreviousCycle: true,
-    previousStartedAt: progress.startedAt,
-    previousCompletedCount: typeof progress.completedCount === 'number' ? progress.completedCount : null,
-    previousTotalCandidates: typeof progress.totalCandidates === 'number' ? progress.totalCandidates : null,
-    previousChurchName: progress.currentChurchName || null,
-    previousBatchIndex: typeof progress.batchIndex === 'number' ? progress.batchIndex : null,
-    previousBatchCount: typeof progress.batchCount === 'number' ? progress.batchCount : null,
-    stuckForMs: elapsedMs
-  });
-  while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
-  // Object.assign preserves latestCycle (the last real completed cycle's
-  // full summary) untouched - this note only ever appends to history,
-  // never overwrites the "what actually happened last" section the rest
-  // of the debug panel reads from.
-  await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify(Object.assign({}, debugPrevious, { history: history })));
 }
 
 async function loadStaggerState(env) {
@@ -728,50 +580,9 @@ async function loadStaggerState(env) {
   return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
 }
 
-// Which batch (see LIVE_CHECK_BATCH_SIZE) gets checked THIS cycle. Starts
-// at 0 and rotates forward by one each cycle, wrapping back to 0 once
-// every batch has had a turn - see checkAllChurchesLive for exactly how
-// the effective index is computed (it's taken modulo the CURRENT batch
-// count, not just incremented blindly, so this stays valid even if the
-// church list grows/shrinks enough to change how many batches there are
-// between one cycle and the next).
-async function loadBatchState(env) {
-  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_BATCH_STATE_KV_KEY);
-  if (!raw) return { batchIndex: 0 };
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.batchIndex === 'number' && !isNaN(parsed.batchIndex)) {
-      return parsed;
-    }
-  } catch (err) {
-    // Fall through to default on any parse issue.
-  }
-  return { batchIndex: 0 };
-}
-
-// The full map of every church's last actually-checked result, keyed by
-// churchId (see LIVE_CHECK_MERGED_RESULTS_KV_KEY above for why this
-// exists). Defaults to an empty map - meaning every church starts out as
-// "never checked yet" until its batch's first turn comes around, which
-// resolves itself naturally within one full rotation after a fresh
-// deploy or the first time a new church is added.
-async function loadMergedResults(env) {
-  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_MERGED_RESULTS_KV_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed;
-  } catch (err) {
-    // Fall through to an empty map on any parse issue - worst case, every
-    // church looks "never checked" until its next batch turn, rather than
-    // crashing the cycle over old corrupted state.
-  }
-  return {};
-}
-
 // Adjusts the stagger delay based on how the just-finished cycle went, and
 // persists it for the next cron run to read. Errs on the side of caution:
-// growth is faster (2x) than decay (0.9x), so a single bad cycle raises
+// growth is faster (1.6x) than decay (0.9x), so a single bad cycle raises
 // the delay noticeably, while trust is rebuilt gradually only after
 // several fully clean cycles in a row.
 function nextStaggerMs(currentMs, checked, errored) {
@@ -789,25 +600,12 @@ function nextStaggerMs(currentMs, checked, errored) {
 }
 
 // Accepts whatever format an admin pasted into youtubeUrl - a bare
-// @handle URL, a /streams URL, a /videos URL, a /live URL, or a
-// /channel/UC... URL - and returns the correct "/live" URL to check.
-//
-// Confirmed in production: an admin-entered URL that already ended in
-// /live (e.g. https://m.youtube.com/@somechannel/live) wasn't recognized
-// by the strip list below, which only handled /streams, /videos,
-// /featured, /community, /about - so it fell through untouched and then
-// got a SECOND /live appended, producing a malformed
-// .../live/live path. That one church consistently behaved differently
-// from every other candidate in the list (the same church stalling out
-// repeatedly, rather than a rotating cast) - a strong sign this was about
-// its specific stored URL, not scale or list position. Adding "live" to
-// the strip list makes this function idempotent - safe to call on a URL
-// that's already correctly formatted, not just ones that need a /live
-// suffix added.
+// @handle URL, a /streams URL, a /videos URL, or a /channel/UC... URL -
+// and returns the correct "/live" URL to check.
 function buildLiveCheckUrl(youtubeUrl) {
   let url = youtubeUrl.trim();
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-  url = url.replace(/\/(streams|videos|featured|community|about|live)\/?$/i, '');
+  url = url.replace(/\/(streams|videos|featured|community|about)\/?$/i, '');
   url = url.replace(/\/+$/, '');
   return url + '/live';
 }
@@ -824,8 +622,9 @@ async function fetchLivePage(liveUrl) {
   // actual bot traffic.
   const controller = new AbortController();
   const timeoutId = setTimeout(function() { controller.abort(); }, LIVE_CHECK_FETCH_TIMEOUT_MS);
+  let response;
   try {
-    const response = await fetch(liveUrl, {
+    response = await fetch(liveUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -833,24 +632,6 @@ async function fetchLivePage(liveUrl) {
       },
       signal: controller.signal
     });
-    if (!response.ok) {
-      throw new Error('Live page fetch failed with status ' + response.status);
-    }
-    // IMPORTANT: response.text() reads and buffers the ENTIRE response
-    // body - this is a separate operation from fetch() itself resolving,
-    // which only means headers arrived. Confirmed in production: churches
-    // hanging for 5+ minutes at a time, well past the 10s timeout, with
-    // fetch() apparently having already resolved - the previous version
-    // of this function cleared the timeout in a finally block wrapping
-    // ONLY the fetch() call above, which meant the timeout was already
-    // disarmed by the time response.text() ran, leaving the body-read
-    // phase completely unbounded (e.g. a connection that opens fine but
-    // then trickles data in very slowly, or stalls partway through).
-    // Awaiting response.text() inside this same try, with the timeout not
-    // cleared until the finally block below, keeps the ENTIRE
-    // connect-plus-read under one shared budget instead of just the
-    // connect phase.
-    return await response.text();
   } catch (err) {
     // AbortController rejects with a generic "AbortError", not anything
     // that mentions a timeout - rethrow with a clearer message since this
@@ -863,6 +644,10 @@ async function fetchLivePage(liveUrl) {
   } finally {
     clearTimeout(timeoutId);
   }
+  if (!response.ok) {
+    throw new Error('Live page fetch failed with status ' + response.status);
+  }
+  return response.text();
 }
 
 // Wraps fetchLivePage with a single retry after a short backoff. Most
@@ -878,10 +663,7 @@ async function fetchLivePageWithRetry(liveUrl) {
   }
 }
 
-// env is optional and only used for the temporary fallback-page capture
-// below (see LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY) - checkChurchLive still
-// works exactly as before if called without it.
-async function checkChurchLive(youtubeUrl, env) {
+async function checkChurchLive(youtubeUrl) {
   const liveUrl = buildLiveCheckUrl(youtubeUrl);
   const html = await fetchLivePageWithRetry(liveUrl);
 
@@ -932,6 +714,31 @@ async function checkChurchLive(youtubeUrl, env) {
       waitingStartDate = fallbackStartDateMetaMatch ? fallbackStartDateMetaMatch[1] : (fallbackStartDateJsonMatch ? fallbackStartDateJsonMatch[1] : null);
     }
 
+    // IMPORTANT (confirmed via a real production side-by-side comparison,
+    // Calvary Boise vs. Calvary Chapel Salmon): scheduledStartTime above
+    // is NOT reliably "the next time this church goes live" - it turned
+    // out to just be whatever value was last present in that slate
+    // renderer, which for most churches most of the time is a stale
+    // leftover from months or years ago (Salmon's was 2,211 hours in the
+    // PAST at the time this was checked). YouTube's own human-readable
+    // countdown text is no better - it confidently said "a few moments"
+    // for that same 3-months-overdue value, so display text can't be
+    // used as a sanity check either.
+    //
+    // What actually distinguishes the two cases: this SEPARATE field,
+    // `liveBroadcastDetails`, which sits in the page's standard video-
+    // metadata block rather than a UI-rendering component. For Boise (a
+    // genuinely upcoming stream), it was
+    // `{"isLiveNow":false,"startTimestamp":"<ISO date>"}` - the ISO value
+    // agreed exactly with scheduledStartTime's own epoch value once
+    // converted, cross-validating each other. For Salmon (stale), it was
+    // JUST `{"isLiveNow":false}` - no startTimestamp key at all. So its
+    // presence/absence, not a "does this date look sane" guess, is the
+    // signal: only trust a next-live-service time when this field is
+    // actually there.
+    const confirmedUpcomingMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":false,"startTimestamp":"([^"]+)"\}/);
+    const confirmedUpcomingStart = confirmedUpcomingMatch ? confirmedUpcomingMatch[1] : null;
+
     const waitingCanonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
     const waitingVideoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
     const waitingTitleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
@@ -943,6 +750,7 @@ async function checkChurchLive(youtubeUrl, env) {
       status: 'waiting',
       videoId: waitingCanonicalMatch ? waitingCanonicalMatch[1] : (waitingVideoIdJsonMatch ? waitingVideoIdJsonMatch[1] : null),
       startDate: waitingStartDate,
+      confirmedUpcomingStart: confirmedUpcomingStart,
       title: waitingTitleMetaMatch ? decodeEntities(waitingTitleMetaMatch[1]) : null,
       description: waitingDescriptionMetaMatch ? decodeEntities(waitingDescriptionMetaMatch[1]) : null,
       author: waitingAuthorMatch ? waitingAuthorMatch[1] : null
@@ -1061,33 +869,6 @@ async function checkChurchLive(youtubeUrl, env) {
     }
   }
 
-  // TEMPORARY - debugging capture only. Confirmed in production that
-  // YouTube sometimes serves a reduced page that still signals
-  // isLive:true (and still carries the live viewer count, since that's
-  // part of the same general page-render data used to draw the page
-  // itself) but omits videoId/title/canonical link entirely (that data
-  // instead lives in the player-metadata/SEO portions of the page,
-  // which are what appear to get stripped). We don't yet have a saved
-  // real example of one of these to inspect - this writes the first one
-  // seen in a cycle to KV so it can be pulled and diffed against a
-  // normal full response. Best-effort: a failed KV write here should
-  // never affect the actual live-check result. REMOVE once we've
-  // captured and reviewed a real example - this is not meant to be a
-  // permanent feature (storing full YouTube page HTML in KV long-term
-  // isn't something we want).
-  if (!videoId && env) {
-    try {
-      await env.CHURCHES_KV.put(LIVE_CHECK_FALLBACK_CAPTURE_KV_KEY, JSON.stringify({
-        capturedAt: new Date().toISOString(),
-        liveUrl: liveUrl,
-        html: html
-      }));
-    } catch (err) {
-      // Swallow - this is a nice-to-have debug capture, not worth
-      // failing the actual live-check result over.
-    }
-  }
-
   return {
     isLive: true,
     status: 'live',
@@ -1100,105 +881,32 @@ async function checkChurchLive(youtubeUrl, env) {
   };
 }
 
-// Runs on the Cron Trigger schedule. Each invocation checks ONE BATCH of
-// eligible churches (see LIVE_CHECK_BATCH_SIZE above for why), rotating
-// to the next batch on the following tick, and merges the freshly-
-// checked batch with every other church's last known result before
-// writing the combined public live-status snapshot.
+// Runs on the Cron Trigger schedule. Checks every livestreamsEnabled
+// church and writes the combined results to KV as one JSON blob.
 //
-// Three things this builds on, all aimed at the same root cause (YouTube
-// rate-limiting/anti-bot detection tripping on our own traffic pattern):
+// Two changes from the original Promise.all version, both aimed at the
+// same root cause (YouTube rate-limiting a burst of near-simultaneous
+// fetches from the same Worker, which previously wiped the whole live
+// list to empty for a cycle):
 //
-// 1. Churches within a batch are checked one at a time with a stagger
-//    delay between each, instead of all at once.
+// 1. Churches are checked one at a time with a stagger delay between
+//    each, instead of all at once - this is what actually keeps request
+//    volume to YouTube low enough to avoid tripping the rate limit in
+//    the first place.
 // 2. If a church's fetch still fails after the retry in
 //    fetchLivePageWithRetry, we fall back to whatever that church's
-//    status was the last time it was ACTUALLY checked (from the
-//    persisted merged-results map), rather than forcing isLive: false.
-// 3. Batching (the newest piece): confirmed in production that neither
-//    of the above alone was enough once the eligible church count
-//    crossed roughly 155-162 - cycles failed 100% of the time at that
-//    count regardless of stagger delay (500ms/750ms/1000ms/1800ms all
-//    tested), but passed 100% of the time when capped at 150, at every
-//    stagger value tried. So instead of one cycle trying to check every
-//    eligible church, the list is split into batches, and only one batch
-//    is actually checked per cycle - every other church just keeps
-//    showing its last known result until its own batch's turn comes back
-//    around.
+//    status was on the PREVIOUS successful cycle, rather than forcing
+//    isLive: false. A transient rate-limit blip on one church now just
+//    means slightly stale data for that one church, not a false "nobody
+//    is live" result for everyone.
 async function checkAllChurchesLive(env) {
-  // Overlap guard - see LIVE_CHECK_OVERLAP_GUARD_MS above for the full
-  // reasoning. Skip this entire invocation if the progress record left
-  // by a previous cycle still says running:true and was started recently
-  // enough to plausibly still be legitimately in progress.
-  try {
-    const progressRaw = await env.CHURCHES_KV.get(LIVE_CHECK_PROGRESS_KV_KEY);
-    if (progressRaw) {
-      const progress = JSON.parse(progressRaw);
-      if (progress && progress.running && progress.startedAt) {
-        const startedAtMs = new Date(progress.startedAt).getTime();
-        if (!isNaN(startedAtMs)) {
-          const elapsedMs = Date.now() - startedAtMs;
-          if (elapsedMs < LIVE_CHECK_OVERLAP_GUARD_MS) {
-            console.log('Skipping live-check cycle - previous cycle still in progress (started ' + progress.startedAt + ')');
-            return;
-          }
-          // Past the guard window - this looks stuck rather than just
-          // slow. Record a visible note before proceeding, so the "Recent
-          // Cycles" trend shows what actually happened here instead of an
-          // unexplained gap.
-          console.log('Previous live-check cycle appears stalled (started ' + progress.startedAt + ', ' + Math.round(elapsedMs / 1000) + 's ago) - starting a new cycle and recording a note.');
-          try {
-            await recordStalledCycleNote(env, progress, elapsedMs);
-          } catch (noteErr) {
-            // Swallow - this is a visibility nice-to-have, not worth
-            // blocking the new cycle over.
-          }
-        }
-      }
-    }
-  } catch (err) {
-    // If we can't tell whether a previous cycle is still running (bad
-    // JSON, missing key, etc.), err on the side of proceeding rather than
-    // silently skipping every future cycle over an unreadable guard.
-  }
-
   const churches = await loadChurches(env);
   const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
-  // Stable, deterministic ordering is required for batch membership to
-  // stay consistent cycle to cycle - without this, whatever order
-  // loadChurches happens to return could shuffle which churches land in
-  // which batch, undermining the "each batch stays safely small" premise.
-  candidates.sort(function(a, b) {
-    if (a.id < b.id) return -1;
-    if (a.id > b.id) return 1;
-    return 0;
-  });
 
-  const batchCount = Math.max(1, Math.ceil(candidates.length / LIVE_CHECK_BATCH_SIZE));
-  const batchState = await loadBatchState(env);
-  // Modulo against the CURRENT batch count, not just whatever was stored -
-  // if the church list has grown or shrunk enough to change how many
-  // batches there are since the index was last written, this keeps the
-  // index valid instead of pointing past the end.
-  const batchIndex = ((batchState.batchIndex % batchCount) + batchCount) % batchCount;
-  const batchCandidates = candidates.slice(batchIndex * LIVE_CHECK_BATCH_SIZE, (batchIndex + 1) * LIVE_CHECK_BATCH_SIZE);
-  const batchIds = {};
-  batchCandidates.forEach(function(c) { batchIds[c.id] = true; });
-
-  // The full map of every church's last actually-checked result - lets
-  // churches OUTSIDE this cycle's batch keep showing their real last-
-  // known status instead of going blank, and doubles as the per-church
-  // fallback source when a fresh check in THIS batch fails.
-  const mergedResults = await loadMergedResults(env);
-
-  // Guarantees isLive defaults to false, then a prior result (if any)
-  // fills in the real fields, then any explicit overrides win last -
-  // used everywhere a church's fresh check couldn't be completed this
-  // cycle, so "no prior data at all" and "had prior data" both land on
-  // sensible values instead of an accidental `isLive: undefined`.
-  function carryForward(prior, overrides) {
-    return Object.assign({ isLive: false }, prior, overrides);
-  }
+  const previousRaw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  const previous = previousRaw ? JSON.parse(previousRaw) : { live: [] };
+  const previousById = {};
+  previous.live.forEach(function(r) { previousById[r.churchId] = r; });
 
   const staggerState = await loadStaggerState(env);
   const staggerMs = staggerState.staggerMs;
@@ -1208,21 +916,15 @@ async function checkAllChurchesLive(env) {
   // Writes the live in-progress snapshot the admin debug panel polls for a
   // real progress bar/ETA. Best-effort - a failed KV write here shouldn't
   // ever take down the actual live-check cycle, so errors are swallowed.
-  // totalCandidates/completedCount are scoped to THIS BATCH (what's
-  // actually being iterated this cycle) - batchIndex/batchCount ride
-  // along so the panel can show "batch 2 of 3" instead of a bare count
-  // that could otherwise read as if it covered every church.
   async function writeProgress(completedCount, currentChurchName, running) {
     try {
       await env.CHURCHES_KV.put(LIVE_CHECK_PROGRESS_KV_KEY, JSON.stringify({
         running: running,
         startedAt: new Date(cycleStartedAt).toISOString(),
         updatedAt: new Date().toISOString(),
-        totalCandidates: batchCandidates.length,
+        totalCandidates: candidates.length,
         completedCount: completedCount,
-        currentChurchName: currentChurchName || null,
-        batchIndex: batchIndex,
-        batchCount: batchCount
+        currentChurchName: currentChurchName || null
       }));
     } catch (err) {
       // Swallow - progress display is a nice-to-have, not worth failing
@@ -1230,240 +932,243 @@ async function checkAllChurchesLive(env) {
     }
   }
 
-  await writeProgress(0, batchCandidates.length ? batchCandidates[0].name : null, true);
+  await writeProgress(0, candidates.length ? candidates[0].name : null, true);
 
   let erroredCount = 0;
   // Churches that were never actually attempted this cycle because we'd
   // already exhausted Cloudflare's subrequest budget - distinct from
-  // erroredCount (a real, attempted fetch that failed).
+  // erroredCount (a real, attempted fetch that failed). Both the ONE
+  // church whose fetch attempt actually triggered the "too many
+  // subrequests" error, and every church after it that got skipped
+  // without attempting a fetch at all, land in this same bucket - from an
+  // admin's perspective both are equally "didn't get checked this cycle,"
+  // not meaningfully different failure types worth separate badges.
   let notCheckedCount = 0;
   // Set the moment we hit Cloudflare's own per-invocation subrequest
-  // ceiling. Hard platform limit, not a YouTube rate-limit signal - once
-  // hit, every further fetch() this invocation fails instantly regardless
-  // of target or delay.
+  // ceiling (confirmed in production: 50/invocation on the Free/Bundled
+  // plan, higher on Paid). This is a hard platform limit, not a YouTube
+  // rate-limit signal - once it's hit, every further fetch() in this SAME
+  // invocation fails instantly regardless of target or delay, so there's
+  // nothing to gain by continuing to loop through (and waiting the
+  // stagger delay between) whatever candidates are left. Also excluded
+  // from the adaptive stagger calculation below for the same reason:
+  // slowing down doesn't fix a count-based ceiling, so treating this like
+  // a bad YouTube cycle would just needlessly max out the delay for
+  // future (unrelated) cycles.
   let hitSubrequestLimit = false;
+  const results = [];
+  // Every candidate's outcome this cycle, including non-live and errored
+  // ones the public-facing `live` list below discards - this is what the
+  // admin debug view reads from, since "nobody's live" and "everything's
+  // 429ing" look identical from the public list alone.
+  const debugResults = [];
   // Tracked purely as a safety net for the finally block below - if the
   // cycle throws partway through, this is how far it actually got.
   let lastCompletedCount = 0;
   let completedNormally = false;
 
   try {
-    for (let i = 0; i < batchCandidates.length; i++) {
-      const c = batchCandidates[i];
+    for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
 
-      if (hitSubrequestLimit) {
-        // Record the rest as not-checked rather than attempting (and
-        // failing) each one identically - carries forward whatever was
-        // already known for this church rather than attempting anything.
-        notCheckedCount++;
-        const prior = mergedResults[c.id];
-        mergedResults[c.id] = carryForward(prior, {
-          churchId: c.id,
-          name: c.name,
-          error: 'Not attempted - subrequest budget exhausted this cycle',
-          usedStaleData: !!prior,
-          notChecked: true
-        });
-        await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
-        lastCompletedCount = i + 1;
-        continue;
+    if (hitSubrequestLimit) {
+      // Record the rest as not-checked rather than attempting (and
+      // failing) each one identically - still falls back to last-known-
+      // good data exactly like a normal per-church failure would.
+      const prior = previousById[c.id];
+      notCheckedCount++;
+      debugResults.push({
+        churchId: c.id,
+        name: c.name,
+        isLive: prior ? prior.isLive : false,
+        error: 'Not attempted - subrequest budget exhausted this cycle',
+        usedStaleData: !!prior,
+        notChecked: true
+      });
+      if (prior) {
+        results.push(Object.assign({}, prior, { stale: true }));
+      } else {
+        results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
       }
-
-      try {
-        const churchCheckStartedAt = Date.now();
-        const status = await checkChurchLive(c.youtubeUrl, env);
-        const churchCheckMs = Date.now() - churchCheckStartedAt;
-        // channelUrl is the fallback the frontend links to when videoId is
-        // null (confirmed in production: YouTube can serve a stripped page
-        // to our datacenter-IP requests that has the isLive:true signal but
-        // omits videoId/title/everything else). A generic "go watch on their
-        // channel" link is far better than a dead, unclickable card.
-        mergedResults[c.id] = Object.assign({
-          churchId: c.id,
-          name: c.name,
-          channelUrl: buildLiveCheckUrl(c.youtubeUrl),
-          checkMs: churchCheckMs,
-          lastCheckedAt: new Date().toISOString(),
-          error: null,
-          usedStaleData: false,
-          stale: false,
-          notChecked: false
-        }, status);
-      } catch (err) {
-        // Both the original fetch and the retry failed - fall back to the
-        // last known-good status for this church instead of assuming it
-        // went offline. If we've never seen this church before, this is
-        // just an ordinary "not live" result.
-        const prior = mergedResults[c.id];
-        // err.message is what actually carries the HTTP status code (see
-        // fetchLivePage's "...failed with status " + response.status) -
-        // this is the one place that distinguishes a 429 from a timeout
-        // from a 5xx, so keep it verbatim. Cloudflare's own subrequest-
-        // limit error text is checked for separately since it needs
-        // different handling (see hitSubrequestLimit above).
-        if (/too many subrequests/i.test(err.message || '')) {
-          hitSubrequestLimit = true;
-          notCheckedCount++;
-          mergedResults[c.id] = carryForward(prior, {
-            churchId: c.id,
-            name: c.name,
-            error: err.message,
-            usedStaleData: !!prior,
-            notChecked: true
-          });
-        } else {
-          erroredCount++;
-          mergedResults[c.id] = carryForward(prior, {
-            churchId: c.id,
-            name: c.name,
-            error: err.message,
-            usedStaleData: !!prior,
-            stale: !!prior,
-            notChecked: false,
-            lastCheckedAt: new Date().toISOString()
-          });
-        }
-      }
-
-      await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+      await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
       lastCompletedCount = i + 1;
+      continue;
+    }
 
-      // Stagger requests to YouTube instead of firing them all at once.
-      // Skip the delay after the last item, or once we've already hit the
-      // subrequest ceiling - no point waiting to attempt something we know
-      // will fail identically.
-      if (i < batchCandidates.length - 1 && !hitSubrequestLimit) {
-        await sleep(staggerMs);
+    try {
+      const churchCheckStartedAt = Date.now();
+      const status = await checkChurchLive(c.youtubeUrl);
+      const churchCheckMs = Date.now() - churchCheckStartedAt;
+      // channelUrl is the fallback the frontend links to when videoId is
+      // null (confirmed in production: YouTube can serve a stripped page
+      // to our datacenter-IP requests that has the isLive:true signal but
+      // omits videoId/title/everything else). A generic "go watch on their
+      // channel" link is far better than a dead, unclickable card - the
+      // visitor can still reach the actual stream even when WE can't
+      // extract the specific video.
+      results.push(Object.assign({ churchId: c.id, name: c.name, channelUrl: buildLiveCheckUrl(c.youtubeUrl) }, status));
+      debugResults.push({ churchId: c.id, name: c.name, isLive: status.isLive, status: status.status || null, startDate: status.startDate || null, checkMs: churchCheckMs, error: null });
+    } catch (err) {
+      // Both the original fetch and the retry failed - fall back to the
+      // last known-good status for this church instead of assuming it
+      // went offline. If we've never seen this church live before, this
+      // is just an ordinary "not live" result.
+      const prior = previousById[c.id];
+      // err.message is what actually carries the HTTP status code (see
+      // fetchLivePage's "...failed with status " + response.status) - this
+      // is the one place that distinguishes a 429 from a timeout from a
+      // 5xx, so keep it verbatim rather than collapsing to a boolean.
+      // Cloudflare's own subrequest-limit error text (confirmed in
+      // production: "Too many subrequests...") is checked for separately
+      // from ordinary per-church fetch failures - see hitSubrequestLimit
+      // above for why it needs different handling.
+      if (/too many subrequests/i.test(err.message || '')) {
+        hitSubrequestLimit = true;
+        notCheckedCount++;
+        debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior, notChecked: true });
+      } else {
+        erroredCount++;
+        debugResults.push({ churchId: c.id, name: c.name, isLive: prior ? prior.isLive : false, error: err.message, usedStaleData: !!prior });
+      }
+      if (prior) {
+        results.push(Object.assign({}, prior, { stale: true }));
+      } else {
+        results.push({ churchId: c.id, name: c.name, isLive: false, error: true });
       }
     }
 
-    // The FULL merged view across every eligible church, not just this
-    // cycle's batch - a church whose turn didn't come up this cycle still
-    // needs to appear, using whatever's already in the merged map (or a
-    // "never checked yet" placeholder for a brand-new church that hasn't
-    // had its first turn since being added). checkedThisCycle is computed
-    // fresh here from actual batch membership THIS cycle, rather than
-    // being a value carried in the persisted map - a church checked three
-    // batch-rotations ago shouldn't still claim "checked this cycle" just
-    // because that field was left over from whenever it last ran.
-    const fullResults = candidates.map(function(c) {
-      const entry = mergedResults[c.id];
-      const checkedThisCycle = !!batchIds[c.id];
-      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle });
-      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle };
-    });
+    await writeProgress(i + 1, candidates[i + 1] ? candidates[i + 1].name : null, true);
+    lastCompletedCount = i + 1;
 
-    const liveOnly = fullResults.filter(function(r) { return r.isLive; });
-    const cycleDurationMs = Date.now() - cycleStartedAt;
-    // actuallyChecked/errored/notChecked below are scoped to THIS BATCH -
-    // batchCandidates.length, not candidates.length, is the denominator,
-    // so the adaptive stagger system and "Recent Cycles" trend reflect
-    // the real sample size actually exercised this cycle.
-    const actuallyCheckedCount = batchCandidates.length - notCheckedCount;
-
-    await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
-      checkedAt: new Date().toISOString(),
-      live: liveOnly,
-      // Cycle-level stats for observability - lets us see the *actual*,
-      // empirical error rate for our own traffic over time in KV, rather
-      // than guessing at what YouTube's threshold is.
-      stats: {
-        totalCandidates: batchCandidates.length,
-        actuallyChecked: actuallyCheckedCount,
-        errored: erroredCount,
-        notChecked: notCheckedCount,
-        staggerMsUsed: staggerMs,
-        batchIndex: batchIndex,
-        batchCount: batchCount,
-        totalChurches: candidates.length
-      }
-    }));
-
-    await env.CHURCHES_KV.put(LIVE_CHECK_MERGED_RESULTS_KV_KEY, JSON.stringify(mergedResults));
-
-    // Full admin debug snapshot: every eligible church's result (not just
-    // live ones, and not just this cycle's batch), plus a rolling history
-    // of recent cycles' summary stats so a trend is visible, not just the
-    // latest cycle in isolation.
-    const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
-    let debugPrevious = { history: [] };
-    if (debugRaw) {
-      try {
-        const parsed = JSON.parse(debugRaw);
-        if (parsed) debugPrevious = parsed;
-      } catch (err) {
-        // Fall through to the empty default above.
-      }
+    // Stagger requests to YouTube instead of firing them all at once.
+    // Skip the delay after the last item, or once we've already hit the
+    // subrequest ceiling - no point waiting to attempt something we know
+    // will fail identically.
+    if (i < candidates.length - 1 && !hitSubrequestLimit) {
+      await sleep(staggerMs);
     }
-    const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
-    history.push({
+  }
+
+  const liveOnly = results.filter(function(r) { return r.isLive; });
+
+  // Single soonest confirmed upcoming start across every church checked
+  // this cycle - only ever ONE value, never a per-church list, since the
+  // frontend only ever needs "what's next," not every waiting church's
+  // data (see Mobile-First-Design.md for why). Deliberately only trusts
+  // confirmedUpcomingStart (the liveBroadcastDetails-backed field), never
+  // the plain startDate/scheduledStartTime value on its own - that field
+  // is what turned out to be unreliable in the first place.
+  let nextUpcomingStart = null;
+  results.forEach(function(r) {
+    if (r.status !== 'waiting' || !r.confirmedUpcomingStart) return;
+    const t = new Date(r.confirmedUpcomingStart).getTime();
+    if (isNaN(t)) return;
+    if (nextUpcomingStart === null || t < new Date(nextUpcomingStart).getTime()) {
+      nextUpcomingStart = r.confirmedUpcomingStart;
+    }
+  });
+
+  const cycleDurationMs = Date.now() - cycleStartedAt;
+  // actuallyChecked = candidates a fetch was really attempted for
+  // (whether it succeeded or failed), i.e. everything EXCEPT the
+  // not-checked bucket above. candidates.length remains the honest total
+  // regardless of how the cycle went.
+  const actuallyCheckedCount = candidates.length - notCheckedCount;
+
+  await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    live: liveOnly,
+    // Only meaningful when `live` is empty - see handleGetLiveStatus and
+    // the frontend's updateLiveNowUi for how this becomes the "Next live
+    // service begins in..." countdown. Null just means no church
+    // currently has a confirmed upcoming start time, not that the field
+    // failed to compute.
+    nextUpcomingStart: nextUpcomingStart,
+    // Cycle-level stats for observability - lets us see the *actual*,
+    // empirical error rate for our own traffic over time in KV, rather
+    // than guessing at what YouTube's threshold is. Check this after
+    // deploying instead of assuming the stagger delay is "enough."
+    stats: {
+      totalCandidates: candidates.length,
+      actuallyChecked: actuallyCheckedCount,
+      errored: erroredCount,
+      notChecked: notCheckedCount,
+      staggerMsUsed: staggerMs
+    }
+  }));
+
+  // Full admin debug snapshot: every candidate's result (not just live
+  // ones), plus a rolling history of recent cycles' summary stats so a
+  // trend (e.g. error rate climbing over the course of an evening) is
+  // visible, not just the latest cycle in isolation.
+  const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  const debugPrevious = debugRaw ? JSON.parse(debugRaw) : { history: [] };
+  const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
+  history.push({
+    checkedAt: new Date().toISOString(),
+    totalCandidates: candidates.length,
+    actuallyChecked: actuallyCheckedCount,
+    errored: erroredCount,
+    notChecked: notCheckedCount,
+    staggerMsUsed: staggerMs,
+    durationMs: cycleDurationMs,
+    hitSubrequestLimit: hitSubrequestLimit
+  });
+  while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+
+  await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
+    latestCycle: {
       checkedAt: new Date().toISOString(),
-      totalCandidates: batchCandidates.length,
+      totalCandidates: candidates.length,
       actuallyChecked: actuallyCheckedCount,
       errored: erroredCount,
       notChecked: notCheckedCount,
       staggerMsUsed: staggerMs,
       durationMs: cycleDurationMs,
       hitSubrequestLimit: hitSubrequestLimit,
-      batchIndex: batchIndex,
-      batchCount: batchCount
-    });
-    while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+      results: debugResults
+    },
+    history: history
+  }));
 
-    await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
-      latestCycle: {
-        checkedAt: new Date().toISOString(),
-        totalCandidates: batchCandidates.length,
-        actuallyChecked: actuallyCheckedCount,
-        errored: erroredCount,
-        notChecked: notCheckedCount,
-        staggerMsUsed: staggerMs,
-        durationMs: cycleDurationMs,
-        hitSubrequestLimit: hitSubrequestLimit,
-        batchIndex: batchIndex,
-        batchCount: batchCount,
-        totalChurches: candidates.length,
-        results: fullResults
-      },
-      history: history
-    }));
-
-    // Rotate to the next batch for the following cycle, regardless of how
-    // this one went - even a batch with errors should still hand off to
-    // the next batch next time, rather than getting stuck retrying the
-    // same batch indefinitely.
-    await env.CHURCHES_KV.put(LIVE_CHECK_BATCH_STATE_KV_KEY, JSON.stringify({
-      batchIndex: (batchIndex + 1) % batchCount,
-      updatedAt: new Date().toISOString()
-    }));
-
-    // Adjust the delay for next cycle based on how THIS BATCH went, and
-    // persist it. Skipped entirely if this cycle hit Cloudflare's
-    // subrequest ceiling - that failure mode reflects a platform limit no
-    // amount of delay can fix, not YouTube's actual rate-limiting
-    // behavior, and a truncated cycle isn't a representative sample of
-    // the real error rate anyway.
-    if (!hitSubrequestLimit) {
-      const updatedStaggerMs = nextStaggerMs(staggerMs, batchCandidates.length, erroredCount);
-      if (updatedStaggerMs !== staggerMs) {
-        await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
-          staggerMs: updatedStaggerMs,
-          updatedAt: new Date().toISOString(),
-          reason: erroredCount / Math.max(batchCandidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
-            ? 'error-rate-above-threshold'
-            : 'clean-cycle-decay'
-        }));
-      }
+  // Adjust the delay for next cycle based on how this one went, and
+  // persist it. This is what replaces the old fixed-guess constant -
+  // the delay grows on its own if error rates climb, and only eases back
+  // down after cycles come back fully clean.
+  //
+  // Skipped entirely if this cycle hit Cloudflare's subrequest ceiling -
+  // that failure mode reflects a platform limit no amount of delay can
+  // fix, not YouTube's actual rate-limiting behavior, and a truncated
+  // cycle isn't a representative sample of the real error rate anyway.
+  if (!hitSubrequestLimit) {
+    const updatedStaggerMs = nextStaggerMs(staggerMs, candidates.length, erroredCount);
+    if (updatedStaggerMs !== staggerMs) {
+      await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
+        staggerMs: updatedStaggerMs,
+        updatedAt: new Date().toISOString(),
+        reason: erroredCount / Math.max(candidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
+          ? 'error-rate-above-threshold'
+          : 'clean-cycle-decay'
+      }));
     }
+  }
 
-    await writeProgress(batchCandidates.length, null, false);
+    await writeProgress(candidates.length, null, false);
     completedNormally = true;
   } finally {
     // Confirmed in production: without this, a cycle that throws anywhere
     // above leaves the progress record permanently stuck at running:true
     // (whatever completedCount it last reached), since the ONLY other
     // write that ever sets running:false was the one directly above -
-    // never reached if something threw first.
+    // never reached if something threw first. From the debug panel, a
+    // stuck record like that reads as "permanently running, no progress,"
+    // even though what actually happened is a crash, possibly several
+    // cycles' worth of them stacking as each new cron tick resets the
+    // counter and crashes again. This doesn't change what caused the
+    // throw or swallow it - it still propagates normally after this block
+    // (see the scheduled() handler's own try/catch for where that error
+    // actually gets recorded) - it just guarantees the progress display
+    // always reflects reality instead of getting stuck.
     if (!completedNormally) {
       await writeProgress(lastCompletedCount, null, false);
     }
@@ -1949,33 +1654,6 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice8.securenetsystems.net/KCHG'
   },
   {
-    displayName: 'KCPV',
-    cityState: 'Pahrump, NV',
-    homePage: 'https://justforjesus.us/',
-    provider: 'securenetsystems',
-    subdomain: 'streamdb4web.securenetsystems.net',
-    callSign: 'KCPVLP',
-    streamUrl: 'https://ice25.securenetsystems.net/KCPVLP'
-  },
-  {
-    displayName: 'KOUJ',
-    cityState: 'Norman, OK',
-    homePage: 'http://www.kouj.org/',
-    provider: 'securenetsystems',
-    subdomain: 'streamdb6web.securenetsystems.net',
-    callSign: 'KOUJ',
-    streamUrl: 'https://ice41.securenetsystems.net/KOUJ'
-  },
-  {
-    displayName: 'KEPT',
-    cityState: 'Hayward, CA',
-    homePage: 'https://www.keptfm.com/',
-    provider: 'securenetsystems',
-    subdomain: 'streamdb7web.securenetsystems.net',
-    callSign: 'KEPT',
-    streamUrl: 'https://ice9.securenetsystems.net/KEPT'
-  },
-  {
     displayName: 'WRDJ',
     cityState: 'Merritt Island, FL',
     homePage: 'http://www.wrdj.com',
@@ -2031,15 +1709,7 @@ const RADIO_STATIONS = [
     homePage: 'https://klyt.fm/',
     provider: 'radioco',
     stationId: 's914ba6b9a',
-    streamUrl: 'https://s5.radio.co/s914ba6b9a/listen'
-  },
-  {
-    displayName: 'KPTG',
-    cityState: 'Adelanto, CA',
-    homePage: 'https://www.ccadelanto.com/radio',
-    provider: 'radiocov2',
-    stationId: 'sf4a5da436',
-    streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
+    streamUrl: 'https://s5.radio.co/s914ba6b9a'
   },
   {
     displayName: 'KQIP',
@@ -2555,41 +2225,6 @@ function parseRadioCoJson(rawJson) {
   };
 }
 
-// Extracts now-playing info from Radio.co's newer v2 public track API
-// (https://public.radio.co/api/v2/{stationId}/track/current) - unlike the
-// older /stations/{id}/status endpoint above (which only returns a single
-// combined "title" string with no artist field), this v2 endpoint returns
-// track_artist and track_title as clean, already-split fields - no
-// guessing/parsing needed at all.
-//
-// Confirmed real response shape (KPTG):
-//   {"data":{"title":"Raul Ries - Somebody Loves You","start_time":"...",
-//    "artwork_urls":{"standard":"https://images.radio.co/album_art/....jpg",
-//    "large":"...jpg"},"track_artist":"Raul Ries",
-//    "track_title":"Somebody Loves You", ...}}
-//
-// Note: "artwork_urls.standard" is used over "large" per station owner's
-// instruction - both are valid jpg URLs, just different sizes.
-function parseRadioCoV2Json(rawJson) {
-  let parsed;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch (err) {
-    throw new Error('Invalid Radio.co v2 JSON response');
-  }
-
-  const track = parsed && parsed.data;
-  const rawCover = track && track.artwork_urls && typeof track.artwork_urls.standard === 'string'
-    ? track.artwork_urls.standard.trim()
-    : '';
-
-  return {
-    title: track && typeof track.track_title === 'string' ? track.track_title.trim() : '',
-    artist: track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '',
-    coverUrl: rawCover || null
-  };
-}
-
 // Extracts now-playing info from RadioKing's public widget API
 // (https://api.radioking.io/widget/radio/{slug}/track/current) - a clean,
 // well-documented single-object response with title/artist already
@@ -2724,12 +2359,6 @@ const RADIO_PROVIDERS = {
       return 'https://public.radio.co/stations/' + station.stationId + '/status';
     },
     parse: parseRadioCoJson
-  },
-  radiocov2: {
-    buildNowPlayingUrl: function(station) {
-      return 'https://public.radio.co/api/v2/' + station.stationId + '/track/current';
-    },
-    parse: parseRadioCoV2Json
   },
   radioking: {
     buildNowPlayingUrl: function(station) {

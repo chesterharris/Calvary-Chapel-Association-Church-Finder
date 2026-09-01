@@ -178,60 +178,6 @@
   .popup-row a:hover {
     text-decoration: underline;
   }
-  .popup-row a:hover .popup-live-badge {
-    text-decoration: none;
-  }
-  /* "LIVE NOW" badge shown in a church's map popup when it's currently
-     streaming - styled after the two-tone LIVE/NOW pill reference image,
-     recolored to the site's own brick red (var(--ember)) instead of a
-     generic red, and sized down to fit inline in a small popup rather
-     than as a standalone graphic. The dot's pulse is a plain opacity+scale
-     keyframe animation (no JS) - cheap, and pauses automatically for
-     anyone with reduced-motion preferences set (see the media query
-     below), which a GIF/PNG version couldn't do. */
-  .popup-live-badge {
-    display: inline-flex;
-    vertical-align: middle;
-    align-items: stretch;
-    border-radius: 999px;
-    overflow: hidden;
-    border: 1.5px solid var(--ember);
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  .popup-live-badge-live {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--ember);
-    color: #fff;
-    padding: 4px 8px 4px 6px;
-  }
-  .popup-live-badge-now {
-    display: flex;
-    align-items: center;
-    background: #fff;
-    color: var(--ember);
-    padding: 4px 8px;
-  }
-  .popup-live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #fff;
-    flex-shrink: 0;
-    animation: popupLivePulse 2.2s ease-in-out infinite;
-  }
-  @keyframes popupLivePulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.35; transform: scale(0.7); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .popup-live-dot { animation: none; }
-  }
   .score-pin {
     width: 22px;
     height: 22px;
@@ -442,6 +388,16 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(185,28,28,0.5); }
     50% { box-shadow: 0 0 0 5px rgba(185,28,28,0); }
   }
+  /* Deliberately calm, no pulse animation - this is informational
+     ("here's when to come back"), not urgent the way an actually-live
+     stream is. Reuses the site's existing brass accent rather than
+     introducing a new color. */
+  .btn-upcoming {
+    background: var(--brass);
+    color: var(--paper);
+    border: 1px solid var(--brass);
+  }
+  .btn-upcoming:hover { opacity: 0.85; }
   .btn:hover { opacity: 0.85; }
 
   @media (max-width: 720px) {
@@ -621,7 +577,6 @@
     height: 100%;
     width: 320px;
     max-width: 88vw;
-    overflow: hidden;
     background: var(--paper);
     color: var(--ink);
     z-index: 1500;
@@ -635,9 +590,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    background: var(--brass);
-    color: var(--ink);
-    border-bottom: 3px solid var(--evergreen);
+    background: var(--evergreen);
+    color: var(--paper);
+    border-bottom: 3px solid var(--brass);
   }
   .side-panel-header h2 {
     font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -647,7 +602,7 @@
   .btn-close {
     background: none;
     border: none;
-    color: var(--ink);
+    color: var(--paper);
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
@@ -704,16 +659,6 @@
   #radioBrowsePanel {
     width: 420px;
   }
-  /* On phones the fixed 420px above ignores .side-panel's 88vw cap (an ID
-     selector always wins over a class one), which is exactly what pushes
-     this pane wider than the screen and drags its close button off-
-     screen. Capping it back down to 88vw ONLY below the same 600px
-     breakpoint used elsewhere for mobile keeps desktop/tablet untouched. */
-  @media (max-width: 600px) {
-    #radioBrowsePanel {
-      width: 88vw;
-    }
-  }
   .radio-browse-toolbar {
     display: flex;
     align-items: center;
@@ -721,36 +666,14 @@
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
   }
-  .radio-browse-search-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-  }
   .radio-browse-search {
-    width: 100%;
-    box-sizing: border-box;
-    min-width: 0;
-    padding: 6px 26px 6px 10px;
+    flex: 1;
+    padding: 6px 10px;
     border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 13px;
     font-family: inherit;
   }
-  .radio-browse-search-clear {
-    position: absolute;
-    top: 50%;
-    right: 4px;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--ink);
-    opacity: 0.5;
-    font-size: 16px;
-    line-height: 1;
-    padding: 4px 6px;
-  }
-  .radio-browse-search-clear:hover { opacity: 0.85; }
   .radio-browse-fav-count {
     font-size: 11.5px;
     color: var(--brass);
@@ -968,7 +891,6 @@
   .live-debug-content {
     flex: 1;
     overflow-y: auto;
-    overflow-x: auto;
     padding: 12px 16px;
     font-size: 12.5px;
   }
@@ -984,31 +906,18 @@
     gap: 8px;
   }
   .live-debug-section-title:first-child { margin-top: 0; }
-  .live-debug-group {
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    margin: 6px 0;
-    background: rgba(0,0,0,0.02);
-  }
-  .live-debug-group summary {
+  .live-debug-filter-toggle {
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-weight: 700;
-    font-size: 12.5px;
-    color: var(--evergreen);
-    padding: 7px 10px;
+    font-weight: 400;
+    font-size: 11.5px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 5px;
     cursor: pointer;
-    list-style: none;
+    white-space: nowrap;
   }
-  .live-debug-group summary::-webkit-details-marker { display: none; }
-  .live-debug-group summary::before {
-    content: '▸';
-    display: inline-block;
-    margin-right: 6px;
-    transition: transform 0.15s ease;
-  }
-  .live-debug-group[open] summary::before { transform: rotate(90deg); }
-  .live-debug-group table.live-debug-table { margin-top: 0; }
-  .live-debug-group p { padding: 0 10px 8px; margin: 0; }
+  .live-debug-filter-toggle input { cursor: pointer; }
   .live-debug-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1063,14 +972,11 @@
   /* Per-church table: name gets breathing room, badge stays compact,
      error text gets the rest and wraps instead of forcing horizontal
      scroll (previously the widest offender). */
-  /* Per-church tables (Live/Waiting/Not-Live groups): name gets breathing
-     room, badge stays compact, error text gets the rest and wraps instead
-     of forcing horizontal scroll (previously the widest offender). */
-  .live-debug-group table.live-debug-table col.col-church { width: 34%; }
-  .live-debug-group table.live-debug-table col.col-live { width: 14%; }
-  .live-debug-group table.live-debug-table col.col-time { width: 12%; }
-  .live-debug-group table.live-debug-table col.col-error { width: 40%; }
-  .live-debug-group table.live-debug-table td.church-name {
+  #liveDebugPerChurchTable col.col-church { width: 34%; }
+  #liveDebugPerChurchTable col.col-live { width: 14%; }
+  #liveDebugPerChurchTable col.col-time { width: 12%; }
+  #liveDebugPerChurchTable col.col-error { width: 40%; }
+  #liveDebugPerChurchTable td.church-name {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1182,17 +1088,6 @@
     font-weight: 700;
     font-size: 12px;
     color: var(--evergreen);
-    /* Reserves room for the favorite/featured icon row, which is
-       absolutely positioned over the card's top-right corner (see
-       .live-now-card-actions below) rather than sitting in normal flex
-       flow - without this, a long channel name or the title text right
-       under it runs underneath those icons instead of wrapping around
-       them. Sized for the admin case (two 18px icons + gaps/padding);
-       non-admin (one icon) just gets a little extra breathing room.
-       Only applied to these first two lines since they're the only ones
-       that sit at the same height as the icons - the description/meta
-       lines below have the full width back. */
-    padding-right: 56px;
   }
   .live-now-title {
     font-size: 12.5px;
@@ -1203,7 +1098,6 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    padding-right: 56px;
   }
   .live-now-desc {
     font-size: 11px;
@@ -1533,153 +1427,6 @@
   }
   .radio-player-close:hover { opacity: 1; color: var(--ember); }
 
-  /* ---- Radio sleep timer ----
-     Icon lives in the mini-player bar itself, so it's reachable on both
-     desktop and mobile any time something is playing (this bar is not
-     actually desktop-exclusive - see the comment on .radio-player-bar
-     above). Idle state is just the clock outline; once armed, the
-     remaining time appears next to it in the gold accent already used
-     elsewhere on the page (the ticker's CTA color) so it reads as "live"
-     without being loud about it. */
-  .radio-player-timer-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: none;
-    border: none;
-    color: var(--paper);
-    opacity: 0.7;
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: 3px;
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-  }
-  .radio-player-timer-btn:hover { opacity: 1; }
-  .radio-player-timer-btn.is-armed { opacity: 1; color: #f2c76e; }
-  .radio-timer-icon { display: flex; }
-  .radio-timer-icon svg { width: 18px; height: 18px; display: block; }
-  .radio-timer-remaining {
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-  }
-
-  /* ---- Radio sleep timer slide-up sheet ---- */
-  .timer-sheet-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(28,43,36,0.55);
-    z-index: 2600;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-  }
-  .timer-sheet {
-    background: var(--paper);
-    color: var(--ink);
-    width: 100%;
-    max-width: 420px;
-    border-radius: 12px 12px 0 0;
-    padding: 18px 20px calc(20px + env(safe-area-inset-bottom, 0px));
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
-    animation: timerSheetUp 0.18s ease-out;
-  }
-  @keyframes timerSheetUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-  .timer-sheet-title {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 17px;
-    font-weight: 700;
-    color: var(--evergreen);
-    text-align: center;
-    margin: 0 0 14px 0;
-  }
-  .timer-sheet-rollers {
-    position: relative;
-    display: flex;
-    align-items: stretch;
-    justify-content: center;
-    height: 180px;
-  }
-  .timer-sheet-highlight {
-    position: absolute;
-    left: 6px;
-    right: 6px;
-    top: 50%;
-    transform: translateY(-50%);
-    height: 36px;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    pointer-events: none;
-    z-index: 0;
-  }
-  .timer-roller {
-    position: relative;
-    z-index: 1;
-    width: 62px;
-    height: 100%;
-    overflow-y: scroll;
-    scroll-snap-type: y mandatory;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .timer-roller::-webkit-scrollbar { display: none; }
-  .timer-roller-pad { height: 72px; }
-  .timer-roller-row {
-    height: 36px;
-    line-height: 36px;
-    text-align: center;
-    font-size: 20px;
-    font-variant-numeric: tabular-nums;
-    color: var(--ink);
-    opacity: 0.35;
-    scroll-snap-align: center;
-    cursor: pointer;
-    transition: opacity 0.15s ease, font-weight 0.15s ease;
-  }
-  .timer-roller-row.is-selected {
-    opacity: 1;
-    font-weight: 700;
-    color: var(--evergreen);
-  }
-  .timer-roller-unit-label {
-    position: relative;
-    z-index: 1;
-    width: 42px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    padding-left: 6px;
-    font-size: 11.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    font-weight: 600;
-    color: var(--brass);
-  }
-  .timer-sheet-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-top: 18px;
-  }
-  .timer-sheet-actions-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-left: auto;
-  }
-  .timer-sheet-actions .btn-ember[disabled] {
-    opacity: 0.45;
-    cursor: default;
-  }
-
   /* ---- Mobile station picker (phones only, see #mobileRadioPicker) ---- */
   .mp-picker {
     display: none;
@@ -1712,15 +1459,15 @@
     justify-content: space-between;
     gap: 8px;
     padding: 14px 14px;
-    background: var(--brass);
-    color: var(--ink);
-    border-bottom: 3px solid var(--evergreen);
+    background: var(--evergreen);
+    color: var(--paper);
+    border-bottom: 3px solid var(--brass);
   }
   .mp-back-btn {
     flex-shrink: 0;
     background: none;
     border: none;
-    color: var(--ink);
+    color: var(--paper);
     font-family: 'Helvetica Neue', Arial, sans-serif;
     font-size: 16px;
     font-weight: 700;
@@ -1730,7 +1477,7 @@
   }
   .mp-topbar-title {
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 20px;
+    font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.02em;
     opacity: 0.95;
@@ -1922,6 +1669,10 @@
     </div>
     <div class="header-actions">
       <button id="btnLiveNow" class="btn btn-live" style="display:none;">🔴 <span id="liveNowCount">0</span> churches live now</button>
+      <!-- Initial content above is just a safe default before JS first
+           runs - updateLiveNowUi() fully owns this button's text, class,
+           and visibility from the first load onward, across all three
+           states (live / upcoming countdown / no streams yet). -->
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
       <button id="btnRadioBrowse" class="btn btn-outline">📻 All Stations</button>
@@ -2124,35 +1875,7 @@
     <div id="radioPlayerNowPlaying" class="radio-player-nowplaying"></div>
   </div>
   <audio id="radioAudio" preload="none"></audio>
-  <button type="button" id="radioTimerBtn" class="radio-player-timer-btn" title="Set sleep timer" aria-label="Set sleep timer">
-    <span class="radio-timer-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>
-    <span id="radioTimerRemaining" class="radio-timer-remaining"></span>
-  </button>
   <button type="button" id="radioPlayerCloseBtn" class="radio-player-close" title="Stop and close player" aria-label="Stop and close player">×</button>
-</div>
-
-<!-- Sleep timer slide-up sheet. Opened from the clock icon in the bar above
-     (same control, same sheet, on both desktop and mobile). Two rollers
-     (hours/minutes) styled as an iOS-style picker via CSS scroll-snap - see
-     the timer-roller-* rules above and the roller wiring in the script below. -->
-<div id="radioTimerOverlay" class="timer-sheet-overlay" style="display: none;">
-  <div class="timer-sheet">
-    <h2 class="timer-sheet-title">Timer</h2>
-    <div class="timer-sheet-rollers">
-      <div class="timer-sheet-highlight" aria-hidden="true"></div>
-      <div id="radioTimerHourRoller" class="timer-roller" data-max="12"></div>
-      <div class="timer-roller-unit-label">hr</div>
-      <div id="radioTimerMinuteRoller" class="timer-roller" data-max="59"></div>
-      <div class="timer-roller-unit-label">min</div>
-    </div>
-    <div class="timer-sheet-actions">
-      <button type="button" id="radioTimerCancelActiveBtn" class="btn btn-danger" style="display: none;">Cancel Timer</button>
-      <div class="timer-sheet-actions-right">
-        <button type="button" id="radioTimerDismissBtn" class="btn btn-outline">Cancel</button>
-        <button type="button" id="radioTimerOkBtn" class="btn btn-ember">OK</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <!-- Mobile-only full-screen station picker. Replaces the map area on
@@ -2192,17 +1915,14 @@
 
 <div id="radioBrowsePanel" class="side-panel" style="display: none;">
   <div class="side-panel-header">
-    <h2 id="radioBrowseTitle">📻 All Radio Stations</h2>
+    <h2>📻 All Radio Stations</h2>
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
   </div>
   <div class="radio-browse-toolbar">
-    <div class="radio-browse-search-wrap">
-      <input type="text" id="radioBrowseSearch" class="radio-browse-search" placeholder="Search stations...">
-      <button id="radioBrowseSearchClear" class="radio-browse-search-clear" style="display: none;" aria-label="Clear search" title="Clear search">&times;</button>
-    </div>
+    <input type="text" id="radioBrowseSearch" class="radio-browse-search" placeholder="Search stations...">
     <span id="radioBrowseFavCount" class="radio-browse-fav-count"></span>
   </div>
-  <div class="radio-browse-help-text">Tap station to Listen. Tap ★ to add or remove it from your home page ticker.</div>
+  <div class="radio-browse-help-text">Tap a station to listen now. Tap the ★ to add or remove it from your ticker at the top of the page.</div>
   <div class="radio-browse-starter-row">
     <a href="#" id="radioBrowseStarterLink" class="radio-browse-starter-link">New here? Add a starter set of stations to your ticker - swap any of them out later.</a>
   </div>
@@ -2463,20 +2183,58 @@
     return Math.max(0, Math.round(diffMs / 60000));
   }
 
+  // Tracks the currently-displayed countdown target (ISO string), or null
+  // when not in countdown mode. Deliberately a module-level variable
+  // rather than something recomputed fresh each call - this is what makes
+  // "reconfirm silently, only visibly change when the target actually
+  // changes" possible (see updateLiveNowUi and the 30s ticker below).
+  let liveNowUpcomingTarget = null;
+
+  // "3h 22m" / "45m" - matches the HH:MM-style granularity decided for
+  // this feature; seconds would be false precision for something in the
+  // hours-away range, and pointless churn on every tick. Named distinctly
+  // from the admin debug panel's own formatCountdown(iso) below (same
+  // general idea, different signature/purpose - ms-based here vs.
+  // ISO-string-based there) so the two don't collide; two functions
+  // declared with the same name in the same scope silently overwrite each
+  // other, and that one's defined later in the file, so it would have
+  // won and broken this one without ever throwing an error.
+  function formatUpcomingCountdown(ms) {
+    const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? (hours + 'h ' + minutes + 'm') : (minutes + 'm');
+  }
+
+  // Recomputes purely from the already-stored liveNowUpcomingTarget - no
+  // server call involved, same "cheap local math" pattern the "Live for
+  // NN min" ticker below already uses. Called both immediately when a
+  // countdown starts and on every 30s tick after that.
+  function refreshLiveNowUpcomingDisplay() {
+    if (!liveNowUpcomingTarget) return;
+    const btn = document.getElementById('btnLiveNow');
+    const remainingMs = new Date(liveNowUpcomingTarget).getTime() - Date.now();
+    // A church can start a few minutes late, so the local countdown will
+    // sometimes reach zero before the next server poll (every 2 min)
+    // confirms what actually happened - show this instead of "0h 0m" or a
+    // negative duration until that poll resolves it one way or the other.
+    btn.innerHTML = remainingMs <= 0
+      ? '🕒 Starting any moment now'
+      : '🕒 Next live service begins in ' + formatUpcomingCountdown(remainingMs);
+  }
+
   function updateLiveNowUi() {
     const btn = document.getElementById('btnLiveNow');
-    const countEl = document.getElementById('liveNowCount');
     const count = liveStatusData.live.length;
     const liveOnlyCb = document.getElementById('liveOnlyFilterCb');
     const liveOnlyRow = document.getElementById('liveOnlyFilterRow');
 
-    // The red alert always reflects the true total, regardless of the
-    // Featured/Favorites filters below - those only ever narrow what's
-    // shown inside the pane once opened, never the header count, so
-    // someone with an over-restrictive filter still gets nudged that more
-    // streams exist.
+    // This always reflects the true total, regardless of the
+    // Featured/Favorites filters used elsewhere - those only ever narrow
+    // what's shown inside the Live Now pane once opened, never this
+    // count, so someone with an over-restrictive filter still gets
+    // nudged that more streams exist.
     if (count === 0) {
-      btn.style.display = 'none';
       // Nothing left to filter to - force the toggle off rather than
       // leaving it checked-but-disabled (a confusing, effectively-stuck
       // state with no visible way to turn it back off).
@@ -2486,11 +2244,39 @@
       }
       liveOnlyCb.disabled = true;
       liveOnlyRow.classList.add('is-disabled');
+
+      btn.classList.remove('btn-live');
+      btn.classList.add('btn-upcoming');
+      btn.style.display = 'inline-block';
+
+      const nextStart = liveStatusData.nextUpcomingStart || null;
+      if (nextStart) {
+        // Only touch the stored target if it actually changed. This is
+        // the entire mechanism behind "reconfirm silently, don't restart
+        // the countdown every 2 minutes" - if the server just re-confirms
+        // the same church/time, the local tick was already accurate and
+        // this is a no-op; a genuinely different target is what causes a
+        // visible jump.
+        if (nextStart !== liveNowUpcomingTarget) {
+          liveNowUpcomingTarget = nextStart;
+        }
+        refreshLiveNowUpcomingDisplay();
+      } else {
+        liveNowUpcomingTarget = null;
+        btn.innerHTML = 'No live streams yet';
+      }
+
       renderMarkers(); // clears any stale pulsing pins if a stream just ended
       return;
     }
 
-    countEl.textContent = String(count);
+    // Back in a normal "N live" state - clear any countdown tracking so a
+    // later return to count-0 can't show a stale target left over from
+    // before this stream started.
+    liveNowUpcomingTarget = null;
+    btn.classList.remove('btn-upcoming');
+    btn.classList.add('btn-live');
+    btn.innerHTML = '🔴 <span id="liveNowCount">' + count + '</span> churches live now';
     btn.style.display = 'inline-block';
     liveOnlyCb.disabled = false;
     liveOnlyRow.classList.remove('is-disabled');
@@ -2581,7 +2367,7 @@
       // requests a stripped page that still signals isLive:true but omits
       // videoId/title/everything else - rather than a blank, dead-looking
       // card in that case, say plainly that it's live and clickable.
-      const titleText = l.title || (l.videoId ? '' : 'Watch live on YouTube');
+      const titleText = l.title || (l.videoId ? '' : 'Live now - tap to watch on YouTube');
       const church = findChurchById(l.churchId);
       const isFav = church ? isChurchFavorite(church.id) : false;
       const isFeatured = church ? !!church.featured : false;
@@ -2612,7 +2398,10 @@
   }
 
   // Ticks the "Live for NN min" text upward client-side, without any new
-  // server calls - cheap math against the startDate we already have.
+  // server calls - cheap math against the startDate we already have. Also
+  // drives the header's "Next live service begins in..." countdown for
+  // the same reason - both are pure local math off an already-known
+  // timestamp, no need for two separate timers doing the same kind of work.
   setInterval(function() {
     document.querySelectorAll('#liveNowList .duration[data-start]').forEach(function(el) {
       const start = el.getAttribute('data-start');
@@ -2620,6 +2409,7 @@
       const mins = minutesSince(start);
       if (mins !== null) el.textContent = 'Live for ' + mins + ' min';
     });
+    refreshLiveNowUpcomingDisplay();
   }, 30000);
 
   document.getElementById('btnLiveNow').addEventListener('click', function() {
@@ -2676,9 +2466,7 @@
   let liveDebugPollTimer = null;
   let liveDebugWatchingRun = false;
   let liveDebugLastData = null;
-  // (Formerly liveDebugShowIssuesOnly - removed along with the "Show only
-  // notable results" checkbox now that results are grouped into their own
-  // Live/Waiting/Not-Live sections instead of one filterable flat list.)
+  let liveDebugShowIssuesOnly = false;
 
   function escapeHtmlDebug(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -2721,14 +2509,10 @@
   // as "15m 10s" than "910.4s".
   function formatDurationMs(ms) {
     if (ms == null || isNaN(ms)) return '-';
-    // Rounds total seconds FIRST, then splits into minutes/seconds -
-    // rounding each part separately (the old approach) could produce a
-    // seconds remainder of 60 after rounding (e.g. 599.6s -> floor(9.99)=9m,
-    // round(59.6)=60s -> "9m 60s" instead of "10m 0s").
-    const totalSec = Math.round(ms / 1000);
-    if (totalSec < 60) return totalSec + 's';
+    const totalSec = ms / 1000;
+    if (totalSec < 60) return totalSec.toFixed(1) + 's';
     const min = Math.floor(totalSec / 60);
-    const sec = totalSec - min * 60;
+    const sec = Math.round(totalSec - min * 60);
     return min + 'm ' + sec + 's';
   }
 
@@ -2778,9 +2562,13 @@
     liveDebugRunNowBtn.innerHTML = isRunning ? '<span class="live-debug-spinner"></span>Running...' : 'Run Check Now';
   }
 
-  // (Formerly isDebugRowAnIssue, used by the "Show only notable results"
-  // filter - removed along with that checkbox. Rows are now grouped by
-  // actual status below instead of filtered.)
+  // "Issue" = anything worth a second look when filtering: not checked
+  // this cycle, an actual error, or currently live (a positive, notable
+  // state worth surfacing even while hiding the routine "not live" noise
+  // that makes up the vast majority of rows).
+  function isDebugRowAnIssue(r) {
+    return !!(r.notChecked || r.error || r.isLive || isWaitingSoon(r));
+  }
 
   // A "waiting" (scheduled-future) church is only worth calling out
   // distinctly once it's close - confirmed in production this list was
@@ -2794,72 +2582,6 @@
     const startTime = new Date(r.startDate).getTime();
     if (isNaN(startTime)) return false;
     return (startTime - Date.now()) < WAITING_SOON_WINDOW_MS;
-  }
-
-  // Builds one <tr> for a single church's result row - same markup/badges
-  // that used to live inline in the old flat-table renderer, just pulled
-  // out so all three status groups (Live/Waiting/Not-Live) can share it.
-  function buildDebugRow(r) {
-    let badge;
-    if (r.notChecked) {
-      badge = '<span class="live-debug-badge notchecked">not checked</span>';
-    } else if (r.error) {
-      badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
-        (r.usedStaleData ? 'stale' : 'failed') + '</span>';
-    } else if (r.status === 'live') {
-      badge = '<span class="live-debug-badge live">live</span>';
-    } else if (r.status === 'waiting') {
-      badge = '<span class="live-debug-badge waiting">waiting</span>';
-    } else {
-      // Fallback for entries from before the 3-state status field
-      // existed (see checkChurchLive) - falls back to the old
-      // isLive-only distinction rather than showing nothing.
-      badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
-    }
-
-    // Highlights an outlier at a glance rather than making someone scan
-    // every row for a slow one - thresholds are a starting guess (typical
-    // fetches land well under 1s), not a claim about where "slow"
-    // objectively begins.
-    let timeText = '-';
-    if (typeof r.checkMs === 'number') {
-      const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
-      const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
-      timeText = '<span' + timeClass + '>' + timeSec + '</span>';
-    } else if (r.checkedThisCycle === false) {
-      // This church wasn't part of THIS cycle's batch (see
-      // LIVE_CHECK_BATCH_SIZE in index.js) - showing the row's status
-      // still comes from its own last real check, just not this cycle's,
-      // so say so explicitly rather than leaving a bare "-" that could
-      // read as "never checked at all."
-      timeText = r.neverChecked
-        ? '<span style="opacity:0.55;">not yet checked</span>'
-        : '<span style="opacity:0.55;">carried over' + (r.lastCheckedAt ? ' (' + formatRelativeTime(r.lastCheckedAt) + ')' : '') + '</span>';
-    }
-
-    return '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
-      '<td>' + timeText + '</td>' +
-      '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (isWaitingSoon(r) && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
-  }
-
-  // Wraps one status group (Live/Waiting/Not-Live) in a native <details>
-  // element - collapsed by default (no "open" attribute), so opening one
-  // of 150+ rows' worth of detail is an explicit choice rather than
-  // something you have to scroll past every time the panel opens. Native
-  // <details>/<summary> needs no extra JS to expand/collapse and is
-  // keyboard-accessible for free.
-  function buildDebugResultsGroup(label, rows, openByDefault) {
-    if (!rows.length) {
-      return '<details class="live-debug-group"><summary>' + escapeHtmlDebug(label) + ' - 0</summary>' +
-        '<p style="opacity:0.6;">None right now.</p></details>';
-    }
-    let html = '<details class="live-debug-group"' + (openByDefault ? ' open' : '') + '><summary>' + escapeHtmlDebug(label) + ' - ' + rows.length + '</summary>';
-    html += '<table class="live-debug-table">' +
-      '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
-      '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
-    rows.forEach(function(r) { html += buildDebugRow(r); });
-    html += '</tbody></table></details>';
-    return html;
   }
 
   function renderLiveDebugContent(data) {
@@ -2903,17 +2625,7 @@
     html += '<div class="live-debug-summary">';
     html += '<div><span class="label">Checked</span><span class="value">' + formatRelativeTime(cycle.checkedAt) + '</span></div>';
     html += '<div><span class="label">Duration</span><span class="value">' + formatDurationMs(cycle.durationMs) + '</span></div>';
-    if (cycle.batchCount != null && cycle.batchCount > 1) {
-      // Each cycle only checks ONE batch (see LIVE_CHECK_BATCH_SIZE in
-      // index.js) - shown explicitly whenever there's more than one batch,
-      // so "Total candidates" below reads as "this batch" rather than
-      // looking like the whole church list. Omitted entirely when there's
-      // only one batch (batching is a no-op at that church count), so
-      // this row doesn't show up as noise for smaller lists.
-      html += '<div><span class="label">Batch</span><span class="value">' + (cycle.batchIndex + 1) + ' of ' + cycle.batchCount + '</span></div>';
-      html += '<div><span class="label">Total churches</span><span class="value">' + (cycle.totalChurches != null ? cycle.totalChurches : '-') + '</span></div>';
-    }
-    html += '<div><span class="label">' + (cycle.batchCount != null && cycle.batchCount > 1 ? 'Checked this batch' : 'Total candidates') + '</span><span class="value">' + cycle.totalCandidates + '</span></div>';
+    html += '<div><span class="label">Total candidates</span><span class="value">' + cycle.totalCandidates + '</span></div>';
     html += '<div><span class="label">Actually checked</span><span class="value">' + cycle.actuallyChecked + '</span></div>';
     html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + '</span></div>';
     html += '<div><span class="label">Not checked</span><span class="value' + (cycle.notChecked > 0 ? ' warn' : '') + '">' + cycle.notChecked + '</span></div>';
@@ -2938,88 +2650,70 @@
     }
 
     if (cycle.results && cycle.results.length) {
-      html += '<div class="live-debug-section-title">Per-Church Results</div>';
+      const rowsToShow = liveDebugShowIssuesOnly ? cycle.results.filter(isDebugRowAnIssue) : cycle.results;
+      html += '<div class="live-debug-section-title">Per-Church Results' +
+        '<label class="live-debug-filter-toggle"><input type="checkbox" id="liveDebugIssuesOnlyToggle"' +
+        (liveDebugShowIssuesOnly ? ' checked' : '') + '> Show only notable results</label></div>';
 
-      // Single pass, four buckets - a church that's currently erroring or
-      // stuck on stale carried-over data gets its OWN group up front,
-      // rather than being buried inside the (often 100+ row) Not-Live
-      // bucket alongside every ordinary non-live church. Confirmed in
-      // production this was the actual barrier to spotting a recurring
-      // error - the data was always there, it just took expanding
-      // Not-Live and scanning past everything else to find it.
-      const liveRows = [];
-      const waitingRows = [];
-      const erroredRows = [];
-      const notLiveRows = [];
-      cycle.results.forEach(function(r) {
-        if (!r.notChecked && !r.error && (r.status === 'live' || (r.status == null && r.isLive))) {
-          liveRows.push(r);
-        } else if (!r.notChecked && !r.error && r.status === 'waiting') {
-          waitingRows.push(r);
-        } else if (!r.notChecked && r.error) {
-          // Deliberately excludes notChecked entries (subrequest-budget
-          // skips) even though those also carry an explanatory .error
-          // string - that's an already-understood platform limit (see
-          // the banner above), not a genuine per-church failure, and
-          // mixing the two would dilute the signal this group exists to
-          // surface. Those still land in Not-Live, same as before.
-          erroredRows.push(r);
-        } else {
-          notLiveRows.push(r);
-        }
-      });
+      if (rowsToShow.length) {
+        html += '<table class="live-debug-table" id="liveDebugPerChurchTable">' +
+          '<colgroup><col class="col-church"><col class="col-live"><col class="col-time"><col class="col-error"></colgroup>' +
+          '<thead><tr><th>Church</th><th>Status</th><th>Check Time</th><th>Details</th></tr></thead><tbody>';
+        rowsToShow.forEach(function(r) {
+          let badge;
+          if (r.notChecked) {
+            badge = '<span class="live-debug-badge notchecked">not checked</span>';
+          } else if (r.error) {
+            badge = '<span class="live-debug-badge ' + (r.usedStaleData ? 'stale' : 'error') + '">' +
+              (r.usedStaleData ? 'stale' : 'failed') + '</span>';
+          } else if (r.status === 'live') {
+            badge = '<span class="live-debug-badge live">live</span>';
+          } else if (r.status === 'waiting' && isWaitingSoon(r)) {
+            badge = '<span class="live-debug-badge waiting">waiting</span>';
+          } else {
+            // Fallback for entries from before the 3-state status field
+            // existed (see checkChurchLive) - falls back to the old
+            // isLive-only distinction rather than showing nothing.
+            badge = '<span class="live-debug-badge ok">' + (r.isLive ? 'live' : 'not live') + '</span>';
+          }
 
-      html += buildDebugResultsGroup('Live', liveRows);
-      html += buildDebugResultsGroup('Waiting', waitingRows);
-      html += buildDebugResultsGroup(erroredRows.length ? '⚠️ Errored' : 'Errored', erroredRows, true);
-      html += buildDebugResultsGroup('Not-Live', notLiveRows);
+          // Highlights an outlier at a glance rather than making someone
+          // scan every row for a slow one - thresholds are a starting
+          // guess (typical fetches land well under 1s), not a claim about
+          // where "slow" objectively begins.
+          let timeText = '-';
+          if (typeof r.checkMs === 'number') {
+            const timeSec = (r.checkMs / 1000).toFixed(1) + 's';
+            const timeClass = r.checkMs > 5000 ? ' style="color:var(--ember);font-weight:700;"' : (r.checkMs > 2000 ? ' style="color:var(--brass);font-weight:700;"' : '');
+            timeText = '<span' + timeClass + '>' + timeSec + '</span>';
+          }
+
+          html += '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
+            '<td>' + timeText + '</td>' +
+            '<td>' + (r.error ? '<span class="live-debug-error-text">' + escapeHtmlDebug(r.error) + '</span>' : (isWaitingSoon(r) && r.startDate ? '<span style="opacity:0.65;" title="' + escapeHtmlDebug(r.startDate) + '">Starts ' + escapeHtmlDebug(formatCountdown(r.startDate)) + '</span>' : '')) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      } else {
+        html += '<p style="opacity:0.6;">No issues right now.</p>';
+      }
     }
 
     if (data.history && data.history.length) {
       html += '<div class="live-debug-section-title">Recent Cycles (trend)</div>';
-      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Batch</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
+      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
       // Most recent first - easier to spot a worsening trend at a glance
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
-        // Stall notes (written by the overlap guard in checkAllChurchesLive
-        // when it overrides a previous cycle that's been stuck past
-        // LIVE_CHECK_OVERLAP_GUARD_MS) don't have the normal per-cycle
-        // fields (errored, staggerMsUsed, etc.) since no real cycle
-        // actually completed - render them as their own full-width row
-        // instead of falling through to the normal columns, which would
-        // otherwise show a run of blank/dash cells with no explanation.
-        if (h.stalledPreviousCycle) {
-          const stuckText = formatDurationMs(h.stuckForMs);
-          const churchText = h.previousChurchName ? escapeHtmlDebug(h.previousChurchName) : 'unknown church';
-          const countText = (h.previousCompletedCount != null && h.previousTotalCandidates != null)
-            ? (h.previousCompletedCount + '/' + h.previousTotalCandidates)
-            : '?/?';
-          // Older stall notes (written before previousBatchIndex/
-          // previousBatchCount existed) won't have these fields - fall
-          // back to a plain dash pair rather than showing "undefined/
-          // undefined" until they age out of the rolling history.
-          const stalledBatchText = (h.previousBatchIndex != null && h.previousBatchCount != null)
-            ? '(' + (h.previousBatchIndex + 1) + '/' + h.previousBatchCount + ') '
-            : '';
-          html += '<tr><td colspan="7" style="color:var(--ember);">⚠️ ' + stalledBatchText + 'Stuck on ' + churchText +
-            ' (' + countText + '), ' + stuckText + ' - restarted ' +
-            formatRelativeTime(h.checkedAt) + '</td></tr>';
-          return;
-        }
         // Backward compatibility: history entries written before this
-        // field rename (checked -> totalCandidates), before notChecked
-        // existed, and before batching (batchIndex/batchCount) existed
-        // are still sitting in the rolling 50-cycle history right after a
-        // deploy. Rather than show a raw "undefined" for those old rows
-        // until they naturally age out, fall back to the old field name
-        // (or a plain dash) so the table reads cleanly either way.
+        // field rename (checked -> totalCandidates) and before notChecked
+        // existed at all are still sitting in the rolling 50-cycle
+        // history right after a deploy. Rather than show a raw
+        // "undefined" for those old rows until they naturally age out,
+        // fall back to the old field name (or a plain dash) so the table
+        // reads cleanly either way.
         const total = h.totalCandidates != null ? h.totalCandidates : (h.checked != null ? h.checked : '-');
         const notChecked = h.notChecked != null ? h.notChecked : '-';
-        const batchText = (h.batchIndex != null && h.batchCount != null)
-          ? (h.batchIndex + 1) + '/' + h.batchCount
-          : '-';
-        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td>' +
-          '<td>' + batchText + '</td><td>' + total + '</td>' +
+        html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td><td>' + total + '</td>' +
           '<td' + (h.errored > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
           '<td' + (typeof notChecked === 'number' && notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + notChecked + '</td>' +
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';
@@ -3028,6 +2722,14 @@
     }
 
     liveDebugContent.innerHTML = html;
+
+    const toggleEl = document.getElementById('liveDebugIssuesOnlyToggle');
+    if (toggleEl) {
+      toggleEl.addEventListener('change', function() {
+        liveDebugShowIssuesOnly = toggleEl.checked;
+        renderLiveDebugContent(liveDebugLastData);
+      });
+    }
   }
 
   async function loadLiveDebugStatus() {
@@ -3047,14 +2749,7 @@
     const done = progress.completedCount || 0;
     const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
     liveDebugProgressBar.style.width = pct + '%';
-    // "churches" here means this cycle's BATCH (see LIVE_CHECK_BATCH_SIZE
-    // in index.js) - batchCount > 1 means the church list is split across
-    // multiple cycles, so the batch label is included whenever it applies
-    // to avoid this number looking like it covers every church.
-    const batchLabel = (progress.batchCount != null && progress.batchCount > 1)
-      ? ' (batch ' + (progress.batchIndex + 1) + '/' + progress.batchCount + ')'
-      : '';
-    liveDebugProgressText.textContent = done + ' / ' + total + ' churches' + batchLabel + ' (' + pct + '%)';
+    liveDebugProgressText.textContent = done + ' / ' + total + ' churches (' + pct + '%)';
 
     // ETA from REAL elapsed-time-so-far, not a historical guess - self-
     // corrects live if this particular run is faster or slower than usual.
@@ -3068,7 +2763,7 @@
     }
 
     liveDebugStatusDot.className = 'live-debug-status-dot warn';
-    liveDebugStatusText.textContent = 'Running now' + batchLabel + (progress.currentChurchName ? ' - checking "' + escapeHtmlDebug(progress.currentChurchName) + '"' : '');
+    liveDebugStatusText.textContent = 'Running now' + (progress.currentChurchName ? ' - checking "' + escapeHtmlDebug(progress.currentChurchName) + '"' : '');
   }
 
   function hideProgressUI() {
@@ -3433,17 +3128,17 @@
     if (c.youtubeUrl) {
       let ytUrl = c.youtubeUrl.trim();
       if (ytUrl && !/^https?:\/\//i.test(ytUrl)) ytUrl = 'https://' + ytUrl;
-      let ytLabel = 'Visit their YouTube channel';
+      let ytLabel = 'Watch on YouTube';
       // Same videoId-first, channelUrl-fallback pattern already used by
       // the Live Now panel's own click handler (see the liveNowList click
       // listener above) - a single click should land on the actual live
       // broadcast, not just the channel's front page, whenever we know
       // specifically which video that is.
-      const isCurrentlyLive = liveChurchIds.has(c.id);
-      if (isCurrentlyLive) {
+      if (liveChurchIds.has(c.id)) {
         const liveEntry = findLiveEntryForChurch(c.id);
         if (liveEntry && liveEntry.videoId) {
           ytUrl = 'https://www.youtube.com/watch?v=' + encodeURIComponent(liveEntry.videoId);
+          ytLabel = 'Watch live on YouTube';
         } else if (liveEntry && liveEntry.channelUrl) {
           // Known live, but couldn't extract a specific videoId (e.g. a
           // stripped page from YouTube on our server-side check) - a
@@ -3451,19 +3146,10 @@
           // actual broadcast, just without skipping straight to the exact
           // video.
           ytUrl = liveEntry.channelUrl;
+          ytLabel = 'Watch live on YouTube';
         }
-        // In place of the plain "Watch live on YouTube" text, the link's
-        // content becomes the pulsing LIVE NOW badge itself - same row,
-        // same icon, same click target, just a more attention-getting
-        // label than static text for a church that's live right now.
-        ytLabel = '<span class="popup-live-badge" role="status" aria-label="Live now">' +
-          '<span class="popup-live-badge-live"><span class="popup-live-dot" aria-hidden="true"></span>Live</span>' +
-          '<span class="popup-live-badge-now">Now</span>' +
-          '</span>';
-        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
-      } else {
-        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
       }
+      popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
     }
     // Favorite star (everyone) and, for the admin, the Featured Streams
     // toggle - shown for any church that's indicated it streams live
@@ -3473,13 +3159,8 @@
     // requiring it to already be live to favorite it would defeat the point.
     if (c.livestreamsEnabled) {
       const isFav = isChurchFavorite(c.id);
-      // Gated the same as before (c.livestreamsEnabled, not gated on
-      // whether it's live right now) - only the label text itself changes
-      // based on favorite status, so a favorited church's popup confirms
-      // that state instead of repeating a generic prompt to favorite it.
-      const favLabel = isFav ? 'Favorited' : 'Favorite this church';
       popup += '<div class="popup-fav-row">' +
-        '<span class="popup-fav-label">' + favLabel + '</span>' +
+        '<span class="popup-fav-label">This church streams</span>' +
         '<button type="button" class="church-fav-star' + (isFav ? ' favorited' : '') + '" data-fav-church-id="' + escapeHtml(c.id) + '" title="' + (isFav ? 'Remove from your favorites' : 'Add to your favorites') + '">' +
           buildFavoriteStarSvg(isFav) +
         '</button>';
@@ -4179,14 +3860,6 @@
   const radioPlayPauseBtn = document.getElementById('radioPlayPauseBtn');
   const radioPlayerCloseBtn = document.getElementById('radioPlayerCloseBtn');
   const radioAudio = document.getElementById('radioAudio');
-  const radioTimerBtn = document.getElementById('radioTimerBtn');
-  const radioTimerRemainingEl = document.getElementById('radioTimerRemaining');
-  const radioTimerOverlay = document.getElementById('radioTimerOverlay');
-  const radioTimerHourRoller = document.getElementById('radioTimerHourRoller');
-  const radioTimerMinuteRoller = document.getElementById('radioTimerMinuteRoller');
-  const radioTimerOkBtn = document.getElementById('radioTimerOkBtn');
-  const radioTimerDismissBtn = document.getElementById('radioTimerDismissBtn');
-  const radioTimerCancelActiveBtn = document.getElementById('radioTimerCancelActiveBtn');
 
   const RADIO_POLL_MS = 60000; // matches RADIO_CACHE_SECONDS on the Worker side
   let radioStations = []; // last-loaded station list, indexed for ticker click lookups
@@ -4508,234 +4181,6 @@
     }
   }
 
-  // ---- Radio sleep timer ----
-  //
-  // Lives in the mini-player bar itself (the SAME bar shown on both desktop
-  // and mobile - see the comment on .radio-player-bar in <style> - it isn't
-  // actually desktop-exclusive), so it's reachable any time something is
-  // playing, on either device, without needing the separate full-screen
-  // station picker open.
-  //
-  // Only the last-set duration is remembered across visits (localStorage,
-  // same pattern as radio favorites above). An in-progress countdown itself
-  // is purely in-memory and does not survive a reload - consistent with
-  // playback itself not resuming automatically on reload either.
-  const RADIO_TIMER_LAST_DURATION_KEY = 'ccaFinderRadioTimerLastDuration';
-  const RADIO_TIMER_DEFAULT_HOURS = 0;
-  const RADIO_TIMER_DEFAULT_MINUTES = 30;
-  const RADIO_TIMER_MAX_HOURS = 12;
-  const RADIO_TIMER_MAX_MINUTES = 59;
-  const RADIO_TIMER_ROW_HEIGHT = 36; // must match .timer-roller-row height in <style>
-  // Volume eases out over this many ms right before the timer hits zero,
-  // rather than cutting the stream off mid-word. Only matters while actually
-  // playing - nothing to fade if the listener already paused it themselves.
-  const RADIO_TIMER_FADE_MS = 12000;
-
-  function getLastRadioTimerDuration() {
-    try {
-      const raw = localStorage.getItem(RADIO_TIMER_LAST_DURATION_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (parsed && typeof parsed.hours === 'number' && typeof parsed.minutes === 'number') {
-        return {
-          hours: Math.min(Math.max(0, Math.round(parsed.hours)), RADIO_TIMER_MAX_HOURS),
-          minutes: Math.min(Math.max(0, Math.round(parsed.minutes)), RADIO_TIMER_MAX_MINUTES)
-        };
-      }
-    } catch (err) {
-      // Fall through to the default below.
-    }
-    return { hours: RADIO_TIMER_DEFAULT_HOURS, minutes: RADIO_TIMER_DEFAULT_MINUTES };
-  }
-
-  function setLastRadioTimerDuration(hours, minutes) {
-    try {
-      localStorage.setItem(RADIO_TIMER_LAST_DURATION_KEY, JSON.stringify({ hours: hours, minutes: minutes }));
-    } catch (err) {
-      // Ignore - it just won't be remembered next visit.
-    }
-  }
-
-  let radioTimerEndAt = null; // epoch ms the countdown fires at, or null when not armed
-  let radioTimerIntervalId = null;
-
-  function formatRadioTimerRemaining(ms) {
-    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
-    const ss = String(s).padStart(2, '0');
-    return h > 0 ? (h + ':' + mm + ':' + ss) : (mm + ':' + ss);
-  }
-
-  function updateRadioTimerButtonDisplay() {
-    if (radioTimerEndAt == null) {
-      radioTimerBtn.classList.remove('is-armed');
-      radioTimerRemainingEl.textContent = '';
-      radioTimerBtn.title = 'Set sleep timer';
-      radioTimerBtn.setAttribute('aria-label', 'Set sleep timer');
-      return;
-    }
-    const remainingText = formatRadioTimerRemaining(radioTimerEndAt - Date.now());
-    radioTimerBtn.classList.add('is-armed');
-    radioTimerRemainingEl.textContent = remainingText;
-    const label = 'Sleep timer: ' + remainingText + ' remaining - tap to change or cancel';
-    radioTimerBtn.title = label;
-    radioTimerBtn.setAttribute('aria-label', label);
-  }
-
-  function stopRadioTimerInterval() {
-    if (radioTimerIntervalId != null) {
-      clearInterval(radioTimerIntervalId);
-      radioTimerIntervalId = null;
-    }
-  }
-
-  // Clears an armed timer without touching playback itself - used both when
-  // the listener explicitly cancels it and as part of a full playback stop
-  // (see stopRadioPlayback below), so the timer never keeps ticking after
-  // there's no bar left to show it on.
-  function cancelRadioTimer() {
-    radioTimerEndAt = null;
-    stopRadioTimerInterval();
-    radioAudio.volume = 1;
-    updateRadioTimerButtonDisplay();
-  }
-
-  function armRadioTimer(hours, minutes) {
-    const durationMs = (hours * 3600 + minutes * 60) * 1000;
-    if (durationMs <= 0) return;
-    radioAudio.volume = 1; // in case a previous timer's fade-out was mid-way through
-    radioTimerEndAt = Date.now() + durationMs;
-    stopRadioTimerInterval();
-    radioTimerIntervalId = setInterval(radioTimerTick, 1000);
-    updateRadioTimerButtonDisplay();
-  }
-
-  function radioTimerTick() {
-    if (radioTimerEndAt == null) { stopRadioTimerInterval(); return; }
-    const remainingMs = radioTimerEndAt - Date.now();
-
-    if (remainingMs <= 0) {
-      stopRadioPlayback();
-      return;
-    }
-    if (remainingMs <= RADIO_TIMER_FADE_MS && !radioAudio.paused) {
-      radioAudio.volume = Math.max(0, Math.min(1, remainingMs / RADIO_TIMER_FADE_MS));
-    }
-    updateRadioTimerButtonDisplay();
-  }
-
-  // Fully stops playback - identical to what the bar's own × close button
-  // has always done - and also clears any armed timer, so both paths (a
-  // manual close, or the countdown hitting zero) leave things in exactly
-  // the same end state.
-  function stopRadioPlayback() {
-    radioAudio.pause();
-    radioAudio.removeAttribute('src');
-    radioAudio.load();
-    hideMiniPlayer();
-    currentPlayingDisplayName = null;
-    cancelRadioTimer();
-  }
-
-  // ---- Sleep timer roller sheet ----
-  function buildRadioTimerRollerRows(rollerEl, max) {
-    let html = '<div class="timer-roller-pad" aria-hidden="true"></div>';
-    for (let i = 0; i <= max; i++) {
-      html += '<div class="timer-roller-row" data-value="' + i + '">' + i + '</div>';
-    }
-    html += '<div class="timer-roller-pad" aria-hidden="true"></div>';
-    rollerEl.innerHTML = html;
-  }
-
-  function setRadioTimerRollerValue(rollerEl, value, smooth) {
-    rollerEl.scrollTo({ top: value * RADIO_TIMER_ROW_HEIGHT, behavior: smooth ? 'smooth' : 'auto' });
-  }
-
-  function getRadioTimerRollerValue(rollerEl) {
-    return Math.round(rollerEl.scrollTop / RADIO_TIMER_ROW_HEIGHT);
-  }
-
-  function updateRadioTimerRollerHighlight(rollerEl) {
-    const selected = getRadioTimerRollerValue(rollerEl);
-    rollerEl.querySelectorAll('.timer-roller-row').forEach(function(row) {
-      row.classList.toggle('is-selected', Number(row.getAttribute('data-value')) === selected);
-    });
-  }
-
-  function updateRadioTimerOkState() {
-    const h = getRadioTimerRollerValue(radioTimerHourRoller);
-    const m = getRadioTimerRollerValue(radioTimerMinuteRoller);
-    radioTimerOkBtn.disabled = (h === 0 && m === 0);
-  }
-
-  function wireRadioTimerRoller(rollerEl) {
-    let settleTimeout = null;
-    rollerEl.addEventListener('scroll', function() {
-      updateRadioTimerRollerHighlight(rollerEl);
-      clearTimeout(settleTimeout);
-      settleTimeout = setTimeout(function() {
-        // Snap-correct in case the scroll ended slightly off a row boundary,
-        // then re-derive state from the now-settled position.
-        setRadioTimerRollerValue(rollerEl, getRadioTimerRollerValue(rollerEl), true);
-        updateRadioTimerRollerHighlight(rollerEl);
-        updateRadioTimerOkState();
-      }, 120);
-    });
-    rollerEl.addEventListener('click', function(e) {
-      const row = e.target.closest('.timer-roller-row');
-      if (!row) return;
-      setRadioTimerRollerValue(rollerEl, Number(row.getAttribute('data-value')), true);
-    });
-  }
-
-  buildRadioTimerRollerRows(radioTimerHourRoller, RADIO_TIMER_MAX_HOURS);
-  buildRadioTimerRollerRows(radioTimerMinuteRoller, RADIO_TIMER_MAX_MINUTES);
-  wireRadioTimerRoller(radioTimerHourRoller);
-  wireRadioTimerRoller(radioTimerMinuteRoller);
-
-  function openRadioTimerSheet() {
-    const last = getLastRadioTimerDuration();
-    radioTimerCancelActiveBtn.style.display = radioTimerEndAt != null ? 'inline-block' : 'none';
-    radioTimerOverlay.style.display = 'flex';
-    // Wait a frame so the sheet has real layout before we set scroll
-    // positions on its (until-now-hidden) rollers.
-    requestAnimationFrame(function() {
-      setRadioTimerRollerValue(radioTimerHourRoller, last.hours, false);
-      setRadioTimerRollerValue(radioTimerMinuteRoller, last.minutes, false);
-      updateRadioTimerRollerHighlight(radioTimerHourRoller);
-      updateRadioTimerRollerHighlight(radioTimerMinuteRoller);
-      updateRadioTimerOkState();
-    });
-  }
-
-  function closeRadioTimerSheet() {
-    radioTimerOverlay.style.display = 'none';
-  }
-
-  radioTimerBtn.addEventListener('click', openRadioTimerSheet);
-
-  radioTimerOverlay.addEventListener('click', function(e) {
-    if (e.target === radioTimerOverlay) closeRadioTimerSheet();
-  });
-
-  radioTimerDismissBtn.addEventListener('click', closeRadioTimerSheet);
-
-  radioTimerCancelActiveBtn.addEventListener('click', function() {
-    cancelRadioTimer();
-    closeRadioTimerSheet();
-  });
-
-  radioTimerOkBtn.addEventListener('click', function() {
-    const h = getRadioTimerRollerValue(radioTimerHourRoller);
-    const m = getRadioTimerRollerValue(radioTimerMinuteRoller);
-    if (h === 0 && m === 0) return;
-    setLastRadioTimerDuration(h, m);
-    armRadioTimer(h, m);
-    closeRadioTimerSheet();
-  });
-
   function playStation(station) {
     if (!station.streamUrl) {
       // Configured but its direct stream URL isn't confirmed yet - fail
@@ -4743,11 +4188,6 @@
       alert(station.displayName + ' isn\'t available to play yet.');
       return;
     }
-    // Reset volume in case a still-running sleep timer had faded the
-    // PREVIOUS station out - switching stations keeps the timer armed (it
-    // counts down independent of which station is currently playing), so
-    // the new one should always start at full volume regardless.
-    radioAudio.volume = 1;
     radioAudio.src = station.streamUrl;
     radioAudio.play().catch(function() {
       // Autoplay can be blocked by the browser - the play/pause button still
@@ -4879,20 +4319,14 @@
   function renderRadioBrowsePanel() {
     const listEl = document.getElementById('radioBrowseList');
     const favCountEl = document.getElementById('radioBrowseFavCount');
-    const titleEl = document.getElementById('radioBrowseTitle');
     if (!radioStations || !radioStations.length) {
       listEl.innerHTML = '<div class="radio-browse-empty">Loading stations...</div>';
       favCountEl.textContent = '';
-      if (titleEl) titleEl.textContent = '📻 All Radio Stations';
       return;
     }
 
-    if (titleEl) titleEl.textContent = '📻 All ' + radioStations.length + ' Radio Stations';
-
     const favorites = getFavoriteStationNames();
-    favCountEl.textContent = favorites.length
-      ? ('\u2605 ' + favorites.length + (isMobilePickerBreakpoint() ? ' in ticker' : ' in your ticker'))
-      : '';
+    favCountEl.textContent = favorites.length ? ('\u2605 ' + favorites.length + ' in your ticker') : '';
 
     const ordered = getOrderedRadioStations();
     const query = radioBrowseSearchQuery.trim().toLowerCase();
@@ -4944,11 +4378,6 @@
     // radioBrowseFrozenOrder's comment above for why this only happens
     // here, not on every re-render while the panel stays open.
     radioBrowseFrozenOrder = computeRadioBrowseOrder();
-    // The search box/query intentionally persist across a close+reopen
-    // (unlike a fresh page load) - this just keeps the clear button's
-    // visibility in sync with whatever query is still sitting there,
-    // rather than only reacting to new typing.
-    document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
     renderRadioBrowsePanel();
   }
 
@@ -4958,16 +4387,7 @@
   });
   document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
     radioBrowseSearchQuery = e.target.value;
-    document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
     renderRadioBrowsePanel();
-  });
-  document.getElementById('radioBrowseSearchClear').addEventListener('click', function() {
-    const input = document.getElementById('radioBrowseSearch');
-    radioBrowseSearchQuery = '';
-    input.value = '';
-    this.style.display = 'none';
-    renderRadioBrowsePanel();
-    input.focus();
   });
   document.getElementById('radioBrowseList').addEventListener('click', function(e) {
     if (e.target.closest('.radio-browse-homepage-link')) {
@@ -5046,7 +4466,11 @@
   });
 
   radioPlayerCloseBtn.addEventListener('click', function() {
-    stopRadioPlayback();
+    radioAudio.pause();
+    radioAudio.removeAttribute('src');
+    radioAudio.load();
+    hideMiniPlayer();
+    currentPlayingDisplayName = null;
   });
 
   // ---- Mobile station picker (full-screen, phones only) ----
