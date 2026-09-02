@@ -2908,7 +2908,7 @@
     liveNowUpcomingTarget = null;
     btn.classList.remove('btn-upcoming');
     btn.classList.add('btn-live');
-    btn.innerHTML = '🔴 <span id="liveNowCount">' + count + '</span> churches live now';
+    btn.innerHTML = '🔴 <span id="liveNowCount">' + count + '</span> ' + (count === 1 ? 'church' : 'churches') + ' live now';
     btn.style.display = 'inline-block';
     liveOnlyCb.disabled = false;
     liveOnlyRow.classList.remove('is-disabled');
