@@ -1991,6 +1991,15 @@
     text-transform: uppercase;
     opacity: 0.95;
   }
+  /* "Station Picker" (#mobileRadioPicker) is about the same length as
+     "Radio Stations" was, so renaming it alone wasn't going to be what
+     fixes the wrap - this scoped-down size is. Scoped to just this one
+     title (not the shared .mp-topbar-title above) so Conferences' own
+     shorter title, which already fits fine at 23px, is untouched. */
+  .mp-topbar-title-tight {
+    font-size: 19px;
+    letter-spacing: 0.03em;
+  }
   /* Balances the back button's width so the title reads as centered.
      Widened from the old 52px to fit "◀ BACK" at the bigger size above
      without throwing off the centering. */
@@ -2496,7 +2505,7 @@
 <div id="mobileRadioPicker" class="mp-picker">
   <div class="mp-topbar">
     <button type="button" id="mpBackBtn" class="mp-back-btn">&#9664; BACK</button>
-    <div class="mp-topbar-title">Radio Stations</div>
+    <div class="mp-topbar-title mp-topbar-title-tight">Station Picker</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
   <div id="mpList" class="mp-list"></div>
