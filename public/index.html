@@ -870,26 +870,62 @@
   #radioBrowsePanel {
     width: 420px;
   }
+  /* Hidden by default (desktop) - see the 720px rule below, where these
+     take over from the "x" close button for #radioBrowsePanel and
+     #liveNowPanel, the two remaining panes still built as .side-panel
+     drawers rather than dedicated .mp-picker markup like the Radio
+     Stations picker and Conferences pane. */
+  .mobile-panel-back-btn, .mobile-panel-spacer { display: none; }
   /* Below the same 720px breakpoint where the header swaps to the ☰ menu
-     (this panel is only reachable via "All Stations" there, never the
-     desktop button, once header-actions itself is hidden), All Stations
-     becomes a full-screen takeover instead of a right-side drawer - same
+     (All Stations and Live Now are only reachable there, never via a
+     desktop button, once header-actions itself is hidden), both panels
+     become full-screen takeovers instead of right-side drawers - same
      reasoning as the Radio station picker and Conferences pane, and the
      same body-class/hide-everything-else mechanism (see
-     body.mobile-browse-open below), for consistency across all three ☰
-     destinations. This also fully replaces an older narrower band-aid
-     that capped the drawer to 88vw on phones because the fixed 420px
-     above (an ID selector beats .side-panel's own 88vw cap) pushed it
-     wider than the screen and dragged its close button off-screen -
-     inset:0 below has no such width problem to begin with. */
+     body.mobile-browse-open / body.mobile-livenow-open below), for
+     consistency across all four ☰-reachable destinations. This also
+     fully replaces an older narrower band-aid on #radioBrowsePanel that
+     capped it to 88vw on phones because its fixed 420px width above (an
+     ID selector beats .side-panel's own 88vw cap) pushed it wider than
+     the screen and dragged its close button off-screen - inset:0 below
+     has no such width problem to begin with. */
   @media (max-width: 720px) {
-    #radioBrowsePanel {
+    #radioBrowsePanel,
+    #liveNowPanel {
       position: fixed;
       inset: 0;
       width: 100%;
       max-width: none;
       box-shadow: none;
       z-index: 1700;
+    }
+    /* Same treatment as .mp-topbar's title/back-button/spacer trio above -
+       centered, all-caps, bigger, easier-to-tap "◀ BACK" instead of a
+       small "x" in the corner, which was hard to hit accurately on a
+       phone. The "x" itself is simply hidden here rather than removed
+       from the markup, since it's still the right control on desktop. */
+    #radioBrowsePanel .side-panel-header .btn-close,
+    #liveNowPanel .side-panel-header .btn-close {
+      display: none;
+    }
+    #radioBrowsePanel .mobile-panel-back-btn,
+    #liveNowPanel .mobile-panel-back-btn,
+    #radioBrowsePanel .mobile-panel-spacer,
+    #liveNowPanel .mobile-panel-spacer {
+      display: flex;
+    }
+    #radioBrowsePanel .side-panel-header h2,
+    #liveNowPanel .side-panel-header h2 {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      text-align: center;
+      text-transform: uppercase;
+      font-size: 20px;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
   .radio-browse-toolbar {
@@ -1886,20 +1922,20 @@
     background: var(--paper);
     flex-direction: column;
   }
-  /* Full takeover on phones: while the picker (or the conferences pane or
-     All Stations panel below, which share this same mechanism under
-     their own body classes) is open, the header, both tickers, the score
-     filter bar, the map, and the desktop mini-player all step aside so
-     nothing competes with it for a driver's glance. Each pane's own top
-     bar/close control is the only way back. */
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) header,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #conferenceTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #radioTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #mobilePrimaryRow,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #filterBar,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #map,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #countBadge,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #radioPlayerBar {
+  /* Full takeover on phones: while the picker (or the conferences pane,
+     All Stations, or Live Now panels below, which share this same
+     mechanism under their own body classes) is open, the header, both
+     tickers, the score filter bar, the map, and the desktop mini-player
+     all step aside so nothing competes with it for a driver's glance.
+     Each pane's own top bar/close control is the only way back. */
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) header,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #conferenceTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #radioTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #mobilePrimaryRow,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #filterBar,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #map,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #countBadge,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #radioPlayerBar {
     display: none !important;
   }
   body.mobile-picker-open #mobileRadioPicker {
@@ -1919,27 +1955,35 @@
     color: var(--ink);
     border-bottom: 3px solid var(--evergreen);
   }
+  /* Bigger tap target than the old "‹ Map"/plain "x" style close controls
+     this replaced everywhere (see MOBILE-BUILD-NOTES.md) - both a larger
+     font and more padding, since a small "x" being hard to tap on a phone
+     was the whole reason for this change. */
   .mp-back-btn {
     flex-shrink: 0;
     background: none;
     border: none;
     color: var(--ink);
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 16px;
-    font-weight: 700;
-    padding: 8px 10px;
-    margin: -8px -10px;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    padding: 10px 12px;
+    margin: -10px -12px;
     cursor: pointer;
   }
   .mp-topbar-title {
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 20px;
+    font-size: 23px;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
     opacity: 0.95;
   }
-  /* Balances the back button's width so the title reads as centered. */
-  .mp-topbar-spacer { width: 52px; flex-shrink: 0; }
+  /* Balances the back button's width so the title reads as centered.
+     Widened from the old 52px to fit "◀ BACK" at the bigger size above
+     without throwing off the centering. */
+  .mp-topbar-spacer { width: 74px; flex-shrink: 0; }
   .mp-list {
     flex: 1;
     overflow-y: auto;
@@ -2437,10 +2481,10 @@
 
 <!-- Mobile-only full-screen station picker. Replaces the map area on
      phones (see body.mobile-picker-open in <style>) - opened by tapping
-     the "RADIO" ticker label, closed via the "‹ Map" button below. -->
+     the "RADIO" ticker label, closed via the "◀ BACK" button below. -->
 <div id="mobileRadioPicker" class="mp-picker">
   <div class="mp-topbar">
-    <button type="button" id="mpBackBtn" class="mp-back-btn">&lsaquo; Map</button>
+    <button type="button" id="mpBackBtn" class="mp-back-btn">&#9664; BACK</button>
     <div class="mp-topbar-title">Radio Stations</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
@@ -2457,7 +2501,7 @@
      externally - only the generic overview page is now skipped. -->
 <div id="mobileConferencesPane" class="mp-picker">
   <div class="mp-topbar">
-    <button type="button" id="mcBackBtn" class="mp-back-btn">&lsaquo; Map</button>
+    <button type="button" id="mcBackBtn" class="mp-back-btn">&#9664; BACK</button>
     <div class="mp-topbar-title">Conferences</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
@@ -2465,9 +2509,16 @@
 </div>
 
 <div id="liveNowPanel" class="side-panel" style="display: none;">
+  <!-- The back button + spacer only show up below the 720px full-screen
+       breakpoint (see .mobile-panel-back-btn/.mobile-panel-spacer and the
+       #liveNowPanel media rule in <style>) - the "x" stays the desktop
+       close control, unchanged, since it's a perfectly fine mouse target
+       there and this is a mobile-only tap-target fix. -->
   <div class="side-panel-header">
+    <button type="button" id="liveNowMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
     <h2>🔴 Live Now</h2>
     <button id="closeLiveNowBtn" class="btn-close">×</button>
+    <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
   <div id="liveNowFilters" class="live-now-filters">
     <label id="liveOnlyFilterRow" class="live-only-filter-row">
@@ -2488,9 +2539,13 @@
 </div>
 
 <div id="radioBrowsePanel" class="side-panel" style="display: none;">
+  <!-- See #liveNowPanel's identical comment above re: the mobile-only
+       back button + spacer pair. -->
   <div class="side-panel-header">
-    <h2 id="radioBrowseTitle">📻 All Radio Stations</h2>
+    <button type="button" id="radioBrowseMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <h2 id="radioBrowseTitle">All Radio Stations</h2>
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
+    <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
   <div class="radio-browse-toolbar">
     <div class="radio-browse-search-wrap">
@@ -2989,13 +3044,25 @@
     refreshLiveNowUpcomingDisplay();
   }, 30000);
 
-  document.getElementById('btnLiveNow').addEventListener('click', function() {
+  function openLiveNowPanel() {
     document.getElementById('liveNowPanel').style.display = 'flex';
+    // Full-screen takeover on mobile (see the 720px rule on #liveNowPanel
+    // in <style>, same mechanism as #radioBrowsePanel) - above that width
+    // this stays the normal side drawer, unchanged.
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-livenow-open');
     renderLiveNowList();
-  });
-  document.getElementById('closeLiveNowBtn').addEventListener('click', function() {
+  }
+  function closeLiveNowPanel() {
     document.getElementById('liveNowPanel').style.display = 'none';
-  });
+    document.body.classList.remove('mobile-livenow-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
+  }
+
+  document.getElementById('btnLiveNow').addEventListener('click', openLiveNowPanel);
+  document.getElementById('closeLiveNowBtn').addEventListener('click', closeLiveNowPanel);
+  // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
+  // close behavior as the "x" above, just a bigger/clearer tap target.
+  document.getElementById('liveNowMobileBackBtn').addEventListener('click', closeLiveNowPanel);
   document.getElementById('liveOnlyFilterCb').addEventListener('change', function(e) {
     liveOnlyFilterActive = e.target.checked;
     renderMarkers(); // handles both the filtering and the best-fit zoom
@@ -3523,7 +3590,7 @@
     const channelUrl = card.getAttribute('data-channel-url');
     const c = findChurchById(churchId);
     if (c) {
-      document.getElementById('liveNowPanel').style.display = 'none';
+      closeLiveNowPanel();
       const lat = parseFloat(c.lat);
       const lng = parseFloat(c.lng);
       if (!isNaN(lat) && !isNaN(lng)) map.setView([lat, lng], 14);
@@ -4673,7 +4740,7 @@
   // .mobile-browse-open) in <style>).
   function isMapHiddenByMobileTakeover() {
     const cl = document.body.classList;
-    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open');
+    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open') || cl.contains('mobile-livenow-open');
   }
 
   function showMiniPlayer() {
@@ -5406,11 +5473,13 @@
     if (!radioStations || !radioStations.length) {
       listEl.innerHTML = '<div class="radio-browse-empty">Loading stations...</div>';
       favCountEl.textContent = '';
-      if (titleEl) titleEl.textContent = '📻 All Radio Stations';
+      if (titleEl) titleEl.textContent = 'All Radio Stations';
       return;
     }
 
-    if (titleEl) titleEl.textContent = '📻 All ' + radioStations.length + ' Radio Stations';
+    // No icon prefix here (unlike the other panes' headers) - it wasn't
+    // visible against this header's brass background.
+    if (titleEl) titleEl.textContent = 'All ' + radioStations.length + ' Radio Stations';
 
     const favorites = getFavoriteStationNames();
     favCountEl.textContent = favorites.length
@@ -5480,12 +5549,18 @@
     renderRadioBrowsePanel();
   }
 
-  document.getElementById('btnRadioBrowse').addEventListener('click', openRadioBrowsePanel);
-  document.getElementById('closeRadioBrowseBtn').addEventListener('click', function() {
+  function closeRadioBrowsePanel() {
     document.getElementById('radioBrowsePanel').style.display = 'none';
     document.body.classList.remove('mobile-browse-open');
     map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
-  });
+  }
+
+  document.getElementById('btnRadioBrowse').addEventListener('click', openRadioBrowsePanel);
+  document.getElementById('closeRadioBrowseBtn').addEventListener('click', closeRadioBrowsePanel);
+  // Mobile-only back button (see .mobile-panel-back-btn in <style>) -
+  // same close behavior as the "x" above, just a bigger/clearer tap
+  // target and consistent with the other three full-screen mobile panes.
+  document.getElementById('radioBrowseMobileBackBtn').addEventListener('click', closeRadioBrowsePanel);
   document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
     radioBrowseSearchQuery = e.target.value;
     document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
@@ -5787,18 +5862,24 @@
   });
   // Same reasoning as the mobile radio picker's own breakpoint listener
   // above - don't strand an open menu (or its now-irrelevant badge state),
-  // or the conferences/All Stations panes it opens, if the viewport grows
+  // or the conferences/All Stations/Live Now panes, if the viewport grows
   // past mobile while any of them is open.
   window.matchMedia(MOBILE_HEADER_BREAKPOINT).addEventListener('change', function(e) {
     if (!e.matches) {
       closeHamburgerMenu();
       if (document.body.classList.contains('mobile-conf-open')) closeMobileConferencesPane();
+      // All Stations and Live Now both have a visible desktop button of
+      // their own (unlike Conferences, hamburger-only) - don't hide
+      // either panel, just drop back to the normal side-drawer
+      // presentation now that there's a visible header button again, the
+      // same way each already behaves for anyone who opened it from that
+      // button directly.
       if (document.body.classList.contains('mobile-browse-open')) {
-        // Don't hide the panel itself - just drop back to the normal
-        // desktop side-drawer presentation now that there's a visible
-        // header button again, the same way this same panel already
-        // behaves for anyone who opened it from that button directly.
         document.body.classList.remove('mobile-browse-open');
+        map.invalidateSize();
+      }
+      if (document.body.classList.contains('mobile-livenow-open')) {
+        document.body.classList.remove('mobile-livenow-open');
         map.invalidateSize();
       }
     }

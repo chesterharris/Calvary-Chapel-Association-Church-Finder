@@ -50,6 +50,19 @@ Two fixes to the countdown text itself:
 - **"5 days" read as the conference's own duration, not a countdown to it.** Changed the wording to "in 5 days" everywhere this text appears (ticker, mobile conferences pane, hamburger menu row) - refactored the three separate copies of this wording logic into one shared function (`computeConferenceCountdownText`) so this can't drift out of sync between them again.
 - **Made the countdown portion stand out visually in the ticker**, per your ask for options - went with bold + the same gold accent (`#f2c76e`) already used for this ticker's own "more info" links (your pick of the three I gave you: bold+color / icon prefix / pill badge). Only the countdown/Day-X-of-Y text is bolded, not the location prefix or the title. The mobile conferences pane reuses the same markup, but overrides the color to brass instead of gold there, since that pane's rows sit on the light paper background where the ticker's gold would be hard to read - same emphasis, adapted to a light vs. dark background.
 
+## Follow-up round 5 (Sept 2) - consistent mobile pane headers
+
+Unified the header treatment across all four full-screen mobile panes (Radio Stations picker, Conferences, All Stations, and Live Now):
+
+- **"◀ BACK" replaces "‹ Map" and the "x" close button everywhere**, left-aligned, bigger font and more padding than the old controls - the small "x" being hard to tap was the specific complaint, and this is a meaningfully larger tap target.
+- **Titles are bold, bigger, and ALL CAPS**, centered - done with CSS (`text-transform: uppercase`), not by rewriting the text in JS, so the All Stations panel's live station count ("All 35 Radio Stations") still updates correctly and just displays in caps.
+- **Removed the 📻 icon from the All Stations panel's title** (it wasn't visible against the brass header background). Left the 📻 on the desktop "All Stations" header button and the ☰ menu's own icon alone, since neither of those sits on that brass panel background - the visibility problem was specific to that one spot.
+- **Live Now is now a full-screen takeover on mobile too** - it had been missed when the other three got this treatment earlier today. Same mechanism as All Stations: a normal side drawer above 720px (unchanged, still has its own desktop button), full-screen below it.
+
+Radio Stations picker and Conferences already shared one `.mp-topbar` component, so bumping its font size/adding uppercase there updated both at once. All Stations and Live Now are built as `.side-panel` drawers rather than that component, so each got its own back button + spacer added to its existing header (hidden above 720px, replacing the "x" below it) rather than being rebuilt from scratch - same visual result, less churn to the working desktop layout.
+
+One thing worth a look on a real phone: I widened the back button's spacer (52px → 74px) to keep titles visually centered against the wider "◀ BACK" label at its new larger size - this is an estimate, not something I can verify without a browser, so nudge that width if the centering looks slightly off in practice.
+
 ## Judgment calls worth a second look
 - Hourly countdown refresh interval (see above).
 - "Admin ✓ (sign out)" label text.
