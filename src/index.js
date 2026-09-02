@@ -170,7 +170,7 @@ function handleLogout() {
 // The cache key includes this version, so a fix is never masked by an old
 // cached response sitting around from before the fix - it's a brand new
 // cache key, not a hit against the stale one.
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 const ENTITY_MAP = {
   '&amp;': '&', '&nbsp;': ' ', '&quot;': '"', '&#039;': "'", '&apos;': "'",

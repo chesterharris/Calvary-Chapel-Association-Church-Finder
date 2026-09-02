@@ -37,6 +37,12 @@ You asked whether "All Stations" in the ☰ menu should also become a full-scree
 
 Made it a full-screen takeover below the same 720px breakpoint where the header swaps to the ☰ menu in the first place - above that width it's still the visible desktop button opening the normal side drawer, unchanged. Reused the existing panel and its logic (search, starter-set onboarding, favoriting) as-is; only its mobile presentation changed. If you resize past 720px while it's open on mobile, it now drops back to the side-drawer look instead of closing, matching how it already behaves when opened from the desktop button.
 
+## Follow-up round 3 (Sept 2) - important deploy note
+
+After deploying, the conference ticker was still showing raw text instead of a countdown. The parser itself was fine (re-verified "September 7th – 9th" -> correctly parses to 2026-09-07/2026-09-09) - the real cause was edge caching: `/conferences` is cached in Cloudflare's Cache API for 6 hours, and the code already has a `CACHE_VERSION` constant specifically meant to be bumped whenever `parseConferences()` changes, so a fix is never masked by an old cached response. I changed the parser earlier today but missed bumping it, so the deployed Worker kept serving the pre-fix cached response. Bumped `CACHE_VERSION` from 2 to 3 in this build - **this one needs redeploying** for the countdown to actually show up; a hard browser refresh alone won't touch the edge cache. No conference data is ever cached client-side (no localStorage involved anywhere in this feature) - it's purely this server-side cache.
+
+If a future date-parsing tweak ever needs to go out immediately rather than waiting up to 6 hours, bump `CACHE_VERSION` again when you make that change.
+
 ## Judgment calls worth a second look
 - Hourly countdown refresh interval (see above).
 - "Admin ✓ (sign out)" label text.
