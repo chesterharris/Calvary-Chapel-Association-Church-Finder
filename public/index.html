@@ -1855,21 +1855,26 @@
     background: var(--paper);
     flex-direction: column;
   }
-  /* Full takeover on phones: while the picker is open, the header, both
-     tickers, the score filter bar, the map, and the desktop mini-player
-     all step aside so nothing competes with it for a driver's glance. The
-     picker's own top bar (with its "‹ Map" button) is the only way back. */
-  body.mobile-picker-open header,
-  body.mobile-picker-open #conferenceTicker,
-  body.mobile-picker-open #radioTicker,
-  body.mobile-picker-open #mobilePrimaryRow,
-  body.mobile-picker-open #filterBar,
-  body.mobile-picker-open #map,
-  body.mobile-picker-open #countBadge,
-  body.mobile-picker-open #radioPlayerBar {
+  /* Full takeover on phones: while the picker (or the conferences pane
+     below, which shares this same mechanism under its own body class) is
+     open, the header, both tickers, the score filter bar, the map, and
+     the desktop mini-player all step aside so nothing competes with it
+     for a driver's glance. Each pane's own top bar (with its "‹ Map"
+     button) is the only way back. */
+  body:is(.mobile-picker-open, .mobile-conf-open) header,
+  body:is(.mobile-picker-open, .mobile-conf-open) #conferenceTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open) #radioTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open) #mobilePrimaryRow,
+  body:is(.mobile-picker-open, .mobile-conf-open) #filterBar,
+  body:is(.mobile-picker-open, .mobile-conf-open) #map,
+  body:is(.mobile-picker-open, .mobile-conf-open) #countBadge,
+  body:is(.mobile-picker-open, .mobile-conf-open) #radioPlayerBar {
     display: none !important;
   }
-  body.mobile-picker-open .mp-picker {
+  body.mobile-picker-open #mobileRadioPicker {
+    display: flex;
+  }
+  body.mobile-conf-open #mobileConferencesPane {
     display: flex;
   }
   .mp-topbar {
@@ -2009,6 +2014,43 @@
   .mp-star.favorited { color: var(--brass); }
   .mp-star svg { width: 24px; height: 24px; }
 
+  /* ---- Mobile conferences pane (phones only, see #mobileConferencesPane) ----
+     Reuses .mp-list for scrolling/padding, but its own row style below
+     instead of .mp-row - a conference entry has no play/favorite action,
+     just text that can wrap (titles run longer than a station name) and
+     an optional outbound "more info" link at the end. */
+  .mc-row {
+    padding: 14px;
+    margin-bottom: 12px;
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+  }
+  .mc-name {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--evergreen);
+    line-height: 1.3;
+  }
+  .mc-detail {
+    margin-top: 4px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14.5px;
+    color: var(--ink);
+    opacity: 0.85;
+    line-height: 1.3;
+  }
+  .mc-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--brass);
+    text-decoration: underline;
+  }
+
   /* ---- Church favorites (personal) + Featured Streams (admin-curated) ---- */
   .church-fav-star, .church-featured-toggle {
     background: none;
@@ -2114,11 +2156,11 @@
       <span id="hamburgerBadge" class="hamburger-badge" style="display:none;"></span>
     </button>
     <div id="hamburgerMenu" class="hamburger-menu" style="display:none;">
-      <a id="menuConferencesItem" class="hamburger-menu-item" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">
+      <button type="button" id="menuConferencesItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">📅</span>
         <span class="hamburger-menu-label">Conferences</span>
         <span id="menuConferencesCountdown" class="hamburger-menu-countdown"></span>
-      </a>
+      </button>
       <button type="button" id="menuAllStationsItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">📻</span>
         <span class="hamburger-menu-label">All Stations</span>
@@ -2372,6 +2414,23 @@
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
   <div id="mpList" class="mp-list"></div>
+</div>
+
+<!-- Mobile-only full-screen conferences pane. Same takeover pattern as
+     #mobileRadioPicker above (see body.mobile-conf-open in <style>) -
+     opened from the ☰ menu's Conferences row instead of following that
+     row out to calvarycca.org, since the Worker already scrapes and
+     parses that same page's content for the ticker. Each entry's own
+     "more info"/registration link (a different destination per
+     conference, e.g. westcoastworshipconference.com) still opens
+     externally - only the generic overview page is now skipped. -->
+<div id="mobileConferencesPane" class="mp-picker">
+  <div class="mp-topbar">
+    <button type="button" id="mcBackBtn" class="mp-back-btn">&lsaquo; Map</button>
+    <div class="mp-topbar-title">Conferences</div>
+    <div class="mp-topbar-spacer" aria-hidden="true"></div>
+  </div>
+  <div id="mcList" class="mp-list"></div>
 </div>
 
 <div id="liveNowPanel" class="side-panel" style="display: none;">
@@ -4457,6 +4516,10 @@
   function renderTicker(items) {
     currentConferences = items || [];
     updateHamburgerConferencesUi();
+    // Keeps the full-screen mobile pane in step with the same data/refresh
+    // cycle as the ticker and the hamburger badge - cheap no-op if the
+    // pane isn't currently open (see renderMobileConferencesPane).
+    if (document.body.classList.contains('mobile-conf-open')) renderMobileConferencesPane();
     tickerBar.classList.remove('ticker-loading');
     if (!items || !items.length) {
       tickerTrack.innerHTML = '<span class="ticker-item">No conference listings found &mdash; visit calvarycca.org/conferences</span>';
@@ -4544,24 +4607,32 @@
   // any time that size actually changes underneath it, or the map will
   // keep rendering/interacting as if it were still the old (taller) size
   // until the next manual pan/zoom.
+  // True while the map is hidden behind either full-screen mobile
+  // takeover (see body:is(.mobile-picker-open, .mobile-conf-open) in
+  // <style>).
+  function isMapHiddenByMobileTakeover() {
+    const cl = document.body.classList;
+    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open');
+  }
+
   function showMiniPlayer() {
     radioPlayerBar.style.display = 'flex';
     document.getElementById('app').classList.add('player-open');
-    // The map is itself hidden (display:none) while the full-screen mobile
-    // station picker is open (see body.mobile-picker-open in <style>).
-    // Calling invalidateSize() against a 0x0 container makes Leaflet cache
-    // that bogus size, and it "corrects" for the size jump with a pan once
-    // the map reappears - panning the view off into empty tile space and
-    // leaving it blank until a full reload re-inits the map from scratch.
-    // Skip it here; closeMobileRadioPicker() does the one invalidateSize()
+    // The map is itself hidden (display:none) while either full-screen
+    // mobile takeover is open. Calling invalidateSize() against a 0x0
+    // container makes Leaflet cache that bogus size, and it "corrects"
+    // for the size jump with a pan once the map reappears - panning the
+    // view off into empty tile space and leaving it blank until a full
+    // reload re-inits the map from scratch. Skip it here; whichever
+    // close*() function brings the map back does the one invalidateSize()
     // call that actually matters, once the map is visible again.
-    if (!document.body.classList.contains('mobile-picker-open')) map.invalidateSize();
+    if (!isMapHiddenByMobileTakeover()) map.invalidateSize();
   }
 
   function hideMiniPlayer() {
     radioPlayerBar.style.display = 'none';
     document.getElementById('app').classList.remove('player-open');
-    if (!document.body.classList.contains('mobile-picker-open')) map.invalidateSize();
+    if (!isMapHiddenByMobileTakeover()) map.invalidateSize();
   }
 
   const radioPlayerStation = document.getElementById('radioPlayerStation');
@@ -5553,6 +5624,46 @@
     map.invalidateSize();
   }
 
+  // ---- Mobile conferences pane ----
+  //
+  // Same data (currentConferences) and same countdown formatting
+  // (formatConferenceDisplay) as the header ticker - this pane exists so
+  // the ☰ menu's Conferences row doesn't have to send anyone to
+  // calvarycca.org just to read the same list the Worker already scraped.
+  function renderMobileConferencesPane() {
+    const listEl = document.getElementById('mcList');
+    if (!currentConferences || !currentConferences.length) {
+      listEl.innerHTML = '<div class="mp-empty">No conference listings found &mdash; visit calvarycca.org/conferences</div>';
+      return;
+    }
+    const now = new Date();
+    listEl.innerHTML = currentConferences.map(function(c) {
+      const displayDetail = formatConferenceDisplay(c, now);
+      let html = '<div class="mc-row">' +
+        '<div class="mc-name">' + escapeHtml(c.title) + '</div>';
+      if (displayDetail) html += '<div class="mc-detail">' + escapeHtml(displayDetail) + '</div>';
+      if (c.link) {
+        // Same per-entry destination as the ticker's own "more info" link
+        // (registration pages, etc.) - a deliberate, entry-specific exit
+        // the visitor is choosing, unlike the old generic overview link.
+        const linkLabel = c.linkText && c.linkText.trim() ? c.linkText.trim() : 'More info';
+        html += '<a class="mc-link" href="' + escapeHtml(c.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(linkLabel) + ' &rarr;</a>';
+      }
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  function openMobileConferencesPane() {
+    renderMobileConferencesPane();
+    document.body.classList.add('mobile-conf-open');
+  }
+
+  function closeMobileConferencesPane() {
+    document.body.classList.remove('mobile-conf-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
+  }
+
   document.getElementById('radioTickerLabel').addEventListener('click', function() {
     if (isMobilePickerBreakpoint()) {
       openMobileRadioPicker();
@@ -5562,6 +5673,7 @@
   });
 
   document.getElementById('mpBackBtn').addEventListener('click', closeMobileRadioPicker);
+  document.getElementById('mcBackBtn').addEventListener('click', closeMobileConferencesPane);
 
   // If the viewport is resized (or rotated) past the phone breakpoint
   // while the picker is open, don't strand the visitor in a full-screen
@@ -5606,10 +5718,23 @@
     closeHamburgerMenu();
   });
   // Same reasoning as the mobile radio picker's own breakpoint listener
-  // above - don't strand an open menu (or its now-irrelevant badge state)
-  // if the viewport grows past mobile while it's open.
+  // above - don't strand an open menu (or its now-irrelevant badge state),
+  // or the conferences pane it opens, if the viewport grows past mobile
+  // while either is open.
   window.matchMedia(MOBILE_HEADER_BREAKPOINT).addEventListener('change', function(e) {
-    if (!e.matches) closeHamburgerMenu();
+    if (!e.matches) {
+      closeHamburgerMenu();
+      if (document.body.classList.contains('mobile-conf-open')) closeMobileConferencesPane();
+    }
+  });
+
+  // Unlike the other three rows, Conferences has no desktop equivalent to
+  // delegate to - it opens the mobile-only pane above directly instead of
+  // following calvarycca.org/conferences/ off-site, since the Worker
+  // already scraped and parsed that same content for the ticker.
+  document.getElementById('menuConferencesItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    openMobileConferencesPane();
   });
 
   // Delegates to the existing desktop controls' own click handlers rather

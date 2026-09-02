@@ -317,8 +317,16 @@ function conferenceMonthIndex(name) {
 // Captures: month1, day1, (month2 optional - only present for a range that
 // crosses a month boundary), day2 (optional - absent for a single-day
 // entry). En dash, em dash, and a plain hyphen are all accepted as the
-// range separator since real entries use different ones.
-const CONFERENCE_DATE_RE = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:\s*[\u2013\u2014-]\s*(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2}))?/;
+// range separator since real entries use different ones. Each day number
+// also accepts an optional ordinal suffix (1st/2nd/3rd/4th...) sitting
+// directly against the digits with no space - the live site's actual
+// current text is exactly this shape ("September 7th \u2013 9th"), and without
+// this the separator match below would never fire (it looks for the dash
+// immediately after the day digits), silently truncating every real
+// conference to a single-day event. Confirmed against every entry
+// currently on calvarycca.org/conferences/ - see CONFERENCE_DATE_OVERRIDES
+// for the one entry ("...& 19th") that isn't a dash-separated range at all.
+const CONFERENCE_DATE_RE = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*[\u2013\u2014-]\s*(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2})(?:st|nd|rd|th)?)?/i;
 
 function parseConferenceDetailDates(detail, year) {
   if (!year || !detail) return null;
@@ -340,11 +348,14 @@ function parseConferenceDetailDates(detail, year) {
   if (endDate.getTime() < startDate.getTime()) return null;
 
   // Whatever text sits before the matched date range, with a trailing
-  // separator (" - ", ": ", etc.) trimmed off, is the location/venue part
-  // (e.g. "CC Chino Valley, CA") - kept separately so the ticker can still
-  // show the location alongside a computed countdown/Day-X-of-Y instead of
-  // losing it once the plain date text is replaced.
-  const locationPrefix = detail.slice(0, m.index).replace(/[\s:\u2014\u2013-]+$/, '').trim() || null;
+  // separator (" - ", ": ", a comma before "September...", etc.) trimmed
+  // off, is the location/venue part (e.g. "CC Chino Valley, CA" or "at
+  // Mount Hermon") - kept separately so the ticker can still show the
+  // location alongside a computed countdown/Day-X-of-Y instead of losing
+  // it once the plain date text is replaced. The trailing comma case
+  // ("at Mount Hermon, September 21st-23rd") only started mattering once
+  // the ordinal-suffix fix above let this entry parse at all.
+  const locationPrefix = detail.slice(0, m.index).replace(/[\s:,—–-]+$/, '').trim() || null;
 
   return {
     startDate: startDate.toISOString().slice(0, 10),
@@ -364,6 +375,18 @@ function parseConferenceDetailDates(detail, year) {
 // requires.
 const CONFERENCE_DATE_OVERRIDES = [
   // { titleMatch: 'West Coast Conference', startDate: '2026-10-26', endDate: '2026-10-28' },
+
+  // "Northwest Washington Puget Sound Conference: September 17th & 19th" -
+  // two specific days with a gap on the 18th, not a continuous 3-day
+  // event, per explicit confirmation - the general parser would otherwise
+  // read the "&" as if it weren't there and guess a single-day Sep 17
+  // event (it doesn't recognize "&" as a range separator at all). Rather
+  // than teach the parser a shape that would misrepresent this as a
+  // Day-X-of-3 countdown spanning a day nothing happens, suppress: true
+  // forces this entry to always show its plain detail text instead of any
+  // computed date - matches this file's "safer to discard than guess"
+  // rule everywhere else. Update the titleMatch text if that name changes.
+  { titleMatch: 'Puget Sound', suppress: true },
 ];
 
 function applyConferenceDateOverride(title, parsed) {
@@ -371,6 +394,7 @@ function applyConferenceDateOverride(title, parsed) {
     return title.toLowerCase().indexOf(o.titleMatch.toLowerCase()) !== -1;
   });
   if (!hit) return parsed;
+  if (hit.suppress) return null;
   return {
     startDate: hit.startDate,
     endDate: hit.endDate,
