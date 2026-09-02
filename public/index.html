@@ -870,14 +870,26 @@
   #radioBrowsePanel {
     width: 420px;
   }
-  /* On phones the fixed 420px above ignores .side-panel's 88vw cap (an ID
-     selector always wins over a class one), which is exactly what pushes
-     this pane wider than the screen and drags its close button off-
-     screen. Capping it back down to 88vw ONLY below the same 600px
-     breakpoint used elsewhere for mobile keeps desktop/tablet untouched. */
-  @media (max-width: 600px) {
+  /* Below the same 720px breakpoint where the header swaps to the ☰ menu
+     (this panel is only reachable via "All Stations" there, never the
+     desktop button, once header-actions itself is hidden), All Stations
+     becomes a full-screen takeover instead of a right-side drawer - same
+     reasoning as the Radio station picker and Conferences pane, and the
+     same body-class/hide-everything-else mechanism (see
+     body.mobile-browse-open below), for consistency across all three ☰
+     destinations. This also fully replaces an older narrower band-aid
+     that capped the drawer to 88vw on phones because the fixed 420px
+     above (an ID selector beats .side-panel's own 88vw cap) pushed it
+     wider than the screen and dragged its close button off-screen -
+     inset:0 below has no such width problem to begin with. */
+  @media (max-width: 720px) {
     #radioBrowsePanel {
-      width: 88vw;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      max-width: none;
+      box-shadow: none;
+      z-index: 1700;
     }
   }
   .radio-browse-toolbar {
@@ -1855,20 +1867,20 @@
     background: var(--paper);
     flex-direction: column;
   }
-  /* Full takeover on phones: while the picker (or the conferences pane
-     below, which shares this same mechanism under its own body class) is
-     open, the header, both tickers, the score filter bar, the map, and
-     the desktop mini-player all step aside so nothing competes with it
-     for a driver's glance. Each pane's own top bar (with its "‹ Map"
-     button) is the only way back. */
-  body:is(.mobile-picker-open, .mobile-conf-open) header,
-  body:is(.mobile-picker-open, .mobile-conf-open) #conferenceTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open) #radioTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open) #mobilePrimaryRow,
-  body:is(.mobile-picker-open, .mobile-conf-open) #filterBar,
-  body:is(.mobile-picker-open, .mobile-conf-open) #map,
-  body:is(.mobile-picker-open, .mobile-conf-open) #countBadge,
-  body:is(.mobile-picker-open, .mobile-conf-open) #radioPlayerBar {
+  /* Full takeover on phones: while the picker (or the conferences pane or
+     All Stations panel below, which share this same mechanism under
+     their own body classes) is open, the header, both tickers, the score
+     filter bar, the map, and the desktop mini-player all step aside so
+     nothing competes with it for a driver's glance. Each pane's own top
+     bar/close control is the only way back. */
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) header,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #conferenceTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #radioTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #mobilePrimaryRow,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #filterBar,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #map,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #countBadge,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open) #radioPlayerBar {
     display: none !important;
   }
   body.mobile-picker-open #mobileRadioPicker {
@@ -4607,12 +4619,12 @@
   // any time that size actually changes underneath it, or the map will
   // keep rendering/interacting as if it were still the old (taller) size
   // until the next manual pan/zoom.
-  // True while the map is hidden behind either full-screen mobile
-  // takeover (see body:is(.mobile-picker-open, .mobile-conf-open) in
-  // <style>).
+  // True while the map is hidden behind any of the three full-screen
+  // mobile takeovers (see body:is(.mobile-picker-open, .mobile-conf-open,
+  // .mobile-browse-open) in <style>).
   function isMapHiddenByMobileTakeover() {
     const cl = document.body.classList;
-    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open');
+    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open');
   }
 
   function showMiniPlayer() {
@@ -5395,6 +5407,11 @@
 
   function openRadioBrowsePanel() {
     document.getElementById('radioBrowsePanel').style.display = 'flex';
+    // Full-screen takeover on mobile (see the 720px rule on #radioBrowsePanel
+    // in <style>) - same breakpoint the header itself uses to swap this
+    // button into the ☰ menu, since above it this is still the visible
+    // desktop button opening a normal side drawer, unchanged.
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-browse-open');
     document.getElementById('radioBrowseStarterConfirm').style.display = 'none';
     document.getElementById('radioBrowseStarterMsg').style.display = 'none';
     // Keep the visible count honest rather than hardcoding a number in the
@@ -5417,6 +5434,8 @@
   document.getElementById('btnRadioBrowse').addEventListener('click', openRadioBrowsePanel);
   document.getElementById('closeRadioBrowseBtn').addEventListener('click', function() {
     document.getElementById('radioBrowsePanel').style.display = 'none';
+    document.body.classList.remove('mobile-browse-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
   });
   document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
     radioBrowseSearchQuery = e.target.value;
@@ -5719,12 +5738,20 @@
   });
   // Same reasoning as the mobile radio picker's own breakpoint listener
   // above - don't strand an open menu (or its now-irrelevant badge state),
-  // or the conferences pane it opens, if the viewport grows past mobile
-  // while either is open.
+  // or the conferences/All Stations panes it opens, if the viewport grows
+  // past mobile while any of them is open.
   window.matchMedia(MOBILE_HEADER_BREAKPOINT).addEventListener('change', function(e) {
     if (!e.matches) {
       closeHamburgerMenu();
       if (document.body.classList.contains('mobile-conf-open')) closeMobileConferencesPane();
+      if (document.body.classList.contains('mobile-browse-open')) {
+        // Don't hide the panel itself - just drop back to the normal
+        // desktop side-drawer presentation now that there's a visible
+        // header button again, the same way this same panel already
+        // behaves for anyone who opened it from that button directly.
+        document.body.classList.remove('mobile-browse-open');
+        map.invalidateSize();
+      }
     }
   });
 
