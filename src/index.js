@@ -8,12 +8,12 @@
 //      and any other static files) via the ASSETS binding.
 //
 // Edge-cached for 6 hours so we're not re-scraping calvarycca.org on every load.
- 
+
 import { jwtVerify, createRemoteJWKSet } from 'jose';
- 
+
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
- 
+
 // ---- Admin login (Google Sign-In) ----
 //
 // Flow: the browser gets a signed ID token from Google, POSTs it to
@@ -28,17 +28,17 @@ const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
 // show a badge. Real feature-gating (hiding Add/Manage/Delete from non-admins)
 // is a separate future step, and when that happens it should also check
 // this same session server-side rather than trusting the browser.
- 
+
 const SESSION_COOKIE = 'cca_admin_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
- 
+
 function base64UrlEncode(bytes) {
   let str = '';
   for (const b of bytes) str += String.fromCharCode(b);
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
- 
+
 function base64UrlDecodeToBytes(str) {
   str = str.replace(/-/g, '+').replace(/_/g, '/');
   while (str.length % 4) str += '=';
@@ -47,7 +47,7 @@ function base64UrlDecodeToBytes(str) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
- 
+
 async function hmacKey(secret) {
   return crypto.subtle.importKey(
     'raw',
@@ -57,7 +57,7 @@ async function hmacKey(secret) {
     ['sign', 'verify']
   );
 }
- 
+
 // Builds "<payload>.<signature>", both base64url. Payload is just
 // { email, exp } - no secrets live in the cookie itself, only the signature
 // proves we issued it.
@@ -69,7 +69,7 @@ async function signSession(payload, secret) {
   const sigB64 = base64UrlEncode(new Uint8Array(sig));
   return payloadB64 + '.' + sigB64;
 }
- 
+
 // Returns the parsed payload if the signature is valid and it hasn't
 // expired, otherwise null. Never throws.
 async function verifySession(token, secret) {
@@ -91,19 +91,19 @@ async function verifySession(token, secret) {
     return null;
   }
 }
- 
+
 function getCookie(request, name) {
   const header = request.headers.get('Cookie') || '';
   const match = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
   return match ? decodeURIComponent(match[1]) : null;
 }
- 
+
 async function isAdminRequest(request, env) {
   const token = getCookie(request, SESSION_COOKIE);
   const payload = await verifySession(token, env.SESSION_SECRET);
   return !!(payload && payload.email && env.ADMIN_EMAIL && payload.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase());
 }
- 
+
 async function handleVerifyAdmin(request, env) {
   const cors = { 'Content-Type': 'application/json' };
   let body;
@@ -112,17 +112,17 @@ async function handleVerifyAdmin(request, env) {
   } catch (err) {
     return new Response(JSON.stringify({ isAdmin: false, error: 'Bad request body' }), { status: 400, headers: cors });
   }
- 
+
   const idToken = body && body.token;
   if (!idToken) {
     return new Response(JSON.stringify({ isAdmin: false, error: 'Missing token' }), { status: 400, headers: cors });
   }
- 
+
   if (!env.GOOGLE_CLIENT_ID || !env.ADMIN_EMAIL || !env.SESSION_SECRET) {
     // Misconfigured Worker - fail closed, never treat this as "admin".
     return new Response(JSON.stringify({ isAdmin: false, error: 'Server not configured' }), { status: 500, headers: cors });
   }
- 
+
   let payload;
   try {
     const result = await jwtVerify(idToken, GOOGLE_JWKS, {
@@ -134,44 +134,44 @@ async function handleVerifyAdmin(request, env) {
     // Token didn't verify (forged, expired, wrong audience, etc.) - not admin.
     return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
   }
- 
+
   const email = (payload.email || '').toLowerCase();
   const isAdmin = !!(payload.email_verified && email === env.ADMIN_EMAIL.toLowerCase());
- 
+
   if (!isAdmin) {
     return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
   }
- 
+
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
   const session = await signSession({ email, exp }, env.SESSION_SECRET);
- 
+
   const setCookie = `${SESSION_COOKIE}=${encodeURIComponent(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
   return new Response(JSON.stringify({ isAdmin: true }), {
     status: 200,
     headers: { ...cors, 'Set-Cookie': setCookie }
   });
 }
- 
+
 async function handleWhoAmI(request, env) {
   const admin = await isAdminRequest(request, env);
   return new Response(JSON.stringify({ isAdmin: admin }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }
- 
+
 function handleLogout() {
   const clearCookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ ok: true }), {
     headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie }
   });
 }
- 
+
 // Bump this any time parseConferences() (or anything it depends on) changes.
 // The cache key includes this version, so a fix is never masked by an old
 // cached response sitting around from before the fix - it's a brand new
 // cache key, not a hit against the stale one.
 const CACHE_VERSION = 2;
- 
+
 const ENTITY_MAP = {
   '&amp;': '&', '&nbsp;': ' ', '&quot;': '"', '&#039;': "'", '&apos;': "'",
   '&#8211;': '\u2013', '&#8212;': '\u2014', '&#8216;': '\u2018', '&#8217;': '\u2019',
@@ -179,7 +179,7 @@ const ENTITY_MAP = {
   '&ndash;': '\u2013', '&mdash;': '\u2014', '&lsquo;': '\u2018', '&rsquo;': '\u2019',
   '&ldquo;': '\u201c', '&rdquo;': '\u201d', '&hellip;': '\u2026'
 };
- 
+
 function decodeEntities(str) {
   return str.replace(/&#?\w+;/g, function(match) {
     if (ENTITY_MAP[match]) return ENTITY_MAP[match];
@@ -188,11 +188,11 @@ function decodeEntities(str) {
     return match;
   });
 }
- 
+
 function stripTags(html) {
   return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
 }
- 
+
 // Safely decodes a raw JSON string's escape sequences (\", \\, \n, \uXXXX,
 // etc.) when we've pulled that string's contents out via regex rather than
 // a full JSON.parse of the surrounding (often huge, not-fully-valid-as-one-
@@ -206,7 +206,7 @@ function decodeJsonString(raw) {
     return raw;
   }
 }
- 
+
 // Removes entire <script>...</script> and <style>...</style> blocks - code and
 // all - not just the tags. Without this, embedded JS text (e.g. from analytics
 // or emoji-support snippets WordPress injects inline) can leak into the parsed
@@ -216,7 +216,7 @@ function stripScriptsAndStyles(html) {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
 }
- 
+
 // Finds the exact <div> that holds the conference listings (identified by two
 // stable class tokens seen in its opening tag) and returns only what's inside
 // it - by scanning matching <div>/</div> pairs rather than just searching for
@@ -237,7 +237,7 @@ function extractConferenceListDiv(html) {
     }
   }
   if (startIdx === -1) return null; // marker div not found - caller will fall back
- 
+
   const tagRe = /<div\b[^>]*>|<\/div>/gi;
   tagRe.lastIndex = afterOpenTag;
   let depth = 1;
@@ -254,7 +254,7 @@ function extractConferenceListDiv(html) {
   }
   return html.slice(startIdx); // unbalanced markup - take everything from the start point onward
 }
- 
+
 // Fallback used only if the specific div above can't be found (e.g. the site's
 // markup changes). Bounds the search using nearby heading/footer text instead -
 // looser than the div-scan above, but still much safer than searching the
@@ -262,7 +262,7 @@ function extractConferenceListDiv(html) {
 function extractByLandmarks(html) {
   const startPatterns = [/Regional Conferences/i, /Upcoming Conferences/i, /<h1[^>]*>\s*Conferences/i];
   const endPatterns = [/Scroll to top/i, /©\s*\d{4}/i, /<footer\b/i];
- 
+
   let startIdx = -1;
   for (const p of startPatterns) {
     const m = html.match(p);
@@ -273,25 +273,111 @@ function extractByLandmarks(html) {
     const m = html.match(p);
     if (m && m.index !== undefined && (endIdx === -1 || m.index < endIdx)) endIdx = m.index;
   }
- 
+
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
     return html.slice(startIdx, endIdx);
   }
   return html; // couldn't find landmarks either - fall back to searching the whole page
 }
- 
+
 function extractContentRegion(html) {
   return extractConferenceListDiv(html) || extractByLandmarks(html);
 }
- 
+
 // Detail text should read like a date/location line, never like code. If it
 // contains obvious programming tokens, something went wrong upstream (a
 // mismatched tag boundary, an unstripped script fragment, etc.) - better to
 // drop that one entry than show junk in the ticker.
 const CODE_SMELL = /function\s*\(|=>|\bwindow\.|\bdocument\.|\bvar\s+\w+\s*=|\bconst\s+\w+\s*=|sessionStorage|querySelector|getElementById/i;
- 
+
 const MAX_DETAIL_LENGTH = 220; // safety net in case a match runs long
- 
+
+// ---- Conference date parsing (best-effort) ----
+//
+// Confirmed by direct inspection of the source site: there is NO
+// machine-readable date anywhere in a conference listing - no ISO strings,
+// no <time datetime>, no data-* attributes, no microdata. Every date is
+// embedded as freeform text in the detail line (e.g. "CC Chino Valley, CA
+// - Aug 6-8", or a bare "Sep 7-9"), and the year appears only in the
+// title ("2026 West Coast Worship Conference"), never next to the date
+// itself. This is a best-effort parser for the "Mon D", "Mon D-D", and
+// "Mon D-Mon D" shapes seen in every real entry so far - NOT a guarantee.
+// An entry whose detail doesn't match is left with startDate/endDate both
+// null, and the frontend falls back to showing the plain detail text
+// unchanged (exactly like before this feature existed) rather than ever
+// displaying a guessed/wrong countdown. See CONFERENCE_DATE_OVERRIDES
+// below for hand-correcting one specific entry instead of loosening this
+// regex to try to cover it.
+const CONFERENCE_MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function conferenceMonthIndex(name) {
+  return CONFERENCE_MONTH_NAMES.indexOf(name.slice(0, 3).toLowerCase());
+}
+
+// Captures: month1, day1, (month2 optional - only present for a range that
+// crosses a month boundary), day2 (optional - absent for a single-day
+// entry). En dash, em dash, and a plain hyphen are all accepted as the
+// range separator since real entries use different ones.
+const CONFERENCE_DATE_RE = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:\s*[\u2013\u2014-]\s*(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2}))?/;
+
+function parseConferenceDetailDates(detail, year) {
+  if (!year || !detail) return null;
+  const m = CONFERENCE_DATE_RE.exec(detail);
+  if (!m) return null;
+  const startMonth = conferenceMonthIndex(m[1]);
+  if (startMonth === -1) return null;
+  const startDay = Number(m[2]);
+  const endMonth = m[3] ? conferenceMonthIndex(m[3]) : startMonth;
+  const endDay = m[4] ? Number(m[4]) : startDay;
+  if (endMonth === -1 || !startDay || !endDay) return null;
+
+  const startDate = new Date(Date.UTC(year, startMonth, startDay));
+  const endDate = new Date(Date.UTC(year, endMonth, endDay));
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null;
+  // A range that appears to run backwards is more likely a misread month
+  // than a real conference - safer to discard (fall back to plain text)
+  // than to show a bogus multi-month countdown or Day-X-of-Y.
+  if (endDate.getTime() < startDate.getTime()) return null;
+
+  // Whatever text sits before the matched date range, with a trailing
+  // separator (" - ", ": ", etc.) trimmed off, is the location/venue part
+  // (e.g. "CC Chino Valley, CA") - kept separately so the ticker can still
+  // show the location alongside a computed countdown/Day-X-of-Y instead of
+  // losing it once the plain date text is replaced.
+  const locationPrefix = detail.slice(0, m.index).replace(/[\s:\u2014\u2013-]+$/, '').trim() || null;
+
+  return {
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+    locationPrefix: locationPrefix
+  };
+}
+
+// Hand-corrections/additions for entries the parser above can't handle (an
+// unusual date format, a typo on the source site, etc.) or gets wrong -
+// empty by default, add entries here as needed. `titleMatch` is a
+// case-insensitive SUBSTRING tested against the conference's title (not an
+// exact match), so one entry stays matched year over year even though the
+// title's leading year changes ("2026 West Coast Conference" -> "2027
+// West Coast Conference") - only the dates below need updating each year,
+// same upkeep the existing FALLBACK_CONFERENCES list in index.html already
+// requires.
+const CONFERENCE_DATE_OVERRIDES = [
+  // { titleMatch: 'West Coast Conference', startDate: '2026-10-26', endDate: '2026-10-28' },
+];
+
+function applyConferenceDateOverride(title, parsed) {
+  const hit = CONFERENCE_DATE_OVERRIDES.find(function(o) {
+    return title.toLowerCase().indexOf(o.titleMatch.toLowerCase()) !== -1;
+  });
+  if (!hit) return parsed;
+  return {
+    startDate: hit.startDate,
+    endDate: hit.endDate,
+    locationPrefix: parsed ? parsed.locationPrefix : null
+  };
+}
+
 // Pulls out each "<strong>2026 Some Conference:</strong> details... <a href=...>link text</a>"
 // style entry from the raw page HTML. Matching is intentionally loose (based on
 // text patterns, not specific CSS classes) so small markup changes on the source
@@ -311,12 +397,12 @@ function parseConferences(rawHtml) {
     if (!/^\d{4}\b/.test(rawTitle)) continue; // keep only entries that start with a year
     if (rawTitle.length > 120) continue; // real titles are short; long ones are mismatches
     if (CODE_SMELL.test(rawTitle)) continue;
- 
+
     const rawDetail = (match[2] || '').slice(0, 4000); // cap input size before processing
     const linkMatch = rawDetail.match(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
     const link = linkMatch ? linkMatch[1] : null;
     const linkText = linkMatch ? stripTags(linkMatch[2]) : null;
- 
+
     // Remove the anchor itself from the detail text so it isn't duplicated,
     // then strip remaining tags for the plain-text portion.
     const detailWithoutLink = linkMatch ? rawDetail.replace(linkMatch[0], '') : rawDetail;
@@ -324,21 +410,33 @@ function parseConferences(rawHtml) {
       .replace(/\s*\|\s*$/, '')
       .replace(/^:\s*/, '') // some entries have the colon in a nested <span> rather than right after </strong>
       .trim();
- 
+
     if (CODE_SMELL.test(detail)) continue; // discard the whole entry rather than show junk
- 
+
     if (detail.length > MAX_DETAIL_LENGTH) detail = detail.slice(0, MAX_DETAIL_LENGTH).trim() + '\u2026';
- 
+
+    const cleanTitle = rawTitle.replace(/:$/, '').slice(0, 120);
+    const yearMatch = cleanTitle.match(/^(\d{4})\b/);
+    const year = yearMatch ? Number(yearMatch[1]) : null;
+    const dateInfo = applyConferenceDateOverride(cleanTitle, parseConferenceDetailDates(detail, year));
+
     results.push({
-      title: rawTitle.replace(/:$/, '').slice(0, 120),
+      title: cleanTitle,
       detail: detail,
       link: link,
-      linkText: linkText
+      linkText: linkText,
+      // null/null when the date couldn't be confidently parsed (or
+      // there's no override) - see parseConferenceDetailDates above. The
+      // frontend treats null here as "show detail unchanged," never as
+      // "assume no date and hide it."
+      startDate: dateInfo ? dateInfo.startDate : null,
+      endDate: dateInfo ? dateInfo.endDate : null,
+      locationPrefix: dateInfo ? dateInfo.locationPrefix : null
     });
   }
   return results;
 }
- 
+
 // ---- Church data (Workers KV) ----
 //
 // All church records live in KV under a single key, "churches", as one JSON
@@ -350,18 +448,18 @@ function parseConferences(rawHtml) {
 // getNextChurchId() below. This matters because Edit/Delete/Save all target
 // a record by its id, and a reused id could silently operate on the wrong
 // church later.
- 
+
 const CHURCHES_KV_KEY = 'churches';
- 
+
 async function loadChurches(env) {
   const raw = await env.CHURCHES_KV.get(CHURCHES_KV_KEY);
   return raw ? JSON.parse(raw) : [];
 }
- 
+
 async function saveChurches(env, churches) {
   await env.CHURCHES_KV.put(CHURCHES_KV_KEY, JSON.stringify(churches));
 }
- 
+
 // Next id is always one past the highest id currently in use - ids only ever
 // go forward, so a deleted church's old id is retired permanently rather
 // than being handed out again.
@@ -372,7 +470,7 @@ function getNextChurchId(churches) {
   }
   return maxId + 1;
 }
- 
+
 async function handleGetChurches(request, env) {
   const churches = await loadChurches(env);
   return new Response(JSON.stringify(churches), {
@@ -384,7 +482,7 @@ async function handleGetChurches(request, env) {
     }
   });
 }
- 
+
 async function handleSaveChurch(request, env) {
   if (!(await isAdminRequest(request, env))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -392,7 +490,7 @@ async function handleSaveChurch(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   let incoming;
   try {
     incoming = await request.json();
@@ -402,16 +500,16 @@ async function handleSaveChurch(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   if (!incoming || typeof incoming !== 'object' || !incoming.name) {
     return new Response(JSON.stringify({ error: 'Missing required fields' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   const churches = await loadChurches(env);
- 
+
   if (incoming.id != null) {
     // Editing an existing record - id must already exist.
     const index = churches.findIndex(c => c.id === incoming.id);
@@ -428,14 +526,14 @@ async function handleSaveChurch(request, env) {
     const newChurch = { ...incoming, id: getNextChurchId(churches) };
     churches.push(newChurch);
   }
- 
+
   await saveChurches(env, churches);
- 
+
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }
- 
+
 async function handleDeleteChurch(request, env) {
   if (!(await isAdminRequest(request, env))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -443,7 +541,7 @@ async function handleDeleteChurch(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   let body;
   try {
     body = await request.json();
@@ -453,31 +551,31 @@ async function handleDeleteChurch(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   if (!body || typeof body.id !== 'number') {
     return new Response(JSON.stringify({ error: 'Missing id' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   const churches = await loadChurches(env);
   const filtered = churches.filter(c => c.id !== body.id);
- 
+
   if (filtered.length === churches.length) {
     return new Response(JSON.stringify({ error: 'Church id not found' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   await saveChurches(env, filtered);
- 
+
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }
- 
+
 // ---- YouTube live-stream detection ----
 //
 // A Cron Trigger (see wrangler config) calls checkAllChurchesLive() on a
@@ -492,7 +590,7 @@ async function handleDeleteChurch(request, env) {
 // data: `<meta itemprop="isLiveBroadcast" content="True">`. If not live,
 // that block is entirely absent. The canonical link and startDate are
 // pulled from the same response for the video id and "live since" time.
- 
+
 const LIVE_STATUS_KV_KEY = 'live-status';
 const LIVE_CHECK_STAGGER_STATE_KV_KEY = 'live-check-stagger-state';
 // Separate from LIVE_STATUS_KV_KEY (which only ever holds the live-only
@@ -530,7 +628,7 @@ const LIVE_CHECK_BATCH_STATE_KV_KEY = 'live-check-batch-state';
 // only ever covered previously-LIVE churches) - this covers every
 // church's full last-known state, live or not.
 const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
- 
+
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
 // (confirmed in testing: a 429 after just a couple of fetches in quick
@@ -561,11 +659,11 @@ const LIVE_CHECK_STAGGER_DEFAULT_MS = 500;
 const LIVE_CHECK_STAGGER_GROWTH_FACTOR = 2;   // applied on a bad cycle
 const LIVE_CHECK_STAGGER_DECAY_FACTOR = 0.9;  // applied on a fully clean cycle
 const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
- 
+
 // If a single fetch gets rate-limited (429) or otherwise fails, retry once
 // after a short pause before giving up on that church for this cycle.
 const LIVE_CHECK_RETRY_DELAY_MS = 1500;
- 
+
 // Checks run strictly one at a time in a loop (see checkAllChurchesLive),
 // so a single slow-to-respond page stalls every church behind it, not just
 // itself - confirmed in production with an international channel (Calvary
@@ -577,7 +675,7 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // A timeout here is treated exactly like any other fetch failure (retried
 // once, then falls back to last-known-good data) - see fetchLivePage below.
 const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
- 
+
 // Confirmed in production, across a full night of testing: cycles
 // checking around 155-162+ churches in one invocation fail 100% of the
 // time (one church hangs for many minutes, well past its own per-church
@@ -624,7 +722,7 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // church list grows - only if the actual safe-count ceiling turns out to
 // be different from ~50 under real live-heavy load.
 const LIVE_CHECK_BATCH_SIZE = 50;
- 
+
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
 // than starting a second, overlapping invocation on top of it. There is
@@ -661,11 +759,11 @@ const LIVE_CHECK_BATCH_SIZE = 50;
 // the actual pattern being seen (every-10-minutes pileup), just to stop
 // the common case.
 const LIVE_CHECK_OVERLAP_GUARD_MS = 20 * 60 * 1000; // 20 minutes
- 
+
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
- 
+
 // Records a visible marker in the debug history when the overlap guard
 // (see LIVE_CHECK_OVERLAP_GUARD_MS below) decides a previous cycle has
 // been running too long to plausibly still be legitimate, and is about
@@ -706,7 +804,7 @@ async function recordStalledCycleNote(env, progress, elapsedMs) {
   // of the debug panel reads from.
   await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify(Object.assign({}, debugPrevious, { history: history })));
 }
- 
+
 async function loadStaggerState(env) {
   const raw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
   if (!raw) return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
@@ -721,7 +819,7 @@ async function loadStaggerState(env) {
   }
   return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
 }
- 
+
 // Which batch (see LIVE_CHECK_BATCH_SIZE) gets checked THIS cycle. Starts
 // at 0 and rotates forward by one each cycle, wrapping back to 0 once
 // every batch has had a turn - see checkAllChurchesLive for exactly how
@@ -742,7 +840,7 @@ async function loadBatchState(env) {
   }
   return { batchIndex: 0 };
 }
- 
+
 // The full map of every church's last actually-checked result, keyed by
 // churchId (see LIVE_CHECK_MERGED_RESULTS_KV_KEY above for why this
 // exists). Defaults to an empty map - meaning every church starts out as
@@ -762,7 +860,7 @@ async function loadMergedResults(env) {
   }
   return {};
 }
- 
+
 // Adjusts the stagger delay based on how the just-finished cycle went, and
 // persists it for the next cron run to read. Errs on the side of caution:
 // growth is faster (2x) than decay (0.9x), so a single bad cycle raises
@@ -781,7 +879,7 @@ function nextStaggerMs(currentMs, checked, errored) {
   // than adjusting on a small, possibly-noisy sample.
   return Math.max(LIVE_CHECK_STAGGER_MIN_MS, Math.min(LIVE_CHECK_STAGGER_MAX_MS, Math.round(next)));
 }
- 
+
 // Accepts whatever format an admin pasted into youtubeUrl - a bare
 // @handle URL, a /streams URL, a /videos URL, a /live URL, or a
 // /channel/UC... URL - and returns the correct "/live" URL to check.
@@ -805,7 +903,7 @@ function buildLiveCheckUrl(youtubeUrl) {
   url = url.replace(/\/+$/, '');
   return url + '/live';
 }
- 
+
 async function fetchLivePage(liveUrl) {
   // Deliberately NOT identifying as a bot here (the old User-Agent literally
   // said "CCAFinderBot") - confirmed in production that YouTube can serve a
@@ -858,7 +956,7 @@ async function fetchLivePage(liveUrl) {
     clearTimeout(timeoutId);
   }
 }
- 
+
 // Wraps fetchLivePage with a single retry after a short backoff. Most
 // failures here are transient YouTube rate-limiting (429s), not permanent
 // errors, so one retry recovers the majority of cases without materially
@@ -871,11 +969,11 @@ async function fetchLivePageWithRetry(liveUrl) {
     return fetchLivePage(liveUrl);
   }
 }
- 
+
 async function checkChurchLive(youtubeUrl) {
   const liveUrl = buildLiveCheckUrl(youtubeUrl);
   const html = await fetchLivePageWithRetry(liveUrl);
- 
+
   // IMPORTANT: itemprop="isLiveBroadcast" (schema.org) turned out to mark
   // "this video is a livestream-type broadcast" as a category - true for
   // scheduled/upcoming streams and old past broadcasts too, NOT just
@@ -922,7 +1020,7 @@ async function checkChurchLive(youtubeUrl) {
       const fallbackStartDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
       waitingStartDate = fallbackStartDateMetaMatch ? fallbackStartDateMetaMatch[1] : (fallbackStartDateJsonMatch ? fallbackStartDateJsonMatch[1] : null);
     }
- 
+
     // IMPORTANT (confirmed via a real production side-by-side comparison,
     // Calvary Boise vs. Calvary Chapel Salmon): scheduledStartTime above
     // is NOT reliably "the next time this church goes live" - it turned
@@ -947,13 +1045,13 @@ async function checkChurchLive(youtubeUrl) {
     // actually there.
     const confirmedUpcomingMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":false,"startTimestamp":"([^"]+)"\}/);
     const confirmedUpcomingStart = confirmedUpcomingMatch ? confirmedUpcomingMatch[1] : null;
- 
+
     const waitingCanonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
     const waitingVideoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
     const waitingTitleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
     const waitingDescriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
     const waitingAuthorMatch = html.match(/"author":"([^"]*)"/);
- 
+
     return {
       isLive: false,
       status: 'waiting',
@@ -965,10 +1063,10 @@ async function checkChurchLive(youtubeUrl) {
       author: waitingAuthorMatch ? waitingAuthorMatch[1] : null
     };
   }
- 
+
   const isLive = html.includes('"isLive":true');
   if (!isLive) return { isLive: false, status: 'not_live' };
- 
+
   // Loosely matched on purpose: only require the href value itself, not an
   // exact immediate ">" after it. YouTube's markup for this tag isn't
   // perfectly consistent across channels/pages (self-closing "/>", other
@@ -986,7 +1084,7 @@ async function checkChurchLive(youtubeUrl) {
   const descriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
   const authorMatch = html.match(/"author":"([^"]*)"/);
   const uploadDateMetaMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
- 
+
   // IMPORTANT: this is NOT the same field as a bare "viewCount":"N" match
   // would find - that pattern hits videoDetails.viewCount, which is the
   // video's lifetime/cumulative view count (confirmed in production: it
@@ -1009,7 +1107,7 @@ async function checkChurchLive(youtubeUrl) {
   // sidebar video elsewhere on the page - same anchoring discipline
   // already used for the videoId match above, for the same reason.
   const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[(?:\{"text":"[^"]*"\},?)+\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
- 
+
   // Fallback source: the page's embedded videoDetails/microformat JSON.
   // Confirmed via a real production case (Calvary Chapel Gresham) where the
   // <meta>/<link>/itemprop tags above were ALL absent, yet the church was
@@ -1025,7 +1123,7 @@ async function checkChurchLive(youtubeUrl) {
   const descriptionJsonMatch = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
   const startDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
   const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
- 
+
   const videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
   // The og: meta tags are raw HTML attribute content, so they can contain
   // entities like &amp; or &#39; that need decoding before display -
@@ -1037,7 +1135,7 @@ async function checkChurchLive(youtubeUrl) {
   const description = descriptionMetaMatch ? decodeEntities(descriptionMetaMatch[1]) : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
   const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : null);
   const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
- 
+
   // Belt-and-suspenders: if a startDate is present and is still in the
   // future, this is a scheduled/upcoming stream, not a live one, whatever
   // the isLive field said. This used to just return { isLive: false },
@@ -1060,7 +1158,7 @@ async function checkChurchLive(youtubeUrl) {
       };
     }
   }
- 
+
   // Second real-world false-positive pattern found in production: a
   // broadcast that was never properly "ended" on YouTube's side can stay
   // flagged isLive:true indefinitely, even years later, with nobody
@@ -1077,7 +1175,7 @@ async function checkChurchLive(youtubeUrl) {
       return { isLive: false, status: 'not_live' };
     }
   }
- 
+
   return {
     isLive: true,
     status: 'live',
@@ -1089,7 +1187,7 @@ async function checkChurchLive(youtubeUrl) {
     viewCount: concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null
   };
 }
- 
+
 // Runs on the Cron Trigger schedule. Each invocation checks ONE BATCH of
 // eligible churches (see LIVE_CHECK_BATCH_SIZE above for why), rotating
 // to the next batch on the following tick, and merges the freshly-
@@ -1151,7 +1249,7 @@ async function checkAllChurchesLive(env) {
     // JSON, missing key, etc.), err on the side of proceeding rather than
     // silently skipping every future cycle over an unreadable guard.
   }
- 
+
   const churches = await loadChurches(env);
   const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
   // Stable, deterministic ordering is required for batch membership to
@@ -1163,7 +1261,7 @@ async function checkAllChurchesLive(env) {
     if (a.id > b.id) return 1;
     return 0;
   });
- 
+
   const batchCount = Math.max(1, Math.ceil(candidates.length / LIVE_CHECK_BATCH_SIZE));
   const batchState = await loadBatchState(env);
   // Modulo against the CURRENT batch count, not just whatever was stored -
@@ -1174,13 +1272,13 @@ async function checkAllChurchesLive(env) {
   const batchCandidates = candidates.slice(batchIndex * LIVE_CHECK_BATCH_SIZE, (batchIndex + 1) * LIVE_CHECK_BATCH_SIZE);
   const batchIds = {};
   batchCandidates.forEach(function(c) { batchIds[c.id] = true; });
- 
+
   // The full map of every church's last actually-checked result - lets
   // churches OUTSIDE this cycle's batch keep showing their real last-
   // known status instead of going blank, and doubles as the per-church
   // fallback source when a fresh check in THIS batch fails.
   const mergedResults = await loadMergedResults(env);
- 
+
   // Guarantees isLive defaults to false, then a prior result (if any)
   // fills in the real fields, then any explicit overrides win last -
   // used everywhere a church's fresh check couldn't be completed this
@@ -1189,12 +1287,12 @@ async function checkAllChurchesLive(env) {
   function carryForward(prior, overrides) {
     return Object.assign({ isLive: false }, prior, overrides);
   }
- 
+
   const staggerState = await loadStaggerState(env);
   const staggerMs = staggerState.staggerMs;
- 
+
   const cycleStartedAt = Date.now();
- 
+
   // Writes the live in-progress snapshot the admin debug panel polls for a
   // real progress bar/ETA. Best-effort - a failed KV write here shouldn't
   // ever take down the actual live-check cycle, so errors are swallowed.
@@ -1219,9 +1317,9 @@ async function checkAllChurchesLive(env) {
       // the actual check over.
     }
   }
- 
+
   await writeProgress(0, batchCandidates.length ? batchCandidates[0].name : null, true);
- 
+
   let erroredCount = 0;
   // Churches that were never actually attempted this cycle because we'd
   // already exhausted Cloudflare's subrequest budget - distinct from
@@ -1236,11 +1334,11 @@ async function checkAllChurchesLive(env) {
   // cycle throws partway through, this is how far it actually got.
   let lastCompletedCount = 0;
   let completedNormally = false;
- 
+
   try {
     for (let i = 0; i < batchCandidates.length; i++) {
       const c = batchCandidates[i];
- 
+
       if (hitSubrequestLimit) {
         // Record the rest as not-checked rather than attempting (and
         // failing) each one identically - carries forward whatever was
@@ -1258,7 +1356,7 @@ async function checkAllChurchesLive(env) {
         lastCompletedCount = i + 1;
         continue;
       }
- 
+
       try {
         const churchCheckStartedAt = Date.now();
         const status = await checkChurchLive(c.youtubeUrl);
@@ -1314,10 +1412,10 @@ async function checkAllChurchesLive(env) {
           });
         }
       }
- 
+
       await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
       lastCompletedCount = i + 1;
- 
+
       // Stagger requests to YouTube instead of firing them all at once.
       // Skip the delay after the last item, or once we've already hit the
       // subrequest ceiling - no point waiting to attempt something we know
@@ -1326,7 +1424,7 @@ async function checkAllChurchesLive(env) {
         await sleep(staggerMs);
       }
     }
- 
+
     // The FULL merged view across every eligible church, not just this
     // cycle's batch - a church whose turn didn't come up this cycle still
     // needs to appear, using whatever's already in the merged map (or a
@@ -1342,9 +1440,9 @@ async function checkAllChurchesLive(env) {
       if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle });
       return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle };
     });
- 
+
     const liveOnly = fullResults.filter(function(r) { return r.isLive; });
- 
+
     // Single soonest confirmed upcoming start across every eligible church
     // (fullResults, not just this cycle's batch - with batching, most
     // churches' latest known status was carried forward from a previous
@@ -1365,14 +1463,14 @@ async function checkAllChurchesLive(env) {
         nextUpcomingStart = r.confirmedUpcomingStart;
       }
     });
- 
+
     const cycleDurationMs = Date.now() - cycleStartedAt;
     // actuallyChecked/errored/notChecked below are scoped to THIS BATCH -
     // batchCandidates.length, not candidates.length, is the denominator,
     // so the adaptive stagger system and "Recent Cycles" trend reflect
     // the real sample size actually exercised this cycle.
     const actuallyCheckedCount = batchCandidates.length - notCheckedCount;
- 
+
     await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
       checkedAt: new Date().toISOString(),
       live: liveOnly,
@@ -1396,9 +1494,9 @@ async function checkAllChurchesLive(env) {
         totalChurches: candidates.length
       }
     }));
- 
+
     await env.CHURCHES_KV.put(LIVE_CHECK_MERGED_RESULTS_KV_KEY, JSON.stringify(mergedResults));
- 
+
     // Full admin debug snapshot: every eligible church's result (not just
     // live ones, and not just this cycle's batch), plus a rolling history
     // of recent cycles' summary stats so a trend is visible, not just the
@@ -1427,7 +1525,7 @@ async function checkAllChurchesLive(env) {
       batchCount: batchCount
     });
     while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
- 
+
     await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
       latestCycle: {
         checkedAt: new Date().toISOString(),
@@ -1445,7 +1543,7 @@ async function checkAllChurchesLive(env) {
       },
       history: history
     }));
- 
+
     // Rotate to the next batch for the following cycle, regardless of how
     // this one went - even a batch with errors should still hand off to
     // the next batch next time, rather than getting stuck retrying the
@@ -1454,7 +1552,7 @@ async function checkAllChurchesLive(env) {
       batchIndex: (batchIndex + 1) % batchCount,
       updatedAt: new Date().toISOString()
     }));
- 
+
     // Adjust the delay for next cycle based on how THIS BATCH went, and
     // persist it. Skipped entirely if this cycle hit Cloudflare's
     // subrequest ceiling - that failure mode reflects a platform limit no
@@ -1473,7 +1571,7 @@ async function checkAllChurchesLive(env) {
         }));
       }
     }
- 
+
     await writeProgress(batchCandidates.length, null, false);
     completedNormally = true;
   } finally {
@@ -1487,7 +1585,7 @@ async function checkAllChurchesLive(env) {
     }
   }
 }
- 
+
 // Public, read-only endpoint - just returns whatever the last cron run
 // cached. No YouTube requests happen here; safe to call on every page
 // load.
@@ -1501,7 +1599,7 @@ async function handleGetLiveStatus(request, env) {
     }
   });
 }
- 
+
 // Admin-only. Manually runs the same check the Cron Trigger runs
 // automatically, so live status can be tested immediately after deploy
 // without waiting up to 10 minutes for the real schedule to fire.
@@ -1518,7 +1616,7 @@ async function handleDebugCheckLiveNow(request, env) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
- 
+
 // Admin-only, read-only - just returns whatever the last cron cycle wrote
 // to LIVE_CHECK_DEBUG_KV_KEY (see checkAllChurchesLive). Never triggers a
 // real check itself (unlike handleDebugCheckLiveNow above) - safe to poll
@@ -1541,7 +1639,7 @@ async function handleDebugLiveCheckStatus(request, env) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
- 
+
 // Admin-only, read-only - returns the live in-progress snapshot written
 // DURING a cycle (see writeProgress() inside checkAllChurchesLive), so the
 // debug panel can show a real progress bar/ETA instead of a simulated one.
@@ -1561,7 +1659,7 @@ async function handleDebugLiveCheckProgress(request, env) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
- 
+
 async function handleConferences(request, ctx) {
   const cache = caches.default;
   const cacheUrl = new URL(request.url);
@@ -1569,23 +1667,23 @@ async function handleConferences(request, ctx) {
   const cacheKey = new Request(cacheUrl.toString(), request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
- 
+
   const jsonHeaders = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'public, max-age=' + CACHE_SECONDS
   };
- 
+
   try {
     const pageRes = await fetch(SOURCE_URL, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
     });
     if (!pageRes.ok) throw new Error('Source site returned ' + pageRes.status);
- 
+
     const html = await pageRes.text();
     const conferences = parseConferences(html);
     if (!conferences.length) throw new Error('Parsed zero conference entries');
- 
+
     const body = JSON.stringify({
       conferences: conferences,
       source: SOURCE_URL,
@@ -1604,7 +1702,7 @@ async function handleConferences(request, ctx) {
     return new Response(body, { headers: jsonHeaders });
   }
 }
- 
+
 // ---- Radio "Now Playing" ticker ----
 //
 // Same overall shape as the Conference ticker above (edge-cached JSON,
@@ -1612,10 +1710,10 @@ async function handleConferences(request, ctx) {
 // platform instead of scraping an HTML page. Cache TTL is deliberately much
 // shorter than Conferences (20s vs 6 hours) - now-playing data changes
 // every few minutes, while conference listings barely change at all.
- 
+
 const RADIO_CACHE_SECONDS = 60;
 const RADIO_CACHE_VERSION = 1;
- 
+
 // Config-driven station list. Adding a new station is just adding one entry
 // here (assuming it's on a provider already handled by RADIO_PROVIDERS below;
 // see the note there for what's involved in adding a new provider).
@@ -2096,7 +2194,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://listen.radioking.com/radio/482243/stream/538778'
   }
 ];
- 
+
 // Extracts <title>, <artist>, and <cover> from the small XML feed each
 // SecureNetSystems station exposes. Deliberately simple regex extraction is
 // fine here (unlike the Conference ticker's messy nested HTML) because this
@@ -2115,7 +2213,7 @@ function parseSecureNetSystemsXml(xml) {
     coverUrl: coverUrl || null
   };
 }
- 
+
 // Extracts now-playing info from Live365's public station JSON endpoint
 // (https://api.live365.com/station/{mountId}). Undocumented but stable -
 // same shape confirmed by station page inspection. Talk/spoken segments
@@ -2131,14 +2229,14 @@ function parseLive365Json(rawJson, station) {
   } catch (err) {
     throw new Error('Invalid Live365 JSON response');
   }
- 
+
   const track = data && data['current-track'];
   const rawCover = track && typeof track.art === 'string' ? track.art.trim() : '';
   const isPlaceholderArt = /blankart\.jpg$/i.test(rawCover);
- 
+
   let title = track && typeof track.title === 'string' ? track.title.trim() : '';
   let artist = track && typeof track.artist === 'string' ? track.artist.trim() : '';
- 
+
   // Opt-in escape hatch: confirmed in production that not every Live365
   // station populates title/artist as genuinely separate fields the way
   // WRDJ does - WGLJ's automation instead crams "artist - title" into the
@@ -2158,14 +2256,14 @@ function parseLive365Json(rawJson, station) {
       title = title.slice(sepIndex + 3).trim();
     }
   }
- 
+
   return {
     title: title,
     artist: artist,
     coverUrl: rawCover && !isPlaceholderArt ? rawCover : null
   };
 }
- 
+
 // Extracts now-playing info from an Icecast status-json.xsl response. Unlike
 // SecureNetSystems, Icecast reports a single combined "title" field rather
 // than separate title/artist fields - by convention it's usually formatted
@@ -2180,17 +2278,17 @@ function parseIcecastJson(rawJson, station) {
   } catch (err) {
     throw new Error('Invalid Icecast JSON response');
   }
- 
+
   // status-json.xsl returns "source" as a single object when the server has
   // just one mount, but as an array when it has several. Requesting with
   // ?mount= should always give us a single object, but handle the array
   // shape too in case a server ever ignores that filter.
   let source = data && data.icestats && data.icestats.source;
   if (Array.isArray(source)) source = source[0];
- 
+
   const rawTitle = source && typeof source.title === 'string' ? source.title.trim() : '';
   if (!rawTitle) return { title: '', artist: '', coverUrl: null };
- 
+
   // Opt-in escape hatch for talk/teaching stations whose titles legitimately
   // contain " - " but aren't an "Artist - Track" pair at all (confirmed in
   // production - KQIP reports scripture references like "Jeremiah 49 -
@@ -2202,7 +2300,7 @@ function parseIcecastJson(rawJson, station) {
   if (station && station.noArtistSplit) {
     return { title: rawTitle, artist: '', coverUrl: null };
   }
- 
+
   const sepIndex = rawTitle.indexOf(' - ');
   if (sepIndex !== -1) {
     return {
@@ -2211,7 +2309,7 @@ function parseIcecastJson(rawJson, station) {
       coverUrl: null
     };
   }
- 
+
   // Some stations (confirmed in production - WRBP 92.5FM) report an empty
   // artist as a bare leading "- Title" instead of omitting the separator
   // entirely. After trimming the string, that leaves a stray "- " prefix
@@ -2221,7 +2319,7 @@ function parseIcecastJson(rawJson, station) {
   const bareTitle = rawTitle.replace(/^-\s+/, '').trim();
   return { title: bareTitle, artist: '', coverUrl: null };
 }
- 
+
 // Extracts now-playing info from a Futuri/streamon.fm "current.json"
 // metadata endpoint. Confirmed via a real response to return a one-element
 // array (not a bare object like Icecast's single-mount case) using ID3
@@ -2237,19 +2335,19 @@ function parseFuturiJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid Futuri JSON response');
   }
- 
+
   const entry = Array.isArray(data) ? data[0] : data;
   if (!entry) return { title: '', artist: '', coverUrl: null };
- 
+
   const title = typeof entry.TIT2 === 'string' ? entry.TIT2.trim() : '';
   const artist = typeof entry.TPE1 === 'string' ? entry.TPE1.trim() : '';
   const coverUrl = typeof entry.WXXX_album_art === 'string' && entry.WXXX_album_art.trim()
     ? entry.WXXX_album_art.trim()
     : null;
- 
+
   return { title: title, artist: artist, coverUrl: coverUrl };
 }
- 
+
 // Extracts now-playing info from a SoCast player's now-playing feed. Unlike
 // the other providers, this isn't bare JSON - it's JSONP, a JS-callback
 // wrapper around a JSON object (confirmed via a real response:
@@ -2274,25 +2372,25 @@ function parseFuturiJson(rawJson) {
 function parseSocastProgramJsonp(raw) {
   const wrapperMatch = raw.match(/^\s*[\w$]+\(([\s\S]*)\)\s*;?\s*$/);
   if (!wrapperMatch) throw new Error('Unexpected SoCast program response format');
- 
+
   let parsed;
   try {
     parsed = JSON.parse(wrapperMatch[1]);
   } catch (err) {
     throw new Error('Invalid SoCast program JSON payload');
   }
- 
+
   if (!parsed || parsed.status !== 'success' || !parsed.data) {
     return { title: '', artist: '', coverUrl: null };
   }
- 
+
   // No separate "artist" concept for a program schedule - program_name is
   // already the full descriptive string (e.g. "Host Name / Show Title"),
   // so it goes entirely into title with artist left blank. The frontend's
   // existing "no artist -> just show the title" fallback handles this the
   // same way it already does for Icecast stations with no artist data.
   const title = typeof parsed.data.program_name === 'string' ? parsed.data.program_name.trim() : '';
- 
+
   // program_button has been the populated one in practice (a host photo);
   // program_header_img/program_mobile_img are alternate fields in the same
   // payload shape that were empty strings in the one real response we've
@@ -2306,10 +2404,10 @@ function parseSocastProgramJsonp(raw) {
   } else if (typeof parsed.data.program_mobile_img === 'string' && parsed.data.program_mobile_img.trim()) {
     coverUrl = parsed.data.program_mobile_img.trim();
   }
- 
+
   return { title: title, artist: '', coverUrl: coverUrl };
 }
- 
+
 // Extracts the "Now playing" line from a WordPress "radiostation" theme's
 // showPlaying.php feed. This is plain HTML (not XML/JSON) built for a
 // browser to display and auto-refresh directly (the response includes its
@@ -2327,10 +2425,10 @@ function parseSocastProgramJsonp(raw) {
 function parseWpShowPlayingHtml(html) {
   const nowPlayingMatch = html.match(/Now playing<\/u><\/i><\/b><br\s*\/?>\s*<b>([\s\S]*?)<\/b>/i);
   if (!nowPlayingMatch) return { title: '', artist: '', coverUrl: null };
- 
+
   const raw = decodeEntities(nowPlayingMatch[1].replace(/<[^>]+>/g, '')).trim();
   if (!raw) return { title: '', artist: '', coverUrl: null };
- 
+
   const sepIndex = raw.indexOf(' by ');
   if (sepIndex === -1) return { title: raw, artist: '', coverUrl: null };
   return {
@@ -2339,7 +2437,7 @@ function parseWpShowPlayingHtml(html) {
     coverUrl: null
   };
 }
- 
+
 // Safe JSON.parse that returns null on failure instead of throwing - used
 // by parseRadioMastSse below to try a few candidate shapes in order rather
 // than committing to one and failing hard if it's wrong.
@@ -2350,7 +2448,7 @@ function tryParseJson(text) {
     return null;
   }
 }
- 
+
 // Extracts now-playing info from a RadioMast.io stream's metadata feed.
 // Confirmed via a real response to be:
 //   { "metadata": "05 You Say - Laura Daigle", "metadata_ext": {} }
@@ -2369,7 +2467,7 @@ function tryParseJson(text) {
 function parseRadioMastSse(raw) {
   const trimmed = raw.trim();
   let data = tryParseJson(trimmed);
- 
+
   if (!data) {
     const firstEvent = trimmed.split(/\r?\n\r?\n/)[0];
     const dataLine = firstEvent.split(/\r?\n/).filter(function(line) {
@@ -2377,36 +2475,36 @@ function parseRadioMastSse(raw) {
     })[0];
     if (dataLine) data = tryParseJson(dataLine.slice(dataLine.indexOf(':') + 1).trim());
   }
- 
+
   if (!data) {
     const match = trimmed.match(/\{[\s\S]*\}/);
     if (match) data = tryParseJson(match[0]);
   }
- 
+
   if (!data) throw new Error('Unexpected RadioMast metadata response format');
- 
+
   const combined = typeof data.metadata === 'string' ? data.metadata.trim() : '';
   if (!combined) return { title: '', artist: '', coverUrl: null };
- 
+
   // Combined string convention here is "{Title} - {Artist}" (confirmed:
   // "05 You Say - Laura Daigle" - Laura Daigle is the artist) - the
   // OPPOSITE order from Icecast's "{Artist} - {Track}" convention, so
   // don't copy that split blindly for a future RadioMast station.
   const sepIndex = combined.indexOf(' - ');
   if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
- 
+
   let title = combined.slice(0, sepIndex).trim();
   const artist = combined.slice(sepIndex + 3).trim();
- 
+
   // Strips a leading track-number prefix some automation systems include
   // (confirmed in production: "05 You Say" for a track actually titled
   // "You Say") - inferred from a single real example, may need revisiting
   // if a future station's real titles legitimately start with a number.
   title = title.replace(/^\d{1,3}[\s.]+/, '');
- 
+
   return { title: title, artist: artist, coverUrl: null };
 }
- 
+
 // Extracts now-playing info from a Live365 HLS media playlist's embedded
 // #EXTINF tags - a completely different (and much simpler) mechanism than
 // Live365's SSE-based `/metadata` endpoint, which we deliberately decided
@@ -2424,10 +2522,10 @@ function parseRadioMastSse(raw) {
 function parseLive365HlsPlaylist(m3u8Text) {
   const matches = [...m3u8Text.matchAll(/^#EXTINF:[\d.]+,(.*)$/gm)];
   if (!matches.length) return { title: '', artist: '', coverUrl: null };
- 
+
   const combined = matches[matches.length - 1][1].trim();
   if (!combined) return { title: '', artist: '', coverUrl: null };
- 
+
   // Convention here is "{Artist} - {Title}" (confirmed: "PASTOR JOHN
   // THOMAS - IN THE POTTERS HAND" - a preacher's name, then the sermon
   // title) - same order as Icecast's split, NOT RadioMast's reversed one.
@@ -2439,7 +2537,7 @@ function parseLive365HlsPlaylist(m3u8Text) {
     coverUrl: null
   };
 }
- 
+
 // Extracts now-playing info from a Shoutcast v2 server's native status
 // endpoint. Distinct from `icecast` above - Shoutcast and Icecast are
 // different streaming server software with different native formats, even
@@ -2460,10 +2558,10 @@ function parseShoutcastJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid Shoutcast JSON response');
   }
- 
+
   const combined = typeof data.songtitle === 'string' ? data.songtitle.trim() : '';
   if (!combined) return { title: '', artist: '', coverUrl: null };
- 
+
   const sepIndex = combined.indexOf(' - ');
   if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
   return {
@@ -2472,7 +2570,7 @@ function parseShoutcastJson(rawJson) {
     coverUrl: null
   };
 }
- 
+
 // Extracts now-playing info from ElasticPlayer's "history" endpoint
 // (https://www.elasticplayer.xyz/api/v1/radio/{id}/history). Returns an
 // array, most-recent-first (by created_at) - index 0 is the current/last
@@ -2492,18 +2590,18 @@ function parseElasticPlayerJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid ElasticPlayer JSON response');
   }
- 
+
   const latest = Array.isArray(data) && data.length > 0 ? data[0] : null;
   const rawMeta = latest && typeof latest.meta === 'string' ? latest.meta.trim() : '';
   const rawCover = latest && typeof latest.image_url === 'string' ? latest.image_url.trim() : '';
- 
+
   return {
     title: rawMeta,
     artist: '',
     coverUrl: rawCover || null
   };
 }
- 
+
 // Extracts now-playing info from streamingrad.io's metadata endpoint
 // (https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player={id}).
 // Confirmed response shape - a single object (not an array, unlike
@@ -2521,17 +2619,17 @@ function parseStreamingRadIoJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid streamingrad.io JSON response');
   }
- 
+
   const meta = data && data.metadata;
   const rawCover = meta && typeof meta.image === 'string' ? meta.image.trim() : '';
- 
+
   return {
     title: meta && typeof meta.title === 'string' ? meta.title.trim() : '',
     artist: meta && typeof meta.artist === 'string' ? meta.artist.trim() : '',
     coverUrl: rawCover || null
   };
 }
- 
+
 // Extracts now-playing info from Radio.co's official public status API
 // (https://public.radio.co/stations/{stationId}/status) - a well-
 // documented platform, unlike most other providers in this file which
@@ -2562,17 +2660,17 @@ function parseRadioCoJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid Radio.co JSON response');
   }
- 
+
   const track = data && data.current_track;
   const rawCover = track && typeof track.artwork_url === 'string' ? track.artwork_url.trim() : '';
- 
+
   return {
     title: track && typeof track.title === 'string' ? track.title.trim() : '',
     artist: '',
     coverUrl: rawCover || null
   };
 }
- 
+
 // Extracts now-playing info from Radio.co's newer v2 public track API
 // (https://public.radio.co/api/v2/{stationId}/track/current) - unlike the
 // older /stations/{id}/status endpoint above (which only returns a single
@@ -2595,19 +2693,19 @@ function parseRadioCoV2Json(rawJson) {
   } catch (err) {
     throw new Error('Invalid Radio.co v2 JSON response');
   }
- 
+
   const track = parsed && parsed.data;
   const rawCover = track && track.artwork_urls && typeof track.artwork_urls.standard === 'string'
     ? track.artwork_urls.standard.trim()
     : '';
- 
+
   return {
     title: track && typeof track.track_title === 'string' ? track.track_title.trim() : '',
     artist: track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '',
     coverUrl: rawCover || null
   };
 }
- 
+
 // Extracts now-playing info from RadioKing's public widget API
 // (https://api.radioking.io/widget/radio/{slug}/track/current) - a clean,
 // well-documented single-object response with title/artist already
@@ -2629,17 +2727,17 @@ function parseRadioKingJson(rawJson) {
   } catch (err) {
     throw new Error('Invalid RadioKing JSON response');
   }
- 
+
   const rawCover = data && typeof data.cover === 'string' ? data.cover.trim() : '';
   const isDefaultCover = !!(data && data.default_cover);
- 
+
   return {
     title: data && typeof data.title === 'string' ? data.title.trim() : '',
     artist: data && typeof data.artist === 'string' ? data.artist.trim() : '',
     coverUrl: rawCover && !isDefaultCover ? rawCover : null
   };
 }
- 
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -2697,7 +2795,7 @@ const RADIO_PROVIDERS = {
   },
   radiomast: {
     // Metadata URL is always just the stream URL itself + "/metadata"
- 
+
     // (confirmed via RadioMast's own docs and a real response) - no
     // separate station-specific field needed beyond the streamUrl every
     // station already has for playback.
@@ -2756,9 +2854,9 @@ const RADIO_PROVIDERS = {
     parse: parseRadioKingJson
   }
 };
- 
+
 const LIVE365_FETCH_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' };
- 
+
 // Live365's own base playlist URL isn't the media playlist we need - it's
 // a "master" playlist pointing to a freshly-issued, session-specific edge
 // URL that changes on every single request (confirmed in production: two
@@ -2776,19 +2874,19 @@ async function fetchLive365NowPlaying(station) {
   const masterRes = await fetch(masterUrl, { headers: LIVE365_FETCH_HEADERS });
   if (!masterRes.ok) throw new Error('Station ' + station.displayName + ' master playlist returned ' + masterRes.status);
   const masterText = await masterRes.text();
- 
+
   const variantMatch = masterText.match(/^https?:\/\/\S+\.m3u8\S*$/m);
   if (!variantMatch) throw new Error('Station ' + station.displayName + ' master playlist had no variant URL');
- 
+
   const mediaRes = await fetch(variantMatch[0], { headers: LIVE365_FETCH_HEADERS });
   if (!mediaRes.ok) throw new Error('Station ' + station.displayName + ' media playlist returned ' + mediaRes.status);
   const mediaText = await mediaRes.text();
- 
+
   return parseLive365HlsPlaylist(mediaText);
 }
- 
+
 const AIIR_WS_TIMEOUT_MS = 5000;
- 
+
 // Aiir's frontend player connects to a single shared WebSocket endpoint
 // (wss://metadata.aiir.net/now-playing) and subscribes per-station via a
 // {"action":"subscribe","serviceId":"..."} message - "serviceId" is the
@@ -2827,26 +2925,26 @@ async function fetchAiirNowPlaying(station) {
   // (that's what it actually is, and what you'd see in DevTools), and
   // rewritten to https:// right here, only for the fetch() call itself.
   const httpUrl = station.wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
- 
+
   const res = await fetch(httpUrl, {
     headers: {
       Upgrade: 'websocket',
       Connection: 'Upgrade'
     }
   });
- 
+
   const ws = res.webSocket;
   if (res.status !== 101 || !ws) {
     throw new Error('Station ' + station.displayName + ' WebSocket upgrade failed (status ' + res.status + ')');
   }
   ws.accept();
- 
+
   return new Promise(function(resolve, reject) {
     const timeout = setTimeout(function() {
       ws.close();
       reject(new Error('Station ' + station.displayName + ' timed out waiting for aiir now-playing data'));
     }, AIIR_WS_TIMEOUT_MS);
- 
+
     ws.addEventListener('message', function(event) {
       let data;
       try {
@@ -2854,14 +2952,14 @@ async function fetchAiirNowPlaying(station) {
       } catch (err) {
         return; // ignore anything unparseable rather than fail the whole fetch
       }
- 
+
       // Heartbeats and any message without a nowPlaying payload aren't
       // real updates - keep waiting for the actual subscribe response.
       if (!data || !data.nowPlaying) return;
- 
+
       clearTimeout(timeout);
       ws.close();
- 
+
       const np = data.nowPlaying;
       resolve({
         title: typeof np.name === 'string' ? np.name.trim() : '',
@@ -2869,25 +2967,25 @@ async function fetchAiirNowPlaying(station) {
         coverUrl: typeof np.imageUrl === 'string' && np.imageUrl.trim() ? np.imageUrl.trim() : null
       });
     });
- 
+
     ws.addEventListener('close', function() {
       clearTimeout(timeout);
       reject(new Error('Station ' + station.displayName + ' aiir WebSocket closed before any data arrived'));
     });
- 
+
     ws.addEventListener('error', function() {
       clearTimeout(timeout);
       reject(new Error('Station ' + station.displayName + ' aiir WebSocket error'));
     });
- 
+
     ws.send(JSON.stringify({ action: 'subscribe', serviceId: station.serviceId }));
   });
 }
- 
+
 async function fetchStationNowPlaying(station) {
   const provider = RADIO_PROVIDERS[station.provider];
   if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
- 
+
   // Most providers just need one fetch+parse (buildNowPlayingUrl + parse).
   // A provider that needs more than one HTTP call (like live365hls's
   // master-playlist-then-edge-URL chain) instead exposes fetchAndParse,
@@ -2904,7 +3002,7 @@ async function fetchStationNowPlaying(station) {
     const raw = await res.text();
     parsed = provider.parse(raw, station);
   }
- 
+
   return {
     displayName: station.displayName,
     title: parsed.title,
@@ -2921,7 +3019,7 @@ async function fetchStationNowPlaying(station) {
     homePage: station.homePage || null
   };
 }
- 
+
 async function handleRadio(request, ctx) {
   const cache = caches.default;
   const cacheUrl = new URL(request.url);
@@ -2929,13 +3027,13 @@ async function handleRadio(request, ctx) {
   const cacheKey = new Request(cacheUrl.toString(), request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
- 
+
   const jsonHeaders = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'public, max-age=' + RADIO_CACHE_SECONDS
   };
- 
+
   // Each station is fetched independently - one station's feed being down
   // shouldn't blank out the whole ticker, same philosophy as the church
   // live-status checker above.
@@ -2955,7 +3053,7 @@ async function handleRadio(request, ctx) {
       };
     }
   }));
- 
+
   const body = JSON.stringify({
     stations: stations,
     fetchedAt: new Date().toISOString()
@@ -2964,7 +3062,7 @@ async function handleRadio(request, ctx) {
   ctx.waitUntil(cache.put(cacheKey, response.clone()));
   return response;
 }
- 
+
 // ---- Feedback form ----
 //
 // Public visitors can submit a name (optional), reply email (optional),
@@ -2982,7 +3080,7 @@ async function handleFeedback(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   // Honeypot: a hidden field real users never fill in. Bots that
   // auto-fill every field trip this and get silently "accepted" (so they
   // don't know to retry) without ever reaching the inbox.
@@ -2991,7 +3089,7 @@ async function handleFeedback(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   const message = (incoming.message || '').trim();
   if (!message || message.length > 5000) {
     return new Response(JSON.stringify({ error: 'Message is required (max 5000 characters)' }), {
@@ -3001,7 +3099,7 @@ async function handleFeedback(request, env) {
   }
   const name = (incoming.name || '').trim().slice(0, 200);
   const replyEmail = (incoming.email || '').trim().slice(0, 200);
- 
+
   // Lightweight rate limit: max 5 submissions per IP per hour. Reuses the
   // existing CHURCHES_KV binding under a distinct key prefix so it never
   // collides with church data, and each key auto-expires in an hour.
@@ -3015,14 +3113,14 @@ async function handleFeedback(request, env) {
     });
   }
   await env.CHURCHES_KV.put(rateKey, String(recentCount + 1), { expirationTtl: 3600 });
- 
+
   if (!env.RESEND_API_KEY || !env.ADMIN_EMAIL) {
     return new Response(JSON.stringify({ error: 'Feedback is not configured yet' }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   const emailRes = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -3037,7 +3135,7 @@ async function handleFeedback(request, env) {
       text: `From: ${name || 'Anonymous'}\nEmail: ${replyEmail || 'Not provided'}\n\n${message}`
     })
   });
- 
+
   if (!emailRes.ok) {
     // Don't leak Resend's response body back to the client - just log
     // enough server-side to debug, and tell the visitor it failed.
@@ -3047,12 +3145,12 @@ async function handleFeedback(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
- 
+
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }
- 
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -3097,7 +3195,7 @@ export default {
     }
     return env.ASSETS.fetch(request);
   },
- 
+
   // Fired automatically by the Cron Trigger defined in wrangler config
   // (proposed schedule: every 10 minutes). Not tied to any visitor
   // request - runs on Cloudflare's own schedule regardless of site

@@ -38,6 +38,7 @@
     height: 100dvh; /* adapts to the visible viewport as Safari's address bar hides/shows */
   }
   header {
+    position: relative; /* anchors .hamburger-menu's dropdown positioning */
     background: var(--evergreen);
     color: var(--paper);
     padding: 14px 20px;
@@ -454,15 +455,170 @@
   .btn-upcoming:hover { opacity: 0.85; }
   .btn:hover { opacity: 0.85; }
 
+  /* ---- Mobile overflow menu (hamburger) ----
+     Hidden entirely above the mobile breakpoint below - see that media
+     query for where it actually becomes visible. Positioned/sized here
+     since its own look doesn't change with viewport width, only whether
+     it's shown at all. */
+  .hamburger-btn {
+    display: none;
+    position: relative;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--paper);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 4px;
+  }
+  .hamburger-btn:hover { opacity: 0.85; }
+  .hamburger-icon svg { width: 24px; height: 24px; display: block; }
+  /* Same dot-vs-number rule as the countdown feature's own badge - a dot
+     when a number can't unambiguously represent the state (multiple
+     upcoming conferences, or one currently underway), a number otherwise. */
+  .hamburger-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: var(--ember);
+    color: var(--paper);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 16px;
+    text-align: center;
+  }
+  .hamburger-badge.is-dot {
+    min-width: 8px;
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    top: 4px;
+    right: 4px;
+  }
+  .hamburger-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 10px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    z-index: 1600;
+    min-width: 220px;
+    overflow: hidden;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .hamburger-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .hamburger-menu-item:last-child { border-bottom: none; }
+  .hamburger-menu-item:hover { background: rgba(0,0,0,0.04); }
+  .hamburger-menu-icon { flex-shrink: 0; font-size: 16px; }
+  .hamburger-menu-label { flex: 1; }
+  .hamburger-menu-countdown {
+    flex-shrink: 0;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--brass);
+  }
+
+  /* ---- Mobile: btnLiveNow + condensed Radio ticker share one row ----
+     Populated by JS (applyMobilePrimaryRowLayout) only at this breakpoint -
+     empty/inert above it. */
+  .mobile-primary-row {
+    display: none;
+  }
+
   @media (max-width: 720px) {
     header {
-      grid-template-columns: 1fr;
-      justify-items: center;
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      text-align: left;
+      flex-wrap: wrap;
     }
-    header .header-actions {
-      justify-content: center;
+    /* Compact branding: logo + title only, subtitle dropped - the original
+       problem statement called out the full branding block as part of the
+       space eaten before the map. */
+    header .header-title-text .sub { display: none; }
+    header h1 { font-size: 16px; }
+    /* Search moves to its own full-width row below title+hamburger, and
+       its separate label line is dropped in favor of the input's existing
+       placeholder - one fewer line before the map. */
+    header .search-column {
+      order: 3;
+      width: 100%;
+      justify-content: stretch;
     }
+    header .search-wrap { width: 100%; }
+    header .search-label { display: none; }
+    #searchInput { width: 100%; box-sizing: border-box; }
+    /* Add Location / Manage Locations / All Stations / Feedback / Live
+       Debug / Admin all move into the hamburger menu (see markup above) -
+       the row that held them on desktop is hidden outright on mobile,
+       not just reflowed, since btnLiveNow (its one child that stays
+       visible) is relocated into .mobile-primary-row by JS before this
+       rule ever matters. */
+    header .header-actions { display: none; }
+    .hamburger-btn { display: block; order: 2; }
+    /* The full-width Conference ticker bar is replaced entirely by the
+       hamburger menu's Conferences row on mobile (Concept A - see
+       Mobile-First-Design.md) - its content isn't duplicated here too. */
+    #conferenceTicker { display: none; }
+    .mobile-primary-row {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--evergreen);
+    }
+    .mobile-primary-row #btnLiveNow {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    /* Condensed: no border/box chrome, just text - see "Radio gets a
+       condensed ticker, not an icon" in Mobile-First-Design.md. The
+       scrolling marquee content itself is unchanged (still real
+       now-playing text, not a static icon). */
+    .mobile-primary-row #radioTicker {
+      flex: 1;
+      min-width: 0;
+      height: auto;
+      background: none;
+      border-bottom: none;
+    }
+    .mobile-primary-row #radioTicker .ticker-label {
+      background: none;
+      border-right: none;
+      padding: 0 6px 0 0;
+    }
+    /* The whole row (not just the label) is the tap target into the
+       Mobile Station Picker on mobile - see handleRadioTickerActivate's
+       own mobile-breakpoint branch. Dismissing doesn't make sense for a
+       permanent top-level action (Radio is one of the three things every
+       mobile visitor needs, per the doc's priorities), so the × is
+       dropped here even though it stays on desktop. */
+    .mobile-primary-row #radioTickerDismissBtn { display: none; }
   }
 
   .modal-overlay {
@@ -1706,6 +1862,7 @@
   body.mobile-picker-open header,
   body.mobile-picker-open #conferenceTicker,
   body.mobile-picker-open #radioTicker,
+  body.mobile-picker-open #mobilePrimaryRow,
   body.mobile-picker-open #filterBar,
   body.mobile-picker-open #map,
   body.mobile-picker-open #countBadge,
@@ -1946,6 +2103,35 @@
         <span id="adminBadge" class="admin-badge" style="display:none;">Admin ✓ <a href="#" id="adminSignOutLink" class="admin-link admin-signout">Sign out</a></span>
       </span>
     </div>
+    <!-- Mobile-only overflow menu (see Mobile-First-Design.md, Concept A).
+         Hidden entirely above the mobile breakpoint - desktop keeps the
+         .header-actions row above, unchanged. Items below delegate to the
+         existing desktop controls' own click handlers (via .click() on the
+         hidden originals) rather than duplicating any logic, so behavior
+         can't drift between the two entry points. -->
+    <button type="button" id="hamburgerBtn" class="hamburger-btn" aria-haspopup="true" aria-expanded="false" aria-label="Menu">
+      <span class="hamburger-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></span>
+      <span id="hamburgerBadge" class="hamburger-badge" style="display:none;"></span>
+    </button>
+    <div id="hamburgerMenu" class="hamburger-menu" style="display:none;">
+      <a id="menuConferencesItem" class="hamburger-menu-item" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">
+        <span class="hamburger-menu-icon" aria-hidden="true">📅</span>
+        <span class="hamburger-menu-label">Conferences</span>
+        <span id="menuConferencesCountdown" class="hamburger-menu-countdown"></span>
+      </a>
+      <button type="button" id="menuAllStationsItem" class="hamburger-menu-item">
+        <span class="hamburger-menu-icon" aria-hidden="true">📻</span>
+        <span class="hamburger-menu-label">All Stations</span>
+      </button>
+      <button type="button" id="menuFeedbackItem" class="hamburger-menu-item">
+        <span class="hamburger-menu-icon" aria-hidden="true">💬</span>
+        <span class="hamburger-menu-label">Feedback</span>
+      </button>
+      <button type="button" id="menuAdminItem" class="hamburger-menu-item">
+        <span class="hamburger-menu-icon" aria-hidden="true">🔒</span>
+        <span id="menuAdminLabel" class="hamburger-menu-label">Admin</span>
+      </button>
+    </div>
   </header>
 
   <div id="adminSignInOverlay" class="modal-overlay" style="display:none;">
@@ -1967,6 +2153,13 @@
     </div>
     <button type="button" id="tickerDismissBtn" class="ticker-dismiss" title="Hide conference ticker">×</button>
   </div>
+
+  <!-- Mobile-only: btnLiveNow and #radioTicker are moved into this row by
+       JS (see applyMobilePrimaryRowLayout) at the mobile breakpoint, so
+       they can share one row and reclaim vertical space above the map.
+       Empty and inert on desktop - both elements stay in their original
+       locations there. -->
+  <div id="mobilePrimaryRow" class="mobile-primary-row"></div>
 
   <div id="radioTicker" class="ticker-bar ticker-loading">
     <button type="button" id="radioTickerLabel" class="ticker-label ticker-label-btn">
@@ -4157,6 +4350,96 @@
   const tickerTrack = document.getElementById('tickerTrack');
   const tickerDismissBtn = document.getElementById('tickerDismissBtn');
 
+  // ---- Conference countdown / Day-X-of-Y (shared by the ticker text and
+  // the hamburger menu's Conferences row + badge - see Mobile-First-
+  // Design.md) ----
+  //
+  // Operates purely on startDate/endDate already computed server-side in
+  // index.js's parseConferences - null for any entry the scraper couldn't
+  // confidently parse a date from (or the static offline FALLBACK_CONFERENCES
+  // below, which never has these fields at all), in which case this returns
+  // null and callers show the conference's plain `detail` text unchanged,
+  // exactly as before this feature existed - never a guessed countdown.
+  const CONFERENCE_COUNTDOWN_WINDOW_DAYS = 14;
+  let currentConferences = [];
+
+  function dateOnlyUTC(d) {
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+
+  function getConferenceCountdown(conf, now) {
+    if (!conf.startDate || !conf.endDate) return null;
+    const start = new Date(conf.startDate + 'T00:00:00Z');
+    const end = new Date(conf.endDate + 'T00:00:00Z');
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+    const todayUTC = dateOnlyUTC(now);
+    const startUTC = dateOnlyUTC(start);
+    const endUTC = dateOnlyUTC(end);
+    const MS_PER_DAY = 86400000;
+    if (todayUTC > endUTC) return null; // already over - nothing to show
+    if (todayUTC >= startUTC) {
+      const totalDays = Math.round((endUTC - startUTC) / MS_PER_DAY) + 1;
+      const dayNum = Math.round((todayUTC - startUTC) / MS_PER_DAY) + 1;
+      return { status: 'underway', day: Math.min(dayNum, totalDays), total: totalDays };
+    }
+    const daysUntil = Math.round((startUTC - todayUTC) / MS_PER_DAY);
+    return { status: 'upcoming', daysUntil: daysUntil };
+  }
+
+  // Full display string for one conference: plain `detail` text unchanged
+  // unless the countdown window (<=14 days) or underway logic actually
+  // applies, per Mobile-First-Design.md's "Conference countdown logic"
+  // decision (applies on both desktop and mobile - this one function
+  // backs both).
+  function formatConferenceDisplay(conf, now) {
+    const countdown = getConferenceCountdown(conf, now);
+    if (!countdown) return conf.detail;
+    let text;
+    if (countdown.status === 'underway') {
+      text = 'Day ' + countdown.day + ' of ' + countdown.total;
+    } else if (countdown.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) {
+      text = countdown.daysUntil + (countdown.daysUntil === 1 ? ' day' : ' days');
+    } else {
+      return conf.detail; // 15+ days out - plain dates, exactly as today
+    }
+    return conf.locationPrefix ? (conf.locationPrefix + ' — ' + text) : text;
+  }
+
+  // Aggregate state for the compact hamburger-icon badge, which can't show
+  // more than one number at once - see the "Timer/countdown discoverability"
+  // and its "underway" follow-up in Mobile-First-Design.md for the exact
+  // dot-vs-number rule this implements.
+  function computeConferenceBadgeState(conferences, now) {
+    let underwayCount = 0;
+    const upcomingSoon = [];
+    (conferences || []).forEach(function(c) {
+      const cd = getConferenceCountdown(c, now);
+      if (!cd) return;
+      if (cd.status === 'underway') underwayCount++;
+      else if (cd.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) upcomingSoon.push(cd.daysUntil);
+    });
+    if (underwayCount > 0 || upcomingSoon.length > 1) return { mode: 'dot' };
+    if (upcomingSoon.length === 1) return { mode: 'count', value: upcomingSoon[0] };
+    return { mode: 'none' };
+  }
+
+  // Text shown inline on the hamburger menu's own Conferences row - unlike
+  // the icon badge above, there's room here to always be specific (no
+  // dot-vs-number compromise needed), so this just surfaces whichever
+  // conference is soonest/underway, full stop.
+  function getSoonestConferenceCountdownText(conferences, now) {
+    let best = null; // {sortKey, text}
+    (conferences || []).forEach(function(c) {
+      const cd = getConferenceCountdown(c, now);
+      if (!cd) return;
+      const sortKey = cd.status === 'underway' ? -1 : cd.daysUntil;
+      const text = cd.status === 'underway' ? ('Day ' + cd.day + ' of ' + cd.total) : (cd.daysUntil + (cd.daysUntil === 1 ? ' day' : ' days'));
+      if (cd.status === 'upcoming' && cd.daysUntil > CONFERENCE_COUNTDOWN_WINDOW_DAYS) return;
+      if (!best || sortKey < best.sortKey) best = { sortKey: sortKey, text: text };
+    });
+    return best ? best.text : null;
+  }
+
   // Reading speed in pixels/second - tune this to taste. Lower = slower/easier to read.
   const TICKER_PX_PER_SEC = 55;
 
@@ -4172,16 +4455,20 @@
     '</svg></span>';
 
   function renderTicker(items) {
+    currentConferences = items || [];
+    updateHamburgerConferencesUi();
     tickerBar.classList.remove('ticker-loading');
     if (!items || !items.length) {
       tickerTrack.innerHTML = '<span class="ticker-item">No conference listings found &mdash; visit calvarycca.org/conferences</span>';
       return;
     }
+    const now = new Date();
     const pieces = items.map(function(c) {
       // Plain text for the title/detail. Only the source's own link text (if
       // any) becomes clickable - e.g. "register now" - not the whole entry.
+      const displayDetail = formatConferenceDisplay(c, now);
       let html = '<span class="ticker-item">' + escapeHtml(c.title);
-      if (c.detail) html += ': ' + escapeHtml(c.detail);
+      if (displayDetail) html += ': ' + escapeHtml(displayDetail);
       html += '</span>';
       if (c.link) {
         const linkLabel = c.linkText && c.linkText.trim() ? c.linkText.trim() : 'more info';
@@ -4224,6 +4511,18 @@
   });
 
   loadTicker();
+
+  // The conference list itself is only fetched once (see loadTicker above -
+  // unlike radio/live-status, it isn't polled), but a days-granularity
+  // countdown still drifts by a full day at midnight even with no new
+  // server data, purely from the browser's own clock moving forward. This
+  // re-renders the already-loaded list from scratch on a slow interval so
+  // a tab left open overnight doesn't show a stale day count - no network
+  // request involved, just recomputing from currentConferences.
+  const CONFERENCE_DISPLAY_REFRESH_MS = 60 * 60 * 1000; // 1 hour
+  setInterval(function() {
+    if (currentConferences.length) renderTicker(currentConferences);
+  }, CONFERENCE_DISPLAY_REFRESH_MS);
 
   // ---- Radio "Now Playing" ticker ----
   // Data source: /radio-now-playing (see handleRadio() in src/index.js), which
@@ -5093,6 +5392,16 @@
   });
 
   function handleRadioTickerActivate(e) {
+    // Mobile: the whole condensed ticker row is one tap target into the
+    // Mobile Station Picker (see Mobile-First-Design.md's "Radio gets a
+    // condensed ticker, not an icon") - regardless of exactly what inside
+    // the row was tapped, same as #radioTickerLabel's own click handler
+    // below. Desktop keeps the marquee's per-station click-to-play,
+    // unchanged.
+    if (isMobilePickerBreakpoint()) {
+      openMobileRadioPicker();
+      return;
+    }
     const item = e.target.closest('.radio-item');
     if (!item) return;
     const idx = Number(item.dataset.stationIndex);
@@ -5245,6 +5554,137 @@
   // view built for a screen size they no longer have.
   window.matchMedia(MOBILE_PICKER_BREAKPOINT).addEventListener('change', function(e) {
     if (!e.matches) closeMobileRadioPicker();
+  });
+
+  // ---- Mobile hamburger (☰) menu - Concept A, see Mobile-First-Design.md ----
+  //
+  // A separate breakpoint from MOBILE_PICKER_BREAKPOINT above (720px vs
+  // 600px) - this one matches the existing header-stacking breakpoint,
+  // since the hamburger is a header-layout concern, not a radio-picker one.
+  const MOBILE_HEADER_BREAKPOINT = '(max-width: 720px)';
+  function isMobileHeaderBreakpoint() {
+    return window.matchMedia(MOBILE_HEADER_BREAKPOINT).matches;
+  }
+
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  const hamburgerMenu = document.getElementById('hamburgerMenu');
+  const hamburgerBadge = document.getElementById('hamburgerBadge');
+
+  function openHamburgerMenu() {
+    hamburgerMenu.style.display = 'block';
+    hamburgerBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeHamburgerMenu() {
+    hamburgerMenu.style.display = 'none';
+    hamburgerBtn.setAttribute('aria-expanded', 'false');
+  }
+  hamburgerBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (hamburgerMenu.style.display === 'block') closeHamburgerMenu();
+    else openHamburgerMenu();
+  });
+  // Outside-tap dismissal - the menu itself stops propagation implicitly
+  // by virtue of this listener living on `document` and only closing when
+  // the click's target is neither the button nor inside the menu.
+  document.addEventListener('click', function(e) {
+    if (hamburgerMenu.style.display !== 'block') return;
+    if (e.target.closest('#hamburgerMenu') || e.target.closest('#hamburgerBtn')) return;
+    closeHamburgerMenu();
+  });
+  // Same reasoning as the mobile radio picker's own breakpoint listener
+  // above - don't strand an open menu (or its now-irrelevant badge state)
+  // if the viewport grows past mobile while it's open.
+  window.matchMedia(MOBILE_HEADER_BREAKPOINT).addEventListener('change', function(e) {
+    if (!e.matches) closeHamburgerMenu();
+  });
+
+  // Delegates to the existing desktop controls' own click handlers rather
+  // than reimplementing them, so mobile and desktop can never behave
+  // differently for the same action.
+  document.getElementById('menuAllStationsItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnRadioBrowse').click();
+  });
+  document.getElementById('menuFeedbackItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnFeedback').click();
+  });
+  document.getElementById('menuAdminItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    // Mirrors #adminArea's own internal branching: sign in if not
+    // signed in yet, sign out if the admin badge is already showing.
+    const adminBadge = document.getElementById('adminBadge');
+    if (adminBadge && adminBadge.style.display !== 'none') {
+      document.getElementById('adminSignOutLink').click();
+    } else {
+      document.getElementById('adminSignInLink').click();
+    }
+  });
+
+  // Keeps the menu's Admin row label in sync with actual sign-in state,
+  // since unlike the other three items it has no fixed label - mirrors
+  // #adminArea's own admin-badge visibility rather than tracking sign-in
+  // state independently, so the two can't drift apart.
+  function updateHamburgerAdminLabel() {
+    const adminBadge = document.getElementById('adminBadge');
+    const label = document.getElementById('menuAdminLabel');
+    label.textContent = (adminBadge && adminBadge.style.display !== 'none') ? 'Admin ✓ (sign out)' : 'Admin';
+  }
+  // #adminBadge's visibility is toggled from several places in the admin
+  // sign-in/out flow elsewhere in this file - rather than editing each of
+  // those call sites, a MutationObserver on its style attribute keeps this
+  // label correct regardless of which path changed it.
+  new MutationObserver(updateHamburgerAdminLabel).observe(document.getElementById('adminBadge'), { attributes: true, attributeFilter: ['style'] });
+  updateHamburgerAdminLabel();
+
+  // Drives both the hamburger icon's badge (dot/number/none) and the
+  // Conferences row's own inline countdown text - called from renderTicker
+  // every time the conference list is (re)rendered, so it always reflects
+  // currentConferences.
+  function updateHamburgerConferencesUi() {
+    const now = new Date();
+    const badgeState = computeConferenceBadgeState(currentConferences, now);
+    if (badgeState.mode === 'none') {
+      hamburgerBadge.style.display = 'none';
+    } else if (badgeState.mode === 'dot') {
+      hamburgerBadge.style.display = 'block';
+      hamburgerBadge.classList.add('is-dot');
+      hamburgerBadge.textContent = '';
+    } else {
+      hamburgerBadge.style.display = 'block';
+      hamburgerBadge.classList.remove('is-dot');
+      hamburgerBadge.textContent = String(badgeState.value);
+    }
+    const countdownText = getSoonestConferenceCountdownText(currentConferences, now);
+    document.getElementById('menuConferencesCountdown').textContent = countdownText || '';
+  }
+
+  // ---- Mobile primary row: btnLiveNow + condensed Radio ticker share one
+  // row (see Mobile-First-Design.md's "Mobile home screen layout order").
+  // Actual DOM relocation, not just CSS - #btnLiveNow and #radioTicker
+  // need to become flex siblings of each other, and they start out in two
+  // different parents (header vs. top-level), which CSS alone can't merge
+  // across. Moving elements via the DOM API preserves their identity,
+  // listeners, and ids exactly - every existing lookup by getElementById
+  // keeps working regardless of which parent currently holds them. Same
+  // "restructure via JS at a breakpoint" pattern this file already uses
+  // for the mobile radio picker above, applied to a different breakpoint.
+  const mobilePrimaryRow = document.getElementById('mobilePrimaryRow');
+  const headerActionsEl = document.querySelector('header .header-actions');
+  function applyMobilePrimaryRowLayout(isMobile) {
+    const liveBtn = document.getElementById('btnLiveNow');
+    const radioBar = document.getElementById('radioTicker');
+    if (isMobile) {
+      mobilePrimaryRow.appendChild(liveBtn);
+      mobilePrimaryRow.appendChild(radioBar);
+    } else {
+      headerActionsEl.insertBefore(liveBtn, headerActionsEl.firstChild);
+      mobilePrimaryRow.insertAdjacentElement('beforebegin', radioBar);
+    }
+  }
+  applyMobilePrimaryRowLayout(isMobileHeaderBreakpoint());
+  window.matchMedia(MOBILE_HEADER_BREAKPOINT).addEventListener('change', function(e) {
+    applyMobilePrimaryRowLayout(e.matches);
   });
 
   document.getElementById('mpList').addEventListener('click', function(e) {
