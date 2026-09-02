@@ -903,7 +903,16 @@
        centered, all-caps, bigger, easier-to-tap "◀ BACK" instead of a
        small "x" in the corner, which was hard to hit accurately on a
        phone. The "x" itself is simply hidden here rather than removed
-       from the markup, since it's still the right control on desktop. */
+       from the markup, since it's still the right control on desktop.
+       The explicit gap here matters - .mp-topbar has its own gap:8px that
+       this header didn't, and .mp-back-btn's negative margin (there to
+       enlarge its tap target without visually widening the topbar) pulled
+       the title flush against "BACK" with zero space between them
+       without it. */
+    #radioBrowsePanel .side-panel-header,
+    #liveNowPanel .side-panel-header {
+      gap: 10px;
+    }
     #radioBrowsePanel .side-panel-header .btn-close,
     #liveNowPanel .side-panel-header .btn-close {
       display: none;
@@ -921,11 +930,13 @@
       margin: 0;
       text-align: center;
       text-transform: uppercase;
-      font-size: 20px;
-      letter-spacing: 0.05em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0.04em;
+      /* Wraps to a second line rather than truncating with "..." - the
+         All Stations title's station count ("All 35 Radio Stations") is
+         exactly the part truncation was cutting off, which is the one
+         piece of information on this header actually worth keeping. */
     }
   }
   .radio-browse-toolbar {
