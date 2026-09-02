@@ -1580,6 +1580,25 @@
   a.ticker-item.ticker-link:hover {
     text-decoration: underline;
   }
+  /* Makes the computed countdown/Day-X-of-Y portion of a conference entry
+     read as "the important part" while the ticker scrolls by, rather than
+     blending into the rest of the plain-text line - same gold already
+     used for this ticker's own "more info" links just above, so it's
+     legible against the ticker's dark background without introducing a
+     new color. See formatConferenceDisplayHtml. */
+  .ticker-countdown {
+    font-weight: 800;
+    color: #f2c76e;
+  }
+  /* The mobile conferences pane (#mobileConferencesPane) reuses this same
+     span, but its rows sit on the light --paper background, not the
+     ticker's dark one - the ticker's bright gold above would be hard to
+     read there, so this override keeps the same "bold, accented" emphasis
+     using brass instead, matching this pane's own existing meta-text
+     accent color (see .mp-meta). */
+  .mc-detail .ticker-countdown {
+    color: var(--brass);
+  }
   .ticker-sep {
     color: var(--brass);
     opacity: 0.6;
@@ -4457,23 +4476,51 @@
     return { status: 'upcoming', daysUntil: daysUntil };
   }
 
-  // Full display string for one conference: plain `detail` text unchanged
-  // unless the countdown window (<=14 days) or underway logic actually
-  // applies, per Mobile-First-Design.md's "Conference countdown logic"
-  // decision (applies on both desktop and mobile - this one function
-  // backs both).
-  function formatConferenceDisplay(conf, now) {
+  // Single source of truth for the "Day X of Y" / "in N days" wording -
+  // formatConferenceDisplay, formatConferenceDisplayHtml, and
+  // getSoonestConferenceCountdownText below all call this instead of each
+  // computing their own copy, so a future wording tweak (like "in N days"
+  // replacing a bare "N days" that read as a duration, not a countdown)
+  // only has to happen once. Returns null when the countdown window
+  // (<=14 days) or underway logic doesn't apply - callers fall back to
+  // conf.detail unchanged in that case.
+  function computeConferenceCountdownText(conf, now) {
     const countdown = getConferenceCountdown(conf, now);
-    if (!countdown) return conf.detail;
-    let text;
+    if (!countdown) return null;
     if (countdown.status === 'underway') {
-      text = 'Day ' + countdown.day + ' of ' + countdown.total;
-    } else if (countdown.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) {
-      text = countdown.daysUntil + (countdown.daysUntil === 1 ? ' day' : ' days');
-    } else {
-      return conf.detail; // 15+ days out - plain dates, exactly as today
+      return 'Day ' + countdown.day + ' of ' + countdown.total;
     }
+    if (countdown.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) {
+      // "in 5 days," not bare "5 days" - the latter reads as a duration
+      // (as if the conference itself were 5 days long), not a countdown.
+      return 'in ' + countdown.daysUntil + (countdown.daysUntil === 1 ? ' day' : ' days');
+    }
+    return null; // 15+ days out - plain dates, exactly as today
+  }
+
+  // Plain-text display string for one conference: `detail` unchanged
+  // unless computeConferenceCountdownText actually has something to show,
+  // per Mobile-First-Design.md's "Conference countdown logic" decision
+  // (applies on both desktop and mobile).
+  function formatConferenceDisplay(conf, now) {
+    const text = computeConferenceCountdownText(conf, now);
+    if (!text) return conf.detail;
     return conf.locationPrefix ? (conf.locationPrefix + ' — ' + text) : text;
+  }
+
+  // HTML-safe version of the above, additionally wrapping just the
+  // computed countdown/Day-X-of-Y portion (never the location prefix, and
+  // never a plain fallback date) in .ticker-countdown - bold + an accent
+  // color, so the countdown reads as "the important part" at a glance in
+  // the scrolling ticker, per explicit design sign-off (see
+  // MOBILE-BUILD-NOTES.md). .ticker-countdown's color is overridden for
+  // the mobile conferences pane (light background) vs. the ticker itself
+  // (dark background) - see the two rules in <style>.
+  function formatConferenceDisplayHtml(conf, now) {
+    const text = computeConferenceCountdownText(conf, now);
+    if (!text) return conf.detail ? escapeHtml(conf.detail) : '';
+    const countdownHtml = '<span class="ticker-countdown">' + escapeHtml(text) + '</span>';
+    return conf.locationPrefix ? (escapeHtml(conf.locationPrefix) + ' — ' + countdownHtml) : countdownHtml;
   }
 
   // Aggregate state for the compact hamburger-icon badge, which can't show
@@ -4503,9 +4550,9 @@
     (conferences || []).forEach(function(c) {
       const cd = getConferenceCountdown(c, now);
       if (!cd) return;
-      const sortKey = cd.status === 'underway' ? -1 : cd.daysUntil;
-      const text = cd.status === 'underway' ? ('Day ' + cd.day + ' of ' + cd.total) : (cd.daysUntil + (cd.daysUntil === 1 ? ' day' : ' days'));
       if (cd.status === 'upcoming' && cd.daysUntil > CONFERENCE_COUNTDOWN_WINDOW_DAYS) return;
+      const sortKey = cd.status === 'underway' ? -1 : cd.daysUntil;
+      const text = computeConferenceCountdownText(c, now);
       if (!best || sortKey < best.sortKey) best = { sortKey: sortKey, text: text };
     });
     return best ? best.text : null;
@@ -4539,11 +4586,13 @@
     }
     const now = new Date();
     const pieces = items.map(function(c) {
-      // Plain text for the title/detail. Only the source's own link text (if
-      // any) becomes clickable - e.g. "register now" - not the whole entry.
-      const displayDetail = formatConferenceDisplay(c, now);
+      // Title is plain text; the detail/countdown comes back already-safe
+      // HTML (see formatConferenceDisplayHtml) so its countdown portion can
+      // be bolded. Only the source's own link text (if any) becomes
+      // clickable - e.g. "register now" - not the whole entry.
+      const displayHtml = formatConferenceDisplayHtml(c, now);
       let html = '<span class="ticker-item">' + escapeHtml(c.title);
-      if (displayDetail) html += ': ' + escapeHtml(displayDetail);
+      if (displayHtml) html += ': ' + displayHtml;
       html += '</span>';
       if (c.link) {
         const linkLabel = c.linkText && c.linkText.trim() ? c.linkText.trim() : 'more info';
@@ -5657,10 +5706,10 @@
     }
     const now = new Date();
     listEl.innerHTML = currentConferences.map(function(c) {
-      const displayDetail = formatConferenceDisplay(c, now);
+      const displayHtml = formatConferenceDisplayHtml(c, now);
       let html = '<div class="mc-row">' +
         '<div class="mc-name">' + escapeHtml(c.title) + '</div>';
-      if (displayDetail) html += '<div class="mc-detail">' + escapeHtml(displayDetail) + '</div>';
+      if (displayHtml) html += '<div class="mc-detail">' + displayHtml + '</div>';
       if (c.link) {
         // Same per-entry destination as the ticker's own "more info" link
         // (registration pages, etc.) - a deliberate, entry-specific exit

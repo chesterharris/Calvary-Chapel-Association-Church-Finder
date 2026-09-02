@@ -43,6 +43,13 @@ After deploying, the conference ticker was still showing raw text instead of a c
 
 If a future date-parsing tweak ever needs to go out immediately rather than waiting up to 6 hours, bump `CACHE_VERSION` again when you make that change.
 
+## Follow-up round 4 (Sept 2)
+
+Two fixes to the countdown text itself:
+
+- **"5 days" read as the conference's own duration, not a countdown to it.** Changed the wording to "in 5 days" everywhere this text appears (ticker, mobile conferences pane, hamburger menu row) - refactored the three separate copies of this wording logic into one shared function (`computeConferenceCountdownText`) so this can't drift out of sync between them again.
+- **Made the countdown portion stand out visually in the ticker**, per your ask for options - went with bold + the same gold accent (`#f2c76e`) already used for this ticker's own "more info" links (your pick of the three I gave you: bold+color / icon prefix / pill badge). Only the countdown/Day-X-of-Y text is bolded, not the location prefix or the title. The mobile conferences pane reuses the same markup, but overrides the color to brass instead of gold there, since that pane's rows sit on the light paper background where the ticker's gold would be hard to read - same emphasis, adapted to a light vs. dark background.
+
 ## Judgment calls worth a second look
 - Hourly countdown refresh interval (see above).
 - "Admin ✓ (sign out)" label text.
