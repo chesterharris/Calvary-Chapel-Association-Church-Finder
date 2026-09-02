@@ -2707,7 +2707,7 @@
     // negative duration until that poll resolves it one way or the other.
     btn.innerHTML = remainingMs <= 0
       ? '🕒 Starting any moment now'
-      : '🕒 Next live service begins in ' + formatUpcomingCountdown(remainingMs);
+      : '🕒 Live in ' + formatUpcomingCountdown(remainingMs);
   }
 
   function updateLiveNowUi() {
@@ -4547,13 +4547,21 @@
   function showMiniPlayer() {
     radioPlayerBar.style.display = 'flex';
     document.getElementById('app').classList.add('player-open');
-    map.invalidateSize();
+    // The map is itself hidden (display:none) while the full-screen mobile
+    // station picker is open (see body.mobile-picker-open in <style>).
+    // Calling invalidateSize() against a 0x0 container makes Leaflet cache
+    // that bogus size, and it "corrects" for the size jump with a pan once
+    // the map reappears - panning the view off into empty tile space and
+    // leaving it blank until a full reload re-inits the map from scratch.
+    // Skip it here; closeMobileRadioPicker() does the one invalidateSize()
+    // call that actually matters, once the map is visible again.
+    if (!document.body.classList.contains('mobile-picker-open')) map.invalidateSize();
   }
 
   function hideMiniPlayer() {
     radioPlayerBar.style.display = 'none';
     document.getElementById('app').classList.remove('player-open');
-    map.invalidateSize();
+    if (!document.body.classList.contains('mobile-picker-open')) map.invalidateSize();
   }
 
   const radioPlayerStation = document.getElementById('radioPlayerStation');
@@ -5537,6 +5545,12 @@
 
   function closeMobileRadioPicker() {
     document.body.classList.remove('mobile-picker-open');
+    // The map (and possibly the mini-player, if a station was picked while
+    // the picker was open) just became visible/changed size again - give
+    // Leaflet the one accurate invalidateSize() call it needs now that the
+    // container's real dimensions are back, instead of the skipped/bogus
+    // ones from while it was hidden (see showMiniPlayer/hideMiniPlayer).
+    map.invalidateSize();
   }
 
   document.getElementById('radioTickerLabel').addEventListener('click', function() {
