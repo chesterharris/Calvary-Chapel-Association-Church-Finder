@@ -90,8 +90,8 @@
   }
   header h1 {
     margin: 0;
-    font-size: 19px;
-    font-weight: 600;
+    font-size: 23px;
+    font-weight: 700;
     letter-spacing: 0.02em;
   }
   header .sub {
@@ -561,7 +561,7 @@
        problem statement called out the full branding block as part of the
        space eaten before the map. */
     header .header-title-text .sub { display: none; }
-    header h1 { font-size: 16px; }
+    header h1 { font-size: 19px; }
     /* Search moves to its own full-width row below title+hamburger, and
        its separate label line is dropped in favor of the input's existing
        placeholder - one fewer line before the map. */
@@ -871,27 +871,30 @@
     width: 420px;
   }
   /* Hidden by default (desktop) - see the 720px rule below, where these
-     take over from the "x" close button for #radioBrowsePanel and
-     #liveNowPanel, the two remaining panes still built as .side-panel
-     drawers rather than dedicated .mp-picker markup like the Radio
-     Stations picker and Conferences pane. */
+     take over from the "x" close button for #radioBrowsePanel,
+     #liveNowPanel, #liveDebugPanel and #managePanel, the four panes still
+     built as .side-panel drawers rather than dedicated .mp-picker markup
+     like the Radio Stations picker and Conferences pane. */
   .mobile-panel-back-btn, .mobile-panel-spacer { display: none; }
   /* Below the same 720px breakpoint where the header swaps to the ☰ menu
-     (All Stations and Live Now are only reachable there, never via a
-     desktop button, once header-actions itself is hidden), both panels
-     become full-screen takeovers instead of right-side drawers - same
-     reasoning as the Radio station picker and Conferences pane, and the
-     same body-class/hide-everything-else mechanism (see
-     body.mobile-browse-open / body.mobile-livenow-open below), for
-     consistency across all four ☰-reachable destinations. This also
-     fully replaces an older narrower band-aid on #radioBrowsePanel that
-     capped it to 88vw on phones because its fixed 420px width above (an
-     ID selector beats .side-panel's own 88vw cap) pushed it wider than
-     the screen and dragged its close button off-screen - inset:0 below
-     has no such width problem to begin with. */
+     (All Stations, Live Now, Live Debug and Manage Locations are only
+     reachable there, never via a desktop button, once header-actions
+     itself is hidden), all four panels become full-screen takeovers
+     instead of right-side drawers - same reasoning as the Radio station
+     picker and Conferences pane, and the same body-class/hide-everything-
+     else mechanism (see body.mobile-browse-open / body.mobile-livenow-open
+     / body.mobile-livedebug-open / body.mobile-manage-open below), for
+     consistency across every ☰-reachable destination. This also fully
+     replaces an older narrower band-aid on #radioBrowsePanel that capped
+     it to 88vw on phones because its fixed 420px width above (an ID
+     selector beats .side-panel's own 88vw cap) pushed it wider than the
+     screen and dragged its close button off-screen - inset:0 below has no
+     such width problem to begin with. */
   @media (max-width: 720px) {
     #radioBrowsePanel,
-    #liveNowPanel {
+    #liveNowPanel,
+    #liveDebugPanel,
+    #managePanel {
       position: fixed;
       inset: 0;
       width: 100%;
@@ -910,21 +913,31 @@
        the title flush against "BACK" with zero space between them
        without it. */
     #radioBrowsePanel .side-panel-header,
-    #liveNowPanel .side-panel-header {
+    #liveNowPanel .side-panel-header,
+    #liveDebugPanel .side-panel-header,
+    #managePanel .side-panel-header {
       gap: 10px;
     }
     #radioBrowsePanel .side-panel-header .btn-close,
-    #liveNowPanel .side-panel-header .btn-close {
+    #liveNowPanel .side-panel-header .btn-close,
+    #liveDebugPanel .side-panel-header .btn-close,
+    #managePanel .side-panel-header .btn-close {
       display: none;
     }
     #radioBrowsePanel .mobile-panel-back-btn,
     #liveNowPanel .mobile-panel-back-btn,
+    #liveDebugPanel .mobile-panel-back-btn,
+    #managePanel .mobile-panel-back-btn,
     #radioBrowsePanel .mobile-panel-spacer,
-    #liveNowPanel .mobile-panel-spacer {
+    #liveNowPanel .mobile-panel-spacer,
+    #liveDebugPanel .mobile-panel-spacer,
+    #managePanel .mobile-panel-spacer {
       display: flex;
     }
     #radioBrowsePanel .side-panel-header h2,
-    #liveNowPanel .side-panel-header h2 {
+    #liveNowPanel .side-panel-header h2,
+    #liveDebugPanel .side-panel-header h2,
+    #managePanel .side-panel-header h2 {
       flex: 1;
       min-width: 0;
       margin: 0;
@@ -937,6 +950,43 @@
          All Stations title's station count ("All 35 Radio Stations") is
          exactly the part truncation was cutting off, which is the one
          piece of information on this header actually worth keeping. */
+    }
+    /* "+Add Location" (and Edit, which reuses the same modal) is the one
+       admin destination built as a centered .modal-overlay dialog rather
+       than a .side-panel - same full-screen-takeover treatment applied to
+       the modal card itself so it matches the other three panes reachable
+       from the ☰ menu, rather than staying a small centered box floating
+       over a long form. */
+    #locationModal .modal {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      max-height: none;
+      border-radius: 0;
+      box-sizing: border-box;
+    }
+    #locationModal .modal-header-mobile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #locationModal .modal-header-mobile .mobile-panel-back-btn,
+    #locationModal .modal-header-mobile .mobile-panel-spacer {
+      display: flex;
+    }
+    #locationModal .modal-header-mobile h2 {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      text-align: center;
+      text-transform: uppercase;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0.04em;
+      border-bottom: none;
+      padding-bottom: 0;
     }
   }
   .radio-browse-toolbar {
@@ -1934,19 +1984,20 @@
     flex-direction: column;
   }
   /* Full takeover on phones: while the picker (or the conferences pane,
-     All Stations, or Live Now panels below, which share this same
-     mechanism under their own body classes) is open, the header, both
-     tickers, the score filter bar, the map, and the desktop mini-player
-     all step aside so nothing competes with it for a driver's glance.
-     Each pane's own top bar/close control is the only way back. */
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) header,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #conferenceTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #radioTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #mobilePrimaryRow,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #filterBar,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #map,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #countBadge,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open) #radioPlayerBar {
+     All Stations, Live Now, Live Debug, Manage Locations, or Add Location
+     panels below, which share this same mechanism under their own body
+     classes) is open, the header, both tickers, the score filter bar, the
+     map, and the desktop mini-player all step aside so nothing competes
+     with it for a driver's glance. Each pane's own top bar/close control
+     is the only way back. */
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) header,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #conferenceTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #radioTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #mobilePrimaryRow,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #filterBar,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #map,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #countBadge,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #radioPlayerBar {
     display: none !important;
   }
   body.mobile-picker-open #mobileRadioPicker {
@@ -2264,6 +2315,25 @@
         <span class="hamburger-menu-icon" aria-hidden="true">💬</span>
         <span class="hamburger-menu-label">Feedback</span>
       </button>
+      <!-- Admin-only rows below - hidden by default (see the inline
+           style="display:none" the same way #btnLiveDebug is), shown only
+           once setAdminUiState(true) runs (see initAdminGate/the sign-in
+           flow). Each opens the same full-screen mobile takeover as the
+           other ☰ rows, by delegating to its existing desktop control's
+           own open function - see openLiveDebugPanel/openManagePanel/
+           openModal below. -->
+      <button type="button" id="menuLiveDebugItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">🛠️</span>
+        <span class="hamburger-menu-label">Live Debug</span>
+      </button>
+      <button type="button" id="menuManageLocationsItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">🗂️</span>
+        <span class="hamburger-menu-label">Manage Locations</span>
+      </button>
+      <button type="button" id="menuAddLocationItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">➕</span>
+        <span class="hamburger-menu-label">Add Location</span>
+      </button>
       <button type="button" id="menuAdminItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">🔒</span>
         <span id="menuAdminLabel" class="hamburger-menu-label">Admin</span>
@@ -2326,7 +2396,16 @@
 
 <div id="locationModal" class="modal-overlay" style="display: none;">
   <div class="modal">
-    <h2 id="modalTitle">Add Location</h2>
+    <!-- Mobile-only back button (see .mobile-panel-back-btn/.mp-topbar-spacer
+         in <style>) - same full-screen-takeover treatment as the other ☰
+         menu destinations below the 720px breakpoint (see #locationModal
+         .modal rule there). Above that width this wrapper is inert and the
+         modal looks exactly as it always has. -->
+    <div class="modal-header-mobile">
+      <button type="button" id="locationModalBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+      <h2 id="modalTitle">Add Location</h2>
+      <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
+    </div>
     <form id="locationForm">
       <div class="form-row">
         <label for="f_name">Church Name *</label>
@@ -2448,9 +2527,13 @@
 </div>
 
 <div id="managePanel" class="side-panel" style="display: none;">
+  <!-- See #liveNowPanel's identical comment re: the mobile-only back
+       button + spacer pair. -->
   <div class="side-panel-header">
+    <button type="button" id="manageMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
     <h2>Manage Locations</h2>
     <button id="closeManageBtn" class="btn-close">×</button>
+    <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
   <input id="manageSearch" type="text" placeholder="Search by name or city…" class="search-input">
   <div id="manageList" class="manage-list"><div class="manage-item"><div class="manage-item-info"><div class="manage-item-name">Calvary Chapel Burr Ridge<span class="manage-item-new">Added</span></div><div class="manage-item-loc">Burr Ridge, IL 60527</div></div><button type="button" data-edit="a1786907829280845">Edit</button><button type="button" data-del="a1786907829280845">Delete</button></div></div>
@@ -2536,7 +2619,11 @@
        there and this is a mobile-only tap-target fix. -->
   <div class="side-panel-header">
     <button type="button" id="liveNowMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
-    <h2>🔴 Live Now</h2>
+    <!-- Text is fully owned by updateLiveNowUi() from first load onward -
+         this is just a safe default before that first runs. Always shows
+         the real count, including 0, rather than hiding the number at
+         zero. -->
+    <h2 id="liveNowPanelTitle">🔴 0 Live Now</h2>
     <button id="closeLiveNowBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
@@ -2591,9 +2678,13 @@
 </div>
 
 <div id="liveDebugPanel" class="side-panel" style="display: none;">
+  <!-- See #liveNowPanel's identical comment re: the mobile-only back
+       button + spacer pair. -->
   <div class="side-panel-header">
+    <button type="button" id="liveDebugMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
     <h2>🛠️ Live Check Debug</h2>
     <button id="closeLiveDebugBtn" class="btn-close">×</button>
+    <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
   <div class="live-debug-toolbar">
     <div class="live-debug-toolbar-status">
@@ -2880,6 +2971,13 @@
     const count = liveStatusData.live.length;
     const liveOnlyCb = document.getElementById('liveOnlyFilterCb');
     const liveOnlyRow = document.getElementById('liveOnlyFilterRow');
+
+    // Keeps the Live Now pane's own header in sync with the same count
+    // every time this runs (including while the pane is already open, via
+    // the existing poll cycle) - always the real number, "0 Live Now"
+    // included, per your call on the zero-count case.
+    const liveNowPanelTitle = document.getElementById('liveNowPanelTitle');
+    if (liveNowPanelTitle) liveNowPanelTitle.textContent = '🔴 ' + count + ' Live Now';
 
     // This always reflects the true total, regardless of the
     // Featured/Favorites filters used elsewhere - those only ever narrow
@@ -3556,20 +3654,34 @@
     }
   }
 
-  document.getElementById('btnLiveDebug').addEventListener('click', function() {
+  // Named (rather than the previous two inline handlers) so the mobile
+  // back button below can share the exact same close behavior as the "x" -
+  // same reasoning/pattern as openLiveNowPanel/closeLiveNowPanel.
+  function openLiveDebugPanel() {
     liveDebugPanel.style.display = 'flex';
+    // Full-screen takeover on mobile (see the 720px rule on #liveDebugPanel
+    // in <style>) - reachable there only via the admin-only ☰ row, since
+    // #btnLiveDebug itself lives in the desktop-only .header-actions row.
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-livedebug-open');
     loadLiveDebugStatus();
     if (liveDebugPollTimer) clearTimeout(liveDebugPollTimer);
     pollProgressAndStatus();
-  });
-  document.getElementById('closeLiveDebugBtn').addEventListener('click', function() {
+  }
+  function closeLiveDebugPanel() {
     liveDebugPanel.style.display = 'none';
+    document.body.classList.remove('mobile-livedebug-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
     if (liveDebugPollTimer) {
       clearTimeout(liveDebugPollTimer);
       liveDebugPollTimer = null;
     }
     liveDebugWatchingRun = false;
-  });
+  }
+  document.getElementById('btnLiveDebug').addEventListener('click', openLiveDebugPanel);
+  document.getElementById('closeLiveDebugBtn').addEventListener('click', closeLiveDebugPanel);
+  // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
+  // close behavior as the "x" above, just a bigger/clearer tap target.
+  document.getElementById('liveDebugMobileBackBtn').addEventListener('click', closeLiveDebugPanel);
   liveDebugRefreshBtn.addEventListener('click', loadLiveDebugStatus);
   liveDebugRunNowBtn.addEventListener('click', function() {
     setDebugButtonsRunning(true);
@@ -4225,12 +4337,20 @@
   const form = document.getElementById('locationForm');
   let editingId = null;
 
+  // Full-screen takeover on mobile (see the 720px rule on #locationModal
+  // .modal in <style>) - same mechanism as the other ☰-reachable admin
+  // panes, applied to both Add and Edit since they share this one modal.
+  function openLocationModalMobileTakeover() {
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-addloc-open');
+  }
+
   function openModal() {
     editingId = null;
     modalTitle.textContent = 'Add Location';
     saveLocationBtn.textContent = 'Save Location';
     form.reset();
     modal.style.display = 'flex';
+    openLocationModalMobileTakeover();
   }
 
   function openEditModal(c) {
@@ -4253,16 +4373,23 @@
     document.getElementById('f_role').value = c.role || '';
     document.getElementById('f_region').value = c.region || '';
     modal.style.display = 'flex';
+    openLocationModalMobileTakeover();
   }
 
   function closeModal() {
     modal.style.display = 'none';
     editingId = null;
+    document.body.classList.remove('mobile-addloc-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
   }
 
 
   document.getElementById('btnAddLocation').addEventListener('click', openModal);
   document.getElementById('cancelModalBtn').addEventListener('click', closeModal);
+  // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
+  // close behavior as Cancel above, just a bigger/clearer tap target at
+  // the top of the full-screen form.
+  document.getElementById('locationModalBackBtn').addEventListener('click', closeModal);
 
   // ---- Feedback form ----
   (function() {
@@ -4465,13 +4592,28 @@
     });
   }
 
-  document.getElementById('btnManageLocations').addEventListener('click', function() {
+  // Named (rather than the previous two inline handlers) so the mobile
+  // back button below can share the exact same close behavior as the "x" -
+  // same reasoning/pattern as openLiveNowPanel/closeLiveNowPanel.
+  function openManagePanel() {
     managePanel.style.display = 'flex';
+    // Full-screen takeover on mobile (see the 720px rule on #managePanel
+    // in <style>) - reachable there only via the admin-only ☰ row, since
+    // #btnManageLocations itself lives in the desktop-only .header-actions
+    // row.
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-manage-open');
     renderManageList();
-  });
-  document.getElementById('closeManageBtn').addEventListener('click', function() {
+  }
+  function closeManagePanel() {
     managePanel.style.display = 'none';
-  });
+    document.body.classList.remove('mobile-manage-open');
+    map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
+  }
+  document.getElementById('btnManageLocations').addEventListener('click', openManagePanel);
+  document.getElementById('closeManageBtn').addEventListener('click', closeManagePanel);
+  // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
+  // close behavior as the "x" above, just a bigger/clearer tap target.
+  document.getElementById('manageMobileBackBtn').addEventListener('click', closeManagePanel);
   manageSearch.addEventListener('input', renderManageList);
 
   const EXPORT_KEY_ORDER = ['id', 'name', 'address', 'citystatezip', 'phone', 'website', 'lat', 'lng', 'email', 'pastor', 'score', 'role', 'region'];
@@ -4755,12 +4897,11 @@
   // any time that size actually changes underneath it, or the map will
   // keep rendering/interacting as if it were still the old (taller) size
   // until the next manual pan/zoom.
-  // True while the map is hidden behind any of the three full-screen
-  // mobile takeovers (see body:is(.mobile-picker-open, .mobile-conf-open,
-  // .mobile-browse-open) in <style>).
+  // True while the map is hidden behind any of the full-screen mobile
+  // takeovers (see the body:is(...) selector in <style>).
   function isMapHiddenByMobileTakeover() {
     const cl = document.body.classList;
-    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open') || cl.contains('mobile-livenow-open');
+    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open') || cl.contains('mobile-livenow-open') || cl.contains('mobile-livedebug-open') || cl.contains('mobile-manage-open') || cl.contains('mobile-addloc-open');
   }
 
   function showMiniPlayer() {
@@ -5888,18 +6029,31 @@
     if (!e.matches) {
       closeHamburgerMenu();
       if (document.body.classList.contains('mobile-conf-open')) closeMobileConferencesPane();
-      // All Stations and Live Now both have a visible desktop button of
-      // their own (unlike Conferences, hamburger-only) - don't hide
-      // either panel, just drop back to the normal side-drawer
-      // presentation now that there's a visible header button again, the
-      // same way each already behaves for anyone who opened it from that
-      // button directly.
+      // All Stations, Live Now, Live Debug, Manage Locations, and Add/Edit
+      // Location all have a visible desktop control of their own (unlike
+      // Conferences, hamburger-only) - don't hide any of them, just drop
+      // back to the normal side-drawer/centered-modal presentation now
+      // that there's a visible header button again, the same way each
+      // already behaves for anyone who opened it from that control
+      // directly.
       if (document.body.classList.contains('mobile-browse-open')) {
         document.body.classList.remove('mobile-browse-open');
         map.invalidateSize();
       }
       if (document.body.classList.contains('mobile-livenow-open')) {
         document.body.classList.remove('mobile-livenow-open');
+        map.invalidateSize();
+      }
+      if (document.body.classList.contains('mobile-livedebug-open')) {
+        document.body.classList.remove('mobile-livedebug-open');
+        map.invalidateSize();
+      }
+      if (document.body.classList.contains('mobile-manage-open')) {
+        document.body.classList.remove('mobile-manage-open');
+        map.invalidateSize();
+      }
+      if (document.body.classList.contains('mobile-addloc-open')) {
+        document.body.classList.remove('mobile-addloc-open');
         map.invalidateSize();
       }
     }
@@ -5924,6 +6078,22 @@
   document.getElementById('menuFeedbackItem').addEventListener('click', function() {
     closeHamburgerMenu();
     document.getElementById('btnFeedback').click();
+  });
+  // Admin-only rows - hidden unless setAdminUiState(true) has run (see
+  // below), so only an already-signed-in admin can ever reach these.
+  // Same delegate-to-the-desktop-control pattern as the three rows above,
+  // so mobile and desktop can't drift apart.
+  document.getElementById('menuLiveDebugItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnLiveDebug').click();
+  });
+  document.getElementById('menuManageLocationsItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnManageLocations').click();
+  });
+  document.getElementById('menuAddLocationItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnAddLocation').click();
   });
   document.getElementById('menuAdminItem').addEventListener('click', function() {
     closeHamburgerMenu();
@@ -6055,6 +6225,13 @@
     adminBadge.style.display = isAdmin ? 'inline' : 'none';
     const debugBtn = document.getElementById('btnLiveDebug');
     if (debugBtn) debugBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    // Mirrors the desktop button above for each of the three admin-only ☰
+    // menu rows (Live Debug, Manage Locations, Add Location) - hidden
+    // until an admin actually signs in, same as btnLiveDebug itself.
+    ['menuLiveDebugItem', 'menuManageLocationsItem', 'menuAddLocationItem'].forEach(function(id) {
+      const item = document.getElementById(id);
+      if (item) item.style.display = isAdmin ? 'flex' : 'none';
+    });
   }
 
   // Hides the score filter bar and the Add/Manage Locations buttons from
