@@ -2276,6 +2276,31 @@ const RADIO_STATIONS = [
     provider: 'triton',
     mount: 'WROJ_LPAAC',
     streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WROJ_LPAAC.aac'
+  },
+  {
+    // Added 2026-09-03. Plain 'icecast' station - no new provider code
+    // needed. The page's own player is a bespoke WordPress plugin
+    // ("vmplayer") that fronts this station's real Icecast server through
+    // its own admin-ajax.php + nonce, already pre-splitting title/artist
+    // for its widget - but the underlying source is confirmed genuine
+    // Icecast (vmplayer's own config says stream_type "icecast", matching
+    // the "icecast-json" source label in its ajax response), so we go
+    // straight to the real status-json.xsl endpoint instead of depending
+    // on the WordPress site's ajax action/nonce. Confirmed directly: raw
+    // title is "Pastor Chuck Smith - The Word for Today", the standard
+    // "Host - Program" combined format our existing split-on-" - " logic
+    // already handles correctly (matches the separate title/artist fields
+    // vmplayer's own ajax response reported). streamUrl uses the clean
+    // mount URL - the page's own stream_url/mounts[].url both carry a long
+    // Google Analytics query string (_gl/_ga clickthrough params) that's
+    // just front-end tracking, not needed to fetch the stream itself.
+    displayName: 'KACM',
+    cityState: 'Montrose, CO',
+    homePage: 'https://calvarymontrose.com/kacm/',
+    provider: 'icecast',
+    host: 'streamer.calvarymontrose.com',
+    mount: 'KACM',
+    streamUrl: 'https://streamer.calvarymontrose.com/KACM'
   }
 ];
 
