@@ -2231,6 +2231,26 @@ const RADIO_STATIONS = [
     provider: 'radioking',
     slug: 'calvary-chapel-radio',
     streamUrl: 'https://listen.radioking.com/radio/482243/stream/538778'
+  },
+  {
+    // Added 2026-09-03. First 'radioboss' station - see the notes doc for
+    // the full provider writeup. One caveat flagged up front:
+    // currenttrack_title at add-time was "SAR20260902" - reads like an
+    // internal automation filename (today's date baked right into it),
+    // not a real program/host name - even though this station's own
+    // published schedule (Real Radio, A New Beginning, Chapter and
+    // Verse, etc.) shows genuine syndicated teaching programming airs
+    // here around the clock. Could not independently re-poll to check
+    // whether real titles show up at other times of day (blocked by
+    // robots.txt), so this is unconfirmed either way - worth a
+    // deliberate second look in a few days, same policy as CSN
+    // International above.
+    displayName: 'KCHP Radio',
+    cityState: 'Humboldt Co, CA',
+    homePage: 'https://telioschurch.com/kchpradio/',
+    provider: 'radioboss',
+    stationId: '77',
+    streamUrl: 'https://c5.radioboss.fm:8077/stream'
   }
 ];
 
@@ -2891,6 +2911,18 @@ const RADIO_PROVIDERS = {
       return 'https://api.radioking.io/widget/radio/' + station.slug + '/track/current';
     },
     parse: parseRadioKingJson
+  },
+  radioboss: {
+    // Uses fetchAndParse even though this is only ONE HTTP call - a
+    // different reason than live365hls/aiir's multi-call chains above.
+    // RadioBoss's now-playing JSON has no cover-art field in the response
+    // body at all; the artwork lives at a separate, predictable URL keyed
+    // by the same station id used in the now-playing request
+    // (https://c5.radioboss.fm/w/artwork/{stationId}.jpg, confirmed via
+    // the station's own embedded widget markup) - fetchAndParse is the
+    // only shape that gets station.stationId available alongside the
+    // parsed response to build that URL.
+    fetchAndParse: fetchRadioBossNowPlaying
   }
 };
 
@@ -3019,6 +3051,30 @@ async function fetchAiirNowPlaying(station) {
 
     ws.send(JSON.stringify({ action: 'subscribe', serviceId: station.serviceId }));
   });
+}
+
+// RadioBoss Cloud's now-playing widget API - a single plain GET, but still
+// uses fetchAndParse (not buildNowPlayingUrl+parse) because the cover-art
+// URL has to be built from station.stationId, which a plain parse(rawText)
+// never sees. currenttrack_title/currenttrack_artist are already separate
+// fields (like streamingradio's shape), no combined-string splitting
+// needed. artwork_ts (a real, current Unix timestamp, confirmed against
+// the add-time response) is appended as a cache-buster so the image
+// updates promptly when the track/art changes - artwork_next_ts, by
+// contrast, was a stale ~2023 value in the one response seen so far and
+// looks like an unused placeholder, not a real "next" pointer - ignored.
+async function fetchRadioBossNowPlaying(station) {
+  const url = 'https://c5.radioboss.fm/w/nowplayinginfo?u=' + encodeURIComponent(station.stationId) + '&_=' + Date.now();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Station ' + station.displayName + ' now-playing endpoint returned ' + res.status);
+  const data = await res.json();
+
+  const title = data && typeof data.currenttrack_title === 'string' ? data.currenttrack_title.trim() : '';
+  const artist = data && typeof data.currenttrack_artist === 'string' ? data.currenttrack_artist.trim() : '';
+  const artworkUrl = 'https://c5.radioboss.fm/w/artwork/' + encodeURIComponent(station.stationId) + '.jpg';
+  const coverUrl = data && data.artwork_ts ? (artworkUrl + '?' + data.artwork_ts) : artworkUrl;
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
 }
 
 async function fetchStationNowPlaying(station) {
