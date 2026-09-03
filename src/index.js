@@ -2234,23 +2234,48 @@ const RADIO_STATIONS = [
   },
   {
     // Added 2026-09-03. First 'radioboss' station - see the notes doc for
-    // the full provider writeup. One caveat flagged up front:
-    // currenttrack_title at add-time was "SAR20260902" - reads like an
-    // internal automation filename (today's date baked right into it),
-    // not a real program/host name - even though this station's own
-    // published schedule (Real Radio, A New Beginning, Chapter and
-    // Verse, etc.) shows genuine syndicated teaching programming airs
-    // here around the clock. Could not independently re-poll to check
-    // whether real titles show up at other times of day (blocked by
-    // robots.txt), so this is unconfirmed either way - worth a
-    // deliberate second look in a few days, same policy as CSN
-    // International above.
+    // the full provider writeup. currenttrack_title looks like a bare code
+    // ("SAR20260902") but is confirmed real, not a dead-pipeline filename:
+    // "SAR" = "Sandy Adams Radio" (a real show on this station's own
+    // published schedule) + that day's airdate - this station's
+    // automation just names blocks {ShowInitials}{YYYYMMDD} instead of
+    // spelling the show out. Terse, but legitimate metadata.
     displayName: 'KCHP Radio',
     cityState: 'Humboldt Co, CA',
     homePage: 'https://telioschurch.com/kchpradio/',
     provider: 'radioboss',
     stationId: '77',
     streamUrl: 'https://c5.radioboss.fm:8077/stream'
+  },
+  {
+    // Added 2026-09-03. First 'triton' station - Triton Digital is a large,
+    // well-documented radio-hosting/streaming platform (same tier of
+    // legitimacy as Radio.co/RadioKing already in this file), not something
+    // reverse-engineered from scratch. mount 'WROJ_LPAAC' = this station's
+    // Triton station_id ("WROJ_LP", found in the page's own inline player
+    // config) + codec suffix ("AAC") - confirmed correct by directly
+    // fetching Triton's public nowplaying API with this value and getting
+    // back real, current, non-frozen data (a specific song + artist, not a
+    // stale placeholder).
+    //
+    // streamUrl deliberately does NOT use the exact URL captured from the
+    // browser's network tab (an edge node like
+    // "18003.live.streamtheworld.com/WROJ_LPAAC_SBM?sbmid=...", where sbmid
+    // is a fresh session token generated per page load - not something a
+    // static config string can supply). Instead it uses Triton/
+    // StreamTheWorld's official redirect endpoint, which resolves to a
+    // healthy edge server on its own and needs no session token. The "_SBM"
+    // (session-based-metadata) stream variant exists so the player can read
+    // now-playing info embedded in the stream itself - we don't need that,
+    // since we already get now-playing data from Triton's separate API
+    // above, so the plain redirect stream is both simpler and a better fit.
+    // Worth a quick real playback check after this deploys.
+    displayName: 'Refuge FM',
+    cityState: 'St. Cloud, MN',
+    homePage: 'https://refuge.mn/refuge-fm',
+    provider: 'triton',
+    mount: 'WROJ_LPAAC',
+    streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WROJ_LPAAC.aac'
   }
 ];
 
@@ -2923,6 +2948,20 @@ const RADIO_PROVIDERS = {
     // only shape that gets station.stationId available alongside the
     // parsed response to build that URL.
     fetchAndParse: fetchRadioBossNowPlaying
+  },
+  triton: {
+    // fetchAndParse for a third reason (distinct from both live365hls/aiir's
+    // multi-call chains and radioboss's need for a station field): Triton's
+    // nowplaying XML has no artwork field at all, and unlike radioboss there
+    // is no predictable per-station artwork URL to build either - the
+    // station's own hosted player fills in cover art with a *second*, fully
+    // separate network call to Apple's public iTunes Search API keyed off
+    // the title/artist text (confirmed by capturing that exact request in
+    // the browser - a JSONP call to itunes.apple.com/search). We replicate
+    // that same second hop server-side (as plain JSON, no callback param
+    // needed - the JSONP wrapper is purely a browser/jQuery convenience,
+    // not required by the API itself).
+    fetchAndParse: fetchTritonNowPlaying
   }
 };
 
@@ -3073,6 +3112,56 @@ async function fetchRadioBossNowPlaying(station) {
   const artist = data && typeof data.currenttrack_artist === 'string' ? data.currenttrack_artist.trim() : '';
   const artworkUrl = 'https://c5.radioboss.fm/w/artwork/' + encodeURIComponent(station.stationId) + '.jpg';
   const coverUrl = data && data.artwork_ts ? (artworkUrl + '?' + data.artwork_ts) : artworkUrl;
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
+// Triton Digital's public nowplaying API - one plain GET returning small,
+// flat, machine-generated XML, so the same simple regex-extraction approach
+// used for SecureNetSystems above is fine here too. Confirmed real fields
+// from a live fetch against this exact station: cue_title (track/show
+// title) and track_artist_name (artist) - both wrapped in CDATA. Two other
+// properties are present (cue_time_duration, cue_time_start) but aren't
+// used; they're playback-position bookkeeping, not display text.
+//
+// Cover art needs a second hop: Triton's response has no artwork field, so
+// we look the title+artist up on Apple's iTunes Search API the same way the
+// station's own hosted player does (confirmed via the browser capture) and
+// take the first result's artwork, upsized from the default 100x100 to
+// 600x600 (a standard, documented iTunes artwork URL trick - the size is
+// just a path segment). Talk/spoken-word cue titles won't match a song on
+// iTunes; that's expected and just means no cover art for that cue, not an
+// error - the title/artist still display fine without it. A failed or slow
+// iTunes lookup is swallowed the same way, so a hiccup on Apple's side
+// never breaks the primary title/artist result.
+async function fetchTritonNowPlaying(station) {
+  const npUrl = 'https://np.tritondigital.com/public/nowplaying?mountName=' + encodeURIComponent(station.mount) + '&numberToFetch=1&eventType=track';
+  const npRes = await fetch(npUrl);
+  if (!npRes.ok) throw new Error('Station ' + station.displayName + ' now-playing endpoint returned ' + npRes.status);
+  const npText = await npRes.text();
+
+  const titleMatch = npText.match(/<property name="cue_title"><!\[CDATA\[([\s\S]*?)\]\]><\/property>/);
+  const artistMatch = npText.match(/<property name="track_artist_name"><!\[CDATA\[([\s\S]*?)\]\]><\/property>/);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const artist = artistMatch ? artistMatch[1].trim() : '';
+
+  let coverUrl = null;
+  if (title || artist) {
+    try {
+      const searchTerm = (artist + ' ' + title).trim();
+      const itUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(searchTerm) + '&country=us&media=music&entity=song&limit=1';
+      const itRes = await fetch(itUrl);
+      if (itRes.ok) {
+        const itData = await itRes.json();
+        if (itData && Array.isArray(itData.results) && itData.results[0] && itData.results[0].artworkUrl100) {
+          coverUrl = itData.results[0].artworkUrl100.replace('100x100bb', '600x600bb');
+        }
+      }
+    } catch (e) {
+      // Cover art is a nice-to-have; a failed/timed-out iTunes lookup
+      // shouldn't fail the whole now-playing fetch.
+    }
+  }
 
   return { title: title, artist: artist, coverUrl: coverUrl };
 }
