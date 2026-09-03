@@ -2166,6 +2166,21 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice8.securenetsystems.net/KVNG'
   },
   {
+    // Added 2026-09-03. Single real-title snapshot at add-time ("The Word
+    // For Today", a genuine syndicated program - not blank/generic like
+    // the GraceFM/KGPS dead-feed cases) - same bar WXMB passed before it
+    // was later found stale. Per the notes' policy for teaching-heavy
+    // SecureNetSystems stations, worth a deliberate second look in about
+    // a week to confirm the title/programStartTS are actually moving.
+    displayName: 'CSN International',
+    cityState: 'Twin Falls, ID',
+    homePage: 'https://csnradio.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'CSNAAC',
+    streamUrl: 'https://ice7.securenetsystems.net/CSNAAC'
+  },
+  {
     displayName: 'KLYT',
     cityState: 'Albuquerque, NM',
     homePage: 'https://klyt.fm/',
