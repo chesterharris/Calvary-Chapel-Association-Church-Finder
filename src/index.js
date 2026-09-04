@@ -2301,6 +2301,24 @@ const RADIO_STATIONS = [
     host: 'streamer.calvarymontrose.com',
     mount: 'KACM',
     streamUrl: 'https://streamer.calvarymontrose.com/KACM'
+  },
+  {
+    // Added 2026-09-04. Plain 'live365json' station, not 'live365hls' -
+    // the captured traffic was an HLS chunklist (das-edge...cdnstream.com,
+    // a fresh per-request listeningSessionId), which looks at first glance
+    // like it needs the live365hls two-hop chase, but per the notes doc
+    // policy, live365json's single clean api.live365.com/station/{mountId}
+    // fetch should always be tried first for any new Live365 station - and
+    // it worked here too. Confirmed with a live fetch that returned the
+    // exact same track as the captured HLS snippet ("Pastor Joe Focht -
+    // Straight from the Heart- Psalm 119"), so no need for the HLS chain
+    // or its per-request session-ID churn.
+    displayName: 'Aloha KIHL',
+    cityState: 'Hilo, HI',
+    homePage: 'https://calvarychapelhilo.org/kihl-radio',
+    provider: 'live365json',
+    mountId: 'a95022',
+    streamUrl: 'https://streaming.live365.com/a95022'
   }
 ];
 
