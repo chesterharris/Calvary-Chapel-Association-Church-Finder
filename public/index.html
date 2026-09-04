@@ -2224,6 +2224,39 @@
     opacity: 0.65;
     margin-right: 4px;
   }
+  /* Distinct background from .live-now-filters below (a plain white/paper
+     row) so the sort control reads as a different kind of thing at a
+     glance, not just another checkbox in the same filters group. */
+  .live-now-sort-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(47,75,60,0.06);
+  }
+  .live-now-sort-label {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--evergreen);
+  }
+  .live-now-sort-select {
+    flex: 1;
+    font-size: 12.5px;
+    font-family: inherit;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 8px;
+    cursor: pointer;
+  }
+  .live-now-sort-select:disabled {
+    cursor: default;
+  }
+  .live-now-sort-row:has(select:disabled) {
+    opacity: 0.5;
+  }
   .live-now-filters {
     border-bottom: 1px solid var(--line);
   }
@@ -2627,6 +2660,20 @@
     <button id="closeLiveNowBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
+  <!-- Deliberately its own row, visually separate from #liveNowFilters
+       below - this reorders the list, it doesn't narrow it, and the user
+       who asked for this was explicit that the distinction matters ("This
+       is not a filter"). Always rendered (never hidden), even when there's
+       currently nothing eligible to sort - see the disabled-state check
+       near the top of renderLiveNowList() for why it greys out instead of
+       disappearing. -->
+  <div id="liveNowSortRow" class="live-now-sort-row">
+    <label for="liveNowSortSelect" class="live-now-sort-label">Sort</label>
+    <select id="liveNowSortSelect" class="live-now-sort-select">
+      <option value="default">Default order</option>
+      <option value="freshest">Freshest streams first</option>
+    </select>
+  </div>
   <div id="liveNowFilters" class="live-now-filters">
     <label id="liveOnlyFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="liveOnlyFilterCb" disabled>
@@ -2788,6 +2835,12 @@
   // that kills the rest of the script (learned this one the hard way). ----
   const LIVENOW_FEATURED_FILTER_KEY = 'ccaFinderLiveNowFeaturedFilter';
   const LIVENOW_FAVORITES_FILTER_KEY = 'ccaFinderLiveNowFavoritesFilter';
+  // "Freshest streams first" sort (added 2026-09-08) - orthogonal to the two
+  // filters above, not a third one: it reorders whichever set is currently
+  // visible, it never hides anything. Persisted the same way as the filters
+  // for the same reason (a duty scheduler running this during a busy Sunday
+  // would want it to stay on across visits, not reset every time).
+  const LIVENOW_SORT_MODE_KEY = 'ccaFinderLiveNowSortMode';
 
   function loadBoolFlag(key) {
     try { return localStorage.getItem(key) === 'true'; } catch (err) { return false; }
@@ -2798,6 +2851,18 @@
 
   let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
   let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
+
+  function loadSortMode() {
+    try {
+      return localStorage.getItem(LIVENOW_SORT_MODE_KEY) === 'freshest' ? 'freshest' : 'default';
+    } catch (err) {
+      return 'default';
+    }
+  }
+  function saveSortMode(mode) {
+    try { localStorage.setItem(LIVENOW_SORT_MODE_KEY, mode); } catch (err) { /* ignore */ }
+  }
+  let liveNowSortMode = loadSortMode();
 
   // Shared by both the map's renderMarkers() and the Live Now list - a
   // church matches when no filter is on, or when it satisfies whichever
@@ -3048,7 +3113,38 @@
   // (already alphabetical from loadLiveStatus's own sort) - a church that
   // is BOTH favorited and featured counts only once, in the Favorites
   // tier, so it doesn't show up twice.
+  // A church's YouTube page doesn't always yield a usable startDate (see
+  // MOBILE-BUILD-NOTES/the provider notes doc for why - this mirrors the
+  // radio-side "some feeds just don't have every field" reality). Shared
+  // by the sort comparator below and by renderLiveNowList's
+  // enable/disable check, so both agree on exactly what counts as "has a
+  // real streaming-for duration" - checked once here rather than each
+  // caller re-deriving its own notion of "valid" and drifting apart.
+  function hasValidStartDate(l) {
+    if (!l || !l.startDate) return false;
+    return !isNaN(new Date(l.startDate).getTime());
+  }
+
+  // "Freshest streams first" (added 2026-09-08) - a SORT, not a filter:
+  // every entry in liveStatusData.live is still returned, just reordered.
+  // Deliberately ignores the Featured/Favorites tiering entirely while
+  // active, per the explicit ask that this mode should let those
+  // preferences be overridden rather than layered underneath it. Entries
+  // with no usable startDate sink to a stable alphabetical tail rather
+  // than being dropped or sorted arbitrarily by a NaN comparison - "until
+  // that data becomes available" from the request, not "hidden until
+  // then."
   function getOrderedLiveList() {
+    if (liveNowSortMode === 'freshest') {
+      return liveStatusData.live.slice().sort(function(a, b) {
+        const aHas = hasValidStartDate(a), bHas = hasValidStartDate(b);
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        if (!aHas) return (a.name || '').localeCompare(b.name || '');
+        // Bigger timestamp (started more recently) sorts first - freshest
+        // to most stale, as asked for.
+        return new Date(b.startDate).getTime() - new Date(a.startDate).getTime();
+      });
+    }
     function tier(l) {
       const church = findChurchById(l.churchId);
       if (church && isChurchFavorite(church.id)) return 0;
@@ -3075,10 +3171,12 @@
   function renderLiveNowList() {
     const list = document.getElementById('liveNowList');
     const msgEl = document.getElementById('liveNowClearFiltersMsg');
+    const sortSelect = document.getElementById('liveNowSortSelect');
     const totalCount = liveStatusData.live.length;
 
     if (!totalCount) {
       msgEl.style.display = 'none';
+      if (sortSelect) sortSelect.disabled = true;
       list.innerHTML = '<div class="live-now-empty">No churches are currently live.</div>';
       return;
     }
@@ -3086,6 +3184,13 @@
     const ordered = getOrderedLiveList();
     const visible = ordered.filter(liveEntryPassesFilter);
     const hiddenCount = totalCount - visible.length;
+
+    // Greyed out and disabled (never hidden - see the sort row's own
+    // comment for why) whenever the currently-visible set - i.e. already
+    // narrowed by Featured/Favorites if either is on - has nothing to
+    // sort by. Recomputed on every render since the eligible set shifts
+    // as churches start/stop streaming and as filters are toggled.
+    if (sortSelect) sortSelect.disabled = !visible.some(hasValidStartDate);
 
     if (hiddenCount > 0) {
       msgEl.style.display = 'block';
@@ -3199,6 +3304,15 @@
     saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, favoritesFilterActive);
     renderLiveNowList();
     renderMarkers();
+  });
+  // Sort only ever reorders the Live Now list itself - unlike the two
+  // filters above, it has no effect on which pins show on the map, so
+  // no renderMarkers() call here.
+  document.getElementById('liveNowSortSelect').value = liveNowSortMode;
+  document.getElementById('liveNowSortSelect').addEventListener('change', function(e) {
+    liveNowSortMode = e.target.value;
+    saveSortMode(liveNowSortMode);
+    renderLiveNowList();
   });
 
   // ---- Live Check Debug panel (admin-only) ----
