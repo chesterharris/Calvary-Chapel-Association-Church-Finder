@@ -1193,9 +1193,23 @@ async function checkChurchLive(youtubeUrl) {
   // "actually live" apart from "stuck live" without needing to inspect
   // the actual video stream data itself.
   const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-  if (uploadDate) {
-    const publishedTime = new Date(uploadDate).getTime();
-    if (!isNaN(publishedTime) && (Date.now() - publishedTime) > RECENT_WINDOW_MS) {
+  // Prefer the CURRENT broadcast's start time (liveBroadcastDetails.
+  // startTimestamp, captured above as startDate) over the video's original
+  // publishDate/uploadDate. A channel that reuses one persistent stream/
+  // video ID across multiple services (rather than creating a fresh video
+  // per service) will always show a stale uploadDate even while genuinely
+  // airing right now - confirmed in production: Calvary Chapel Stone
+  // Mountain reuses the same videoId across multiple Sundays, so its
+  // publishDate stays fixed at whenever that video was first created while
+  // liveBroadcastDetails.startTimestamp tracks the actual current airtime.
+  // Falling back to uploadDate when no current-broadcast timestamp exists
+  // preserves the original stuck-live protection: a genuinely stuck
+  // broadcast has no fresh startTimestamp either, so it still falls through
+  // to the uploadDate check below and gets caught.
+  const recencyAnchor = startDate || uploadDate;
+  if (recencyAnchor) {
+    const anchorTime = new Date(recencyAnchor).getTime();
+    if (!isNaN(anchorTime) && (Date.now() - anchorTime) > RECENT_WINDOW_MS) {
       return { isLive: false, status: 'not_live' };
     }
   }
