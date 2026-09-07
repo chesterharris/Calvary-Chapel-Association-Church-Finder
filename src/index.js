@@ -1214,6 +1214,33 @@ async function checkChurchLive(youtubeUrl) {
     }
   }
 
+  // Third real-world false-positive pattern found in production: a church
+  // can end a genuine service without ever stopping the YouTube broadcast,
+  // leaving isLive:true (and a fresh-looking startDate) for many hours
+  // afterward with no one actually watching - confirmed in production:
+  // CalvaryCG's Sunday service left running ~21 hours later, "1 watching
+  // now" the whole time (that "1" is just the automated check itself, not
+  // a real viewer).
+  //
+  // A flat duration cutoff can't tell that apart from a legitimately long
+  // stream (e.g. a multi-hour Pastor's conference) - and a viewer-count
+  // cutoff on its own can't tell it apart from a small church that
+  // legitimately only ever draws a couple of live viewers. Combining both
+  // signals avoids either false positive: past SOFT_DURATION_CAP_MS, we
+  // only cut the stream if the audience also looks essentially empty. A
+  // real, still-populated stream is left alone until the much longer
+  // RECENT_WINDOW_MS hard ceiling above, so it still can't linger forever.
+  const SOFT_DURATION_CAP_MS = 4 * 60 * 60 * 1000; // 4 hours
+  const MIN_REAL_AUDIENCE = 2; // "1 watching" is just our own check hitting the page
+  if (startDate) {
+    const startTime = new Date(startDate).getTime();
+    const viewCount = concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null;
+    if (!isNaN(startTime) && (Date.now() - startTime) > SOFT_DURATION_CAP_MS &&
+        viewCount !== null && viewCount < MIN_REAL_AUDIENCE) {
+      return { isLive: false, status: 'not_live' };
+    }
+  }
+
   return {
     isLive: true,
     status: 'live',
