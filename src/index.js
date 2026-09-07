@@ -688,6 +688,15 @@ const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
 // after a short pause before giving up on that church for this cycle.
 const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 
+// Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
+// unresolved-live tracking below (see there for why a second, cross-cycle
+// mechanism is needed for churches whose pages come back with no startDate
+// at all). Hoisted to module scope rather than left local to
+// checkChurchLive so both places agree on the exact same thresholds.
+const LIVE_CHECK_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours - hard ceiling
+const LIVE_CHECK_SOFT_DURATION_CAP_MS = 4 * 60 * 60 * 1000; // 4 hours - soft cap, only cuts off a low-audience stream
+const LIVE_CHECK_MIN_REAL_AUDIENCE = 2; // "1 watching" is just our own check hitting the page
+
 // Checks run strictly one at a time in a loop (see checkAllChurchesLive),
 // so a single slow-to-respond page stalls every church behind it, not just
 // itself - confirmed in production with an international channel (Calvary
@@ -1192,7 +1201,6 @@ async function checkChurchLive(youtubeUrl) {
   // recent - this is the strongest signal we've found so far for telling
   // "actually live" apart from "stuck live" without needing to inspect
   // the actual video stream data itself.
-  const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
   // Prefer the CURRENT broadcast's start time (liveBroadcastDetails.
   // startTimestamp, captured above as startDate) over the video's original
   // publishDate/uploadDate. A channel that reuses one persistent stream/
@@ -1209,7 +1217,7 @@ async function checkChurchLive(youtubeUrl) {
   const recencyAnchor = startDate || uploadDate;
   if (recencyAnchor) {
     const anchorTime = new Date(recencyAnchor).getTime();
-    if (!isNaN(anchorTime) && (Date.now() - anchorTime) > RECENT_WINDOW_MS) {
+    if (!isNaN(anchorTime) && (Date.now() - anchorTime) > LIVE_CHECK_RECENT_WINDOW_MS) {
       return { isLive: false, status: 'not_live' };
     }
   }
@@ -1230,13 +1238,11 @@ async function checkChurchLive(youtubeUrl) {
   // only cut the stream if the audience also looks essentially empty. A
   // real, still-populated stream is left alone until the much longer
   // RECENT_WINDOW_MS hard ceiling above, so it still can't linger forever.
-  const SOFT_DURATION_CAP_MS = 4 * 60 * 60 * 1000; // 4 hours
-  const MIN_REAL_AUDIENCE = 2; // "1 watching" is just our own check hitting the page
   if (startDate) {
     const startTime = new Date(startDate).getTime();
     const viewCount = concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null;
-    if (!isNaN(startTime) && (Date.now() - startTime) > SOFT_DURATION_CAP_MS &&
-        viewCount !== null && viewCount < MIN_REAL_AUDIENCE) {
+    if (!isNaN(startTime) && (Date.now() - startTime) > LIVE_CHECK_SOFT_DURATION_CAP_MS &&
+        viewCount !== null && viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
       return { isLive: false, status: 'not_live' };
     }
   }
@@ -1431,6 +1437,52 @@ async function checkAllChurchesLive(env) {
         // to our datacenter-IP requests that has the isLive:true signal but
         // omits videoId/title/everything else). A generic "go watch on their
         // channel" link is far better than a dead, unclickable card.
+
+        // Fourth real-world false-positive pattern, found in production
+        // (confirmed via /api/debug/check-live-now: Calvary Chapel Casa
+        // Grande, Calvary Chapel Antelope Valley, and Calvary South OC all
+        // showing this exact shape at once): for some channels, our
+        // Worker's fetch gets a page with isLive:true and a parseable
+        // viewCount (consistently "1" - our own check, no real audience),
+        // but NO startDate at all - videoId/title/author/startDate all
+        // null. Neither of checkChurchLive's own staleness guards above
+        // has anything to measure against in that case (both are gated on
+        // startDate/uploadDate being present), so a broadcast permanently
+        // stuck in this exact response shape would otherwise show as live
+        // forever, with no way to ever cut it off.
+        //
+        // This same "isLive:true, nothing else" shape is also a KNOWN,
+        // legitimate one-off response for a genuinely fresh live church
+        // (see the frontend's live-now-thumb-fallback handling) - so
+        // treating it as not-live on the very first sighting risks hiding
+        // a real, brand-new stream that just happened to get an
+        // incomplete response. Instead, track how long a given church has
+        // continuously shown this specific low-confidence pattern using
+        // our own merged-results check history (unresolvedLiveSince,
+        // carried forward cycle to cycle the same way any other field is)
+        // and only give up on it - fall through to not_live - once it's
+        // persisted past the same LIVE_CHECK_SOFT_DURATION_CAP_MS/
+        // LIVE_CHECK_MIN_REAL_AUDIENCE threshold checkChurchLive itself
+        // uses for the startDate case above. A transient one-cycle blip
+        // self-heals the moment a normal full-metadata check succeeds,
+        // which clears the marker in the else branch below.
+        if (status.isLive && !status.startDate &&
+            status.viewCount !== null && status.viewCount !== undefined &&
+            status.viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
+          const priorEntry = mergedResults[c.id];
+          const unresolvedSince = (priorEntry && priorEntry.unresolvedLiveSince) || new Date().toISOString();
+          const unresolvedMs = Date.now() - new Date(unresolvedSince).getTime();
+          if (unresolvedMs > LIVE_CHECK_SOFT_DURATION_CAP_MS) {
+            status.isLive = false;
+            status.status = 'not_live';
+            status.unresolvedLiveSince = null;
+          } else {
+            status.unresolvedLiveSince = unresolvedSince;
+          }
+        } else {
+          status.unresolvedLiveSince = null;
+        }
+
         mergedResults[c.id] = Object.assign({
           churchId: c.id,
           name: c.name,
