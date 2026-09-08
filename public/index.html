@@ -3953,7 +3953,7 @@
   const baseLayerPositron = L.maplibreGL({
     style: 'https://tiles.openfreemap.org/styles/positron',
     attribution: '&copy; OpenStreetMap contributors &copy; OpenFreeMap'
-  }).addTo(map);
+  });
 
   // Bright shows more roads/detail at a glance - kept as the secondary
   // option in the layer switcher for anyone who wants that instead of the
@@ -3963,10 +3963,35 @@
     attribution: '&copy; OpenStreetMap contributors &copy; OpenFreeMap'
   });
 
+  // Remembers whichever base layer the visitor last picked, across visits
+  // (added 2026-09-08). Light/Positron stays the default for anyone who's
+  // never touched the switcher, or whose stored value is missing/garbled -
+  // only an explicit, successfully-read "detailed" flips it to Bright.
+  const MAP_STYLE_STORAGE_KEY = 'ccaFinderMapStyle';
+  function loadMapStylePreference() {
+    try {
+      return localStorage.getItem(MAP_STYLE_STORAGE_KEY) === 'detailed' ? 'detailed' : 'light';
+    } catch (err) {
+      return 'light';
+    }
+  }
+  function saveMapStylePreference(style) {
+    try { localStorage.setItem(MAP_STYLE_STORAGE_KEY, style); } catch (err) { /* ignore */ }
+  }
+  (loadMapStylePreference() === 'detailed' ? baseLayerBright : baseLayerPositron).addTo(map);
+
   L.control.layers({
     'Light (Positron)': baseLayerPositron,
     'Detailed (Bright)': baseLayerBright
   }, null, { position: 'topright' }).addTo(map);
+
+  // Leaflet's own built-in hook for "the layer switcher's selection
+  // changed" - fires with the actual layer instance (e.layer), not just
+  // its label text, so this stays correct even if the control's display
+  // names above are ever reworded.
+  map.on('baselayerchange', function(e) {
+    saveMapStylePreference(e.layer === baseLayerBright ? 'detailed' : 'light');
+  });
 
   const markers = L.markerClusterGroup({
     iconCreateFunction: function(cluster) {
