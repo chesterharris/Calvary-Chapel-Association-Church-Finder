@@ -49,18 +49,44 @@
     row-gap: 8px;
     border-bottom: 3px solid var(--brass);
   }
+  /* Relocated from the header into the map's own bottom-right corner (see
+     the JS right after the layer-switcher setup, near baselayerchange) -
+     positioned relative to the Leaflet map container it's now appended
+     into, sitting just above the "Leaflet | OpenStreetMap..." attribution
+     line rather than overlapping it. Styled as its own small floating
+     box (background/border/shadow) rather than bare text, since it can
+     now sit over map tiles of any color, not just the fixed dark green
+     header background it was tuned for before - same reasoning as
+     Leaflet's own zoom/layer controls having their own opaque boxes. */
   .admin-area {
-    margin-left: 8px;
-    font-size: 0.85em;
-    opacity: 0.85;
+    position: absolute;
+    bottom: 34px;
+    right: 10px;
+    z-index: 700;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 0.8em;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  }
+  /* Below the same breakpoint that already hides the desktop
+     .header-actions row (see the 720px media query further down) - admin
+     access on mobile has always gone through the ☰ menu's own Admin row
+     instead (a separate control that already existed, delegating to
+     these same elements via .click()), so this floating corner box would
+     just be redundant clutter there, not a second way to reach anything
+     new. */
+  @media (max-width: 720px) {
+    .admin-area { display: none; }
   }
   .admin-link {
-    color: var(--paper);
+    color: var(--ink);
     text-decoration: underline;
     cursor: pointer;
   }
   .admin-badge {
-    color: var(--paper);
+    color: var(--ink);
   }
   .admin-signout {
     margin-left: 6px;
@@ -3992,6 +4018,29 @@
   map.on('baselayerchange', function(e) {
     saveMapStylePreference(e.layer === baseLayerBright ? 'detailed' : 'light');
   });
+
+  // Moved out of the header (added 2026-09-08) - a real DOM relocation, not
+  // a copy, so the existing #adminSignInLink/#adminSignOutLink/#adminBadge
+  // click handlers, setAdminUiState(), and the hamburger menu's own Admin
+  // row (which just calls .click() on these same elements by id) all keep
+  // working completely untouched; only where this element LIVES changes.
+  // Appended as a plain child of the Leaflet-managed map container itself
+  // (not via Leaflet's own L.control API, whose bottomright stacking order
+  // relative to the auto-added attribution control isn't something to
+  // guess at) - .admin-area's own CSS positions it absolutely from there,
+  // which is also why it automatically stays correctly placed above the
+  // attribution line even when #map shrinks for the mini player bar (see
+  // .player-open #map above) - it moves with the map box it's inside,
+  // no extra handling needed for that case.
+  const adminAreaEl = document.getElementById('adminArea');
+  if (adminAreaEl) {
+    map.getContainer().appendChild(adminAreaEl);
+    // Stops a click/drag started on this box from also panning/dragging
+    // the map underneath it - the same treatment Leaflet's own controls
+    // give themselves, needed here because this is a plain child element
+    // rather than one added through Leaflet's control API.
+    L.DomEvent.disableClickPropagation(adminAreaEl);
+  }
 
   const markers = L.markerClusterGroup({
     iconCreateFunction: function(cluster) {
