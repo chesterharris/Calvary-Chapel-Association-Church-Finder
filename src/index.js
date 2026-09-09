@@ -600,6 +600,142 @@ async function handleDeleteChurch(request, env) {
   });
 }
 
+// ---- Featured video (Workers KV) ----
+//
+// A single admin-managed, non-scrolling banner for one occasional
+// non-live video link (e.g. a conference on-demand recording) - distinct
+// from the scrolling Conference/Radio tickers. Managed via "Manage
+// Featured Video" in the admin hamburger menu.
+//
+// Stored in KV under FEATURED_VIDEO_KV_KEY as one JSON object:
+//   { linkText, url, onlineDate, offlineDate, version, updatedAt }
+//
+// version only increments when linkText or url actually changes (see
+// handleSaveFeaturedVideo below) - editing just the online/offline dates
+// on an otherwise-unchanged entry keeps the same version, so a visitor
+// who already dismissed this entry (see the frontend's
+// cca-featured-video-dismissed-version localStorage key) does not see it
+// again purely because the admin extended its offline date. Entering
+// different linkText/url is treated as a new entry: version increments,
+// and every visitor sees it again regardless of any prior dismissal.
+//
+// onlineDate/offlineDate are plain YYYY-MM-DD date-picker values (no
+// time component) - compared lexically against "today" in the same
+// format, which sorts correctly for ISO date strings.
+
+const FEATURED_VIDEO_KV_KEY = 'featured-video';
+
+async function loadFeaturedVideo(env) {
+  const raw = await env.CHURCHES_KV.get(FEATURED_VIDEO_KV_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function saveFeaturedVideoRecord(env, record) {
+  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(record));
+}
+
+function todayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Visible = fully configured, at or past its online date (or none set),
+// and not yet past its offline date. Only the PUBLIC endpoint applies
+// this - the admin endpoint always returns the raw record so the Manage
+// Featured Video form can prefill even a scheduled or expired entry.
+function isFeaturedVideoVisible(record, today) {
+  if (!record || !record.linkText || !record.url || !record.offlineDate) return false;
+  if (record.onlineDate && record.onlineDate > today) return false;
+  if (record.offlineDate <= today) return false;
+  return true;
+}
+
+async function handleGetFeaturedVideo(request, env) {
+  const record = await loadFeaturedVideo(env);
+  const today = todayDateString();
+  const visible = isFeaturedVideoVisible(record, today)
+    ? { linkText: record.linkText, url: record.url, version: record.version }
+    : null;
+  return new Response(JSON.stringify(visible), {
+    headers: {
+      'Content-Type': 'application/json',
+      // Visibility depends on today's date and can change any time the
+      // admin saves - same reasoning as /api/churches, never cache.
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function handleGetFeaturedVideoAdmin(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const record = await loadFeaturedVideo(env);
+  return new Response(JSON.stringify(record), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handleSaveFeaturedVideo(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const linkText = incoming && typeof incoming.linkText === 'string' ? incoming.linkText.trim() : '';
+  const targetUrl = incoming && typeof incoming.url === 'string' ? incoming.url.trim() : '';
+  const onlineDate = incoming && typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate : null;
+  const offlineDate = incoming && typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
+
+  if (!linkText || !targetUrl || !offlineDate) {
+    return new Response(JSON.stringify({ error: 'Link text, URL, and offline date are required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  if (onlineDate && onlineDate >= offlineDate) {
+    return new Response(JSON.stringify({ error: 'Offline date must be after the online date' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const existing = await loadFeaturedVideo(env);
+  // Version only moves when the actual content (link text or URL)
+  // changes - see the comment above FEATURED_VIDEO_KV_KEY.
+  const contentChanged = !existing || existing.linkText !== linkText || existing.url !== targetUrl;
+  const version = !existing ? 1 : (contentChanged ? existing.version + 1 : existing.version);
+
+  const record = {
+    linkText: linkText,
+    url: targetUrl,
+    onlineDate: onlineDate,
+    offlineDate: offlineDate,
+    version: version,
+    updatedAt: new Date().toISOString()
+  };
+
+  await saveFeaturedVideoRecord(env, record);
+
+  return new Response(JSON.stringify({ success: true, version: version }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
 // ---- YouTube live-stream detection ----
 //
 // A Cron Trigger (see wrangler config) calls checkAllChurchesLive() on a
@@ -3497,6 +3633,15 @@ export default {
     }
     if (url.pathname === '/api/churches' && request.method === 'DELETE') {
       return handleDeleteChurch(request, env);
+    }
+    if (url.pathname === '/api/featured-video' && request.method === 'GET') {
+      return handleGetFeaturedVideo(request, env);
+    }
+    if (url.pathname === '/api/featured-video/admin' && request.method === 'GET') {
+      return handleGetFeaturedVideoAdmin(request, env);
+    }
+    if (url.pathname === '/api/featured-video' && request.method === 'POST') {
+      return handleSaveFeaturedVideo(request, env);
     }
     if (url.pathname === '/api/live-status' && request.method === 'GET') {
       return handleGetLiveStatus(request, env);

@@ -1592,6 +1592,86 @@
   .popup-delete-btn:hover { background: var(--ember); color: var(--paper); }
 
   /* ---- Conference ticker ---- */
+  /* ---- Featured video banner ----
+     Admin-managed, non-scrolling, absent most of the time (see
+     #featuredVideoBanner's JS - hidden unless the server has a
+     currently-visible entry the visitor hasn't dismissed). Deliberately
+     NOT styled like .ticker-bar above: this needs to read as a distinct,
+     occasional element rather than a fourth ticker, so it uses a light
+     background with a solid accent left border instead of the tickers'
+     dark scrolling look. Sits above #conferenceTicker in DOM order,
+     which puts it above the combined mobile live-now/radio row too,
+     with no separate mobile relocation logic needed. */
+  .featured-video-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 14px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    border-left: 4px solid var(--ember);
+  }
+  .fv-badge {
+    flex-shrink: 0;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ember);
+  }
+  .fv-link {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--evergreen);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .fv-link:hover { text-decoration: underline; }
+  .fv-link-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fv-external {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--ember);
+  }
+  .fv-dismiss {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--evergreen);
+    opacity: 0.6;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  .fv-dismiss:hover { opacity: 1; color: var(--ember); }
+  @media (max-width: 600px) {
+    .featured-video-banner { height: 32px; padding: 0 10px; gap: 6px; }
+    .fv-badge { font-size: 9.5px; }
+    .fv-link { font-size: 12px; }
+  }
+  /* Preview copy inside the Manage Featured Video form - same look as
+     the live banner but never reads dismissal state and never writes
+     to it, so an admin can check appearance/click-through repeatedly
+     without touching a real visitor's dismissed-version storage. */
+  .featured-video-preview {
+    margin-top: 4px;
+    border-radius: 6px;
+    border-top: 1px solid var(--line);
+  }
+  .form-error {
+    color: var(--ember);
+    font-size: 12.5px;
+    margin: -8px 0 12px;
+  }
   .ticker-bar {
     background: var(--ink);
     border-bottom: 1px solid var(--brass);
@@ -2342,6 +2422,7 @@
            states (live / upcoming countdown / no streams yet). -->
       <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
       <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
+      <button id="btnManageFeaturedVideo" class="btn btn-outline">Manage Featured Video</button>
       <button id="btnRadioBrowse" class="btn btn-outline">📻 All Stations</button>
       <button id="btnFeedback" class="btn btn-outline">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
@@ -2393,6 +2474,10 @@
         <span class="hamburger-menu-icon" aria-hidden="true">➕</span>
         <span class="hamburger-menu-label">Add Location</span>
       </button>
+      <button type="button" id="menuManageFeaturedVideoItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">🎬</span>
+        <span class="hamburger-menu-label">Manage Featured Video</span>
+      </button>
       <button type="button" id="menuAdminItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">🔒</span>
         <span id="menuAdminLabel" class="hamburger-menu-label">Admin</span>
@@ -2409,6 +2494,21 @@
         <button type="button" id="cancelAdminSignInBtn" class="btn btn-outline">Cancel</button>
       </div>
     </div>
+  </div>
+  <!-- Featured video banner - see .featured-video-banner in <style> for
+       why this sits above the conference ticker in DOM order (covers
+       both desktop and the mobile combined live-now/radio row) and why
+       it's styled distinctly from the tickers below it. Hidden by
+       default; JS shows it only if the server has a currently-visible,
+       not-yet-dismissed entry (see featuredVideoDismissedVersion logic
+       near the other ticker init code). -->
+  <div id="featuredVideoBanner" class="featured-video-banner" style="display:none;">
+    <span class="fv-badge">Featured video</span>
+    <a id="featuredVideoLink" class="fv-link" href="#" target="_blank" rel="noopener">
+      <span id="featuredVideoText" class="fv-link-text"></span>
+      <span class="fv-external" aria-hidden="true">&#8599;</span>
+    </a>
+    <button type="button" id="featuredVideoDismissBtn" class="fv-dismiss" aria-label="Dismiss featured video">&times;</button>
   </div>
   <div id="conferenceTicker" class="ticker-bar ticker-loading">
     <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">CCA Conferences</a>
@@ -2535,6 +2635,49 @@
       <div class="form-actions">
         <button type="button" id="cancelModalBtn" class="btn btn-outline">Cancel</button>
         <button type="submit" class="btn btn-ember" id="saveLocationBtn">Save Location</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="featuredVideoModal" class="modal-overlay" style="display: none;">
+  <div class="modal admin-modal">
+    <h2>Manage Featured Video</h2>
+    <form id="featuredVideoForm">
+      <div class="form-row">
+        <label for="fv_linktext">Link text *</label>
+        <input id="fv_linktext" required maxlength="200" placeholder="e.g. Deep South Conference on demand videos">
+      </div>
+      <div class="form-row">
+        <label for="fv_url">Target URL *</label>
+        <input id="fv_url" required inputmode="url" placeholder="https://...">
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="fv_online">Online date (optional)</label>
+          <input id="fv_online" type="date">
+        </div>
+        <div class="form-row">
+          <label for="fv_offline">Offline date *</label>
+          <input id="fv_offline" type="date" required>
+        </div>
+      </div>
+      <div id="featuredVideoDateError" class="form-error" style="display:none;">Offline date must be after the online date.</div>
+      <div class="form-row">
+        <label>Preview</label>
+        <!-- Reads only the form fields above, live - never touches the
+             real visitor-facing dismissal storage, so an admin can
+             recheck this repeatedly without affecting what the public
+             banner shows or hides. See handleFeaturedVideoFormInput. -->
+        <div id="featuredVideoPreview" class="featured-video-banner featured-video-preview" style="display:none;">
+          <span class="fv-badge">Featured video</span>
+          <span class="fv-link"><span id="featuredVideoPreviewText" class="fv-link-text"></span><span class="fv-external" aria-hidden="true">&#8599;</span></span>
+        </div>
+      </div>
+      <div id="featuredVideoStatus" class="side-panel-sync-status"></div>
+      <div class="form-actions">
+        <button type="button" id="cancelFeaturedVideoBtn" class="btn btn-outline">Cancel</button>
+        <button type="submit" class="btn btn-ember" id="saveFeaturedVideoBtn">Save</button>
       </div>
     </form>
   </div>
@@ -4739,6 +4882,150 @@
     }
   });
 
+  // ---- Featured video banner (public-facing) ----
+  //
+  // Fetches the currently-visible entry (if any) and shows it unless
+  // this browser already dismissed that exact version - see
+  // FEATURED_VIDEO_KV_KEY's comment in index.js for the version rules.
+  // No admin bypass here on purpose (see Manage Featured Video's own
+  // preview below for how admins check appearance instead): the live
+  // banner behaves identically for every visitor, admin included.
+  (function() {
+    var DISMISS_KEY = 'cca-featured-video-dismissed-version';
+    var banner = document.getElementById('featuredVideoBanner');
+    var linkEl = document.getElementById('featuredVideoLink');
+    var textEl = document.getElementById('featuredVideoText');
+    var dismissBtn = document.getElementById('featuredVideoDismissBtn');
+
+    fetch('/api/featured-video', { cache: 'no-store' })
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .then(function(data) {
+        if (!data || !data.linkText || !data.url) return;
+        var dismissedVersion = null;
+        try { dismissedVersion = localStorage.getItem(DISMISS_KEY); } catch (err) { /* localStorage unavailable - just show it */ }
+        if (dismissedVersion !== null && Number(dismissedVersion) === data.version) return;
+        textEl.textContent = data.linkText;
+        linkEl.href = data.url;
+        banner.dataset.version = String(data.version);
+        banner.style.display = 'flex';
+      })
+      .catch(function() { /* fine to stay hidden on any error */ });
+
+    dismissBtn.addEventListener('click', function() {
+      var version = banner.dataset.version;
+      try { if (version) localStorage.setItem(DISMISS_KEY, version); } catch (err) { /* nothing to persist - it'll just show again next load */ }
+      banner.style.display = 'none';
+    });
+  })();
+
+  // ---- Manage Featured Video (admin) ----
+  (function() {
+    var modal = document.getElementById('featuredVideoModal');
+    var form = document.getElementById('featuredVideoForm');
+    var linkTextInput = document.getElementById('fv_linktext');
+    var urlInput = document.getElementById('fv_url');
+    var onlineInput = document.getElementById('fv_online');
+    var offlineInput = document.getElementById('fv_offline');
+    var dateError = document.getElementById('featuredVideoDateError');
+    var preview = document.getElementById('featuredVideoPreview');
+    var previewText = document.getElementById('featuredVideoPreviewText');
+    var statusEl = document.getElementById('featuredVideoStatus');
+    var saveBtn = document.getElementById('saveFeaturedVideoBtn');
+
+    function updatePreview() {
+      var text = linkTextInput.value.trim();
+      if (text) {
+        previewText.textContent = text;
+        preview.style.display = 'flex';
+      } else {
+        preview.style.display = 'none';
+      }
+    }
+    [linkTextInput, urlInput].forEach(function(el) {
+      el.addEventListener('input', updatePreview);
+    });
+
+    function validateDates() {
+      var online = onlineInput.value;
+      var offline = offlineInput.value;
+      var invalid = !!(online && offline && online >= offline);
+      dateError.style.display = invalid ? 'block' : 'none';
+      return !invalid;
+    }
+    onlineInput.addEventListener('change', validateDates);
+    offlineInput.addEventListener('change', validateDates);
+
+    async function openFeaturedVideoModal() {
+      statusEl.textContent = '';
+      dateError.style.display = 'none';
+      form.reset();
+      preview.style.display = 'none';
+      modal.style.display = 'flex';
+      try {
+        var res = await fetch('/api/featured-video/admin', { credentials: 'include', cache: 'no-store' });
+        if (res.ok) {
+          var record = await res.json();
+          if (record) {
+            linkTextInput.value = record.linkText || '';
+            urlInput.value = record.url || '';
+            onlineInput.value = record.onlineDate || '';
+            offlineInput.value = record.offlineDate || '';
+            updatePreview();
+          }
+        }
+      } catch (err) {
+        // Blank form is a safe fallback - admin can still enter a fresh entry.
+      }
+    }
+
+    function closeFeaturedVideoModal() {
+      modal.style.display = 'none';
+    }
+
+    document.getElementById('btnManageFeaturedVideo').addEventListener('click', openFeaturedVideoModal);
+    document.getElementById('cancelFeaturedVideoBtn').addEventListener('click', closeFeaturedVideoModal);
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) closeFeaturedVideoModal();
+    });
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      if (!validateDates()) return;
+
+      var entry = {
+        linkText: linkTextInput.value.trim(),
+        url: urlInput.value.trim(),
+        onlineDate: onlineInput.value || null,
+        offlineDate: offlineInput.value
+      };
+
+      var originalBtnText = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      statusEl.textContent = '';
+      try {
+        var res = await fetch('/api/featured-video', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry)
+        });
+        var data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Save failed');
+        saveBtn.textContent = 'Saved \u2713';
+        setTimeout(function() {
+          saveBtn.disabled = false;
+          saveBtn.textContent = originalBtnText;
+          closeFeaturedVideoModal();
+        }, 500);
+      } catch (err) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalBtnText;
+        statusEl.textContent = (err && err.message) || 'Sorry, saving the featured video failed. Please check your connection and try again.';
+      }
+    });
+  })();
+
   // ---- Manage Locations side panel ----
   const managePanel = document.getElementById('managePanel');
   const manageList = document.getElementById('manageList');
@@ -6283,6 +6570,10 @@
     closeHamburgerMenu();
     document.getElementById('btnAddLocation').click();
   });
+  document.getElementById('menuManageFeaturedVideoItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnManageFeaturedVideo').click();
+  });
   document.getElementById('menuAdminItem').addEventListener('click', function() {
     closeHamburgerMenu();
     // Mirrors #adminArea's own internal branching: sign in if not
@@ -6416,7 +6707,7 @@
     // Mirrors the desktop button above for each of the three admin-only ☰
     // menu rows (Live Debug, Manage Locations, Add Location) - hidden
     // until an admin actually signs in, same as btnLiveDebug itself.
-    ['menuLiveDebugItem', 'menuManageLocationsItem', 'menuAddLocationItem'].forEach(function(id) {
+    ['menuLiveDebugItem', 'menuManageLocationsItem', 'menuAddLocationItem', 'menuManageFeaturedVideoItem'].forEach(function(id) {
       const item = document.getElementById(id);
       if (item) item.style.display = isAdmin ? 'flex' : 'none';
     });
@@ -6433,6 +6724,8 @@
     if (addBtn) addBtn.style.display = 'none';
     const manageBtn = document.getElementById('btnManageLocations');
     if (manageBtn) manageBtn.style.display = 'none';
+    const manageFvBtn = document.getElementById('btnManageFeaturedVideo');
+    if (manageFvBtn) manageFvBtn.style.display = 'none';
   }
 
   async function initAdminGate() {
