@@ -5739,6 +5739,82 @@
       radioPlayerCover.removeAttribute('src');
       radioPlayerCover.style.display = 'none';
     }
+
+    updateMediaSessionMetadata(station);
+  }
+
+  // ---- CarPlay / Lock Screen / Control Center integration ----
+  //
+  // There's no CarPlay-specific API for a website - Safari just reports
+  // whatever's set here (the Media Session API) to every system "now
+  // playing" surface at once: the Lock Screen, Control Center, AND
+  // CarPlay's own built-in Now Playing screen. A custom CarPlay screen
+  // (e.g. a station-picker list living inside CarPlay itself) would
+  // require a native iOS app with a CarPlay entitlement from Apple -
+  // out of scope for a website.
+  //
+  // Two iOS Safari quirks shaped the choices below:
+  //   - Artwork bigger than ~128x128 tends to render as a blurry/grey box
+  //     instead of being scaled down, so GraceFM/WJWD's own logos get a
+  //     small dedicated coverThumbUrl just for this (see RADIO_STATIONS'
+  //     staticCoverThumbUrl in src/index.js) while the mini player keeps
+  //     using the bigger coverUrl. Every other station just passes along
+  //     whatever coverUrl it already has (a provider's own live art, or
+  //     nothing) - no attempt to filter those out pre-emptively.
+  //   - Setting a seekbackward/seekforward handler makes iOS show 10-second
+  //     skip buttons INSTEAD of previous/next-track buttons. Deliberately
+  //     not setting those handlers here, so previoustrack/nexttrack (wired
+  //     below to switching stations, not seeking) are what show up.
+  const hasMediaSession = 'mediaSession' in window.navigator;
+
+  function updateMediaSessionMetadata(station) {
+    if (!hasMediaSession) return;
+    const artworkUrl = station.coverThumbUrl || station.coverUrl || null;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: station.displayName,
+        artist: formatNowPlaying(station) + (station.scheduled ? ' · scheduled' : ''),
+        artwork: artworkUrl ? [{ src: artworkUrl }] : []
+      });
+    } catch (err) {
+      // Not fatal to playback either way - just no CarPlay/lock-screen text.
+    }
+  }
+
+  // Alphabetical across every configured station (favorited or not) - a
+  // stable, predictable order for the CarPlay/lock-screen previous/next
+  // buttons, independent of the mobile picker's separate favorites-first
+  // grouping. station.displayName is unique, so this is safe to re-derive
+  // from radioStations on every press rather than caching an order that
+  // could go stale as the station list changes.
+  function getAdjacentStation(direction) {
+    if (!radioStations.length) return null;
+    const ordered = radioStations.slice().sort(function(a, b) {
+      return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase());
+    });
+    const idx = ordered.findIndex(function(s) { return s.displayName === currentPlayingDisplayName; });
+    if (idx === -1) return ordered[0];
+    return ordered[(idx + direction + ordered.length) % ordered.length];
+  }
+
+  if (hasMediaSession) {
+    // Wrapped individually - iOS Safari can throw for an action type it
+    // doesn't recognize, and one throwing shouldn't stop the rest from
+    // being wired up.
+    const setRadioMediaSessionHandler = function(action, handler) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch (err) { /* not supported here - fine */ }
+    };
+    setRadioMediaSessionHandler('play', function() { radioAudio.play(); });
+    setRadioMediaSessionHandler('pause', function() { radioAudio.pause(); });
+    setRadioMediaSessionHandler('stop', function() { stopRadioPlayback(); });
+    setRadioMediaSessionHandler('previoustrack', function() {
+      const station = getAdjacentStation(-1);
+      if (station) playStation(station);
+    });
+    setRadioMediaSessionHandler('nexttrack', function() {
+      const station = getAdjacentStation(1);
+      if (station) playStation(station);
+    });
   }
 
   // ---- Radio sleep timer ----
@@ -5870,6 +5946,12 @@
     hideMiniPlayer();
     currentPlayingDisplayName = null;
     cancelRadioTimer();
+    // Otherwise CarPlay/Lock Screen/Control Center would keep showing the
+    // last-playing station as still active with nothing actually playing.
+    if (hasMediaSession) {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+    }
   }
 
   // ---- Sleep timer roller sheet ----
@@ -6292,6 +6374,9 @@
   radioAudio.addEventListener('play', function() {
     radioPlayPauseBtn.textContent = '⏸';
     radioPlayPauseBtn.setAttribute('aria-label', 'Pause');
+    // Keeps CarPlay/Lock Screen/Control Center's own play/pause button
+    // in sync too, not just this in-page one.
+    if (hasMediaSession) navigator.mediaSession.playbackState = 'playing';
     // Keep the mobile picker's active-row icon (play vs. pause) in sync
     // regardless of which control - the picker row itself, the desktop
     // mini player, or a lock-screen/hardware media key - triggered it.
@@ -6300,6 +6385,7 @@
   radioAudio.addEventListener('pause', function() {
     radioPlayPauseBtn.textContent = '▶';
     radioPlayPauseBtn.setAttribute('aria-label', 'Play');
+    if (hasMediaSession) navigator.mediaSession.playbackState = 'paused';
     if (document.body.classList.contains('mobile-picker-open')) renderMobileRadioPicker();
   });
 

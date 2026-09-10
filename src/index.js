@@ -2144,6 +2144,18 @@ const RADIO_CACHE_VERSION = 1;
 //                 publishedschedule station, which always returns
 //                 coverUrl: null). Takes priority over the provider's own
 //                 coverUrl when both are present - see fetchStationNowPlaying.
+//   staticCoverThumbUrl (optional, any provider) - a small (128x128 or
+//                 under) version of staticCoverUrl, used ONLY for the
+//                 CarPlay/Lock Screen/Control Center artwork (see the Media
+//                 Session integration in public/index.html). iOS Safari's
+//                 MediaSession implementation renders artwork above ~128px
+//                 as a blurry/grey box instead of resizing it down, so the
+//                 mini player keeps using the bigger staticCoverUrl while
+//                 this smaller one goes to the OS-level "now playing"
+//                 surfaces instead. Not needed for stations relying on a
+//                 provider's own live coverUrl - those are passed through
+//                 as-is (see coverThumbUrl in fetchStationNowPlaying) since
+//                 there's no way to know or control their real dimensions.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -2186,7 +2198,8 @@ const RADIO_STATIONS = [
     // GraceFM's staticCoverUrl above. Built from Larry's own WJWD badge
     // image (low-res source, ~186x183) using the same rounded-square
     // treatment.
-    staticCoverUrl: '/wjwd-icon.png'
+    staticCoverUrl: '/wjwd-icon.png',
+    staticCoverThumbUrl: '/wjwd-icon-128.png'
   },
   {
     displayName: 'EQUIP FM',
@@ -2608,7 +2621,8 @@ const RADIO_STATIONS = [
     // "now playing" data itself is inferred, not confirmed. Shadow-free,
     // square-cornered version of GraceFM's own icon (see the published-
     // schedule notes doc for why the shadowed original wasn't used).
-    staticCoverUrl: '/gracefm-icon.png'
+    staticCoverUrl: '/gracefm-icon.png',
+    staticCoverThumbUrl: '/gracefm-icon-128.png'
   }
 ];
 
@@ -3644,6 +3658,13 @@ async function fetchStationNowPlaying(station) {
     // publishedschedule, which always returns coverUrl: null) show
     // something better than a blank mini player.
     coverUrl: station.staticCoverUrl || parsed.coverUrl || null,
+    // Same idea, for the CarPlay/Lock Screen/Control Center artwork only
+    // (see the Media Session integration in public/index.html) - prefers
+    // the small dedicated thumbnail when a station has one, otherwise falls
+    // back to exactly whatever coverUrl above resolved to (a provider's own
+    // live art, or nothing) rather than leaving those stations with no
+    // artwork at all.
+    coverThumbUrl: station.staticCoverThumbUrl || station.staticCoverUrl || parsed.coverUrl || null,
     streamUrl: station.streamUrl,
     // Optional, hand-entered display-only fields - never shown in the
     // ticker (that only ever renders displayName + now-playing text), just
@@ -3689,6 +3710,7 @@ async function handleRadio(request, ctx) {
         title: null,
         artist: null,
         coverUrl: station.staticCoverUrl || null,
+        coverThumbUrl: station.staticCoverThumbUrl || station.staticCoverUrl || null,
         streamUrl: station.streamUrl,
         cityState: station.cityState || null,
         homePage: station.homePage || null,
