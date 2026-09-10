@@ -10,6 +10,7 @@
 // Edge-cached for 6 hours so we're not re-scraping calvarycca.org on every load.
 
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2122,6 +2123,26 @@ const RADIO_CACHE_VERSION = 1;
 //                 (play.radioking.io/{slug} -> listen.radioking.com/...),
 //                 only found by watching actual Network > Media traffic
 //                 while the embedded player was playing.
+//
+//   publishedschedule stations also need:
+//   schedule    - a { timezone, saturday, sunday, weekday,
+//                 weekdayOverridesByDay } object (see one per station under
+//                 src/radioSchedules/) - NOT a live feed at all. This
+//                 provider makes zero HTTP requests for now-playing data;
+//                 "now playing" is computed purely from the current time in
+//                 `schedule.timezone` against a one-time, hand-transcribed
+//                 copy of the station's own published weekly schedule. See
+//                 radio-station-published-schedule-notes.md for the full
+//                 rationale, the transcription format, and why this exists
+//                 as a separate provider instead of trying to scrape a
+//                 fresh copy of the page on every poll.
+//   staticCoverUrl (optional, any provider) - a fixed image URL/path shown
+//                 in the mini player regardless of what the provider's own
+//                 parse/fetchAndParse returns for coverUrl - for a station
+//                 with a real logo but no per-track artwork source (like a
+//                 publishedschedule station, which always returns
+//                 coverUrl: null). Takes priority over the provider's own
+//                 coverUrl when both are present - see fetchStationNowPlaying.
 const RADIO_STATIONS = [
   {
     // streamUrl inferred from the status endpoint's own URL pattern
@@ -2548,6 +2569,34 @@ const RADIO_STATIONS = [
     provider: 'live365json',
     mountId: 'a95022',
     streamUrl: 'https://streaming.live365.com/a95022'
+  },
+  {
+    // GraceFM/KXGRFM was originally investigated (see the SecureNetSystems
+    // section of radio-station-providers-notes.md) and rejected - its XML
+    // now-playing feed's title/artist are permanently empty with a
+    // programStartTS frozen at 2019, i.e. a dead metadata pipeline, not a
+    // quiet moment. streamUrl below is confirmed live/playable (2026-09-10)
+    // even though the metadata side is dead - those are two independent
+    // things on SecureNetSystems (see the doc's "How to find
+    // subdomain/callSign" note). Rather than skip the station entirely, its
+    // publicly published weekly schedule (gracefm.com/schedule) stands in
+    // for real-time metadata - see radio-station-published-schedule-notes.md
+    // for the full rationale and the transcription itself in
+    // src/radioSchedules/gracefm.js. A 60-day manual re-check against the
+    // live page is scheduled for 2026-11-09.
+    displayName: 'GraceFM',
+    cityState: 'Aurora, CO',
+    homePage: 'https://www.gracefm.com/',
+    provider: 'publishedschedule',
+    schedule: GRACEFM_SCHEDULE,
+    streamUrl: 'https://ice23.securenetsystems.net/KXGRFM',
+    // Static station logo, not per-program art - this provider always
+    // returns coverUrl: null (no artwork source in a published schedule),
+    // and a per-program image wouldn't be accurate anyway since the
+    // "now playing" data itself is inferred, not confirmed. Shadow-free,
+    // square-cornered version of GraceFM's own icon (see the published-
+    // schedule notes doc for why the shadowed original wasn't used).
+    staticCoverUrl: '/gracefm-icon.png'
   }
 ];
 
@@ -3234,6 +3283,14 @@ const RADIO_PROVIDERS = {
     // needed - the JSONP wrapper is purely a browser/jQuery convenience,
     // not required by the API itself).
     fetchAndParse: fetchTritonNowPlaying
+  },
+  publishedschedule: {
+    // See fetchPublishedScheduleNowPlaying below (defined alongside the
+    // other fetchAndParse providers) for the full explanation -
+    // fetchAndParse here does zero fetch() calls at all, unlike every
+    // other fetchAndParse provider above it, all of which still make one or
+    // more real HTTP requests.
+    fetchAndParse: fetchPublishedScheduleNowPlaying
   }
 };
 
@@ -3438,6 +3495,112 @@ async function fetchTritonNowPlaying(station) {
   return { title: title, artist: artist, coverUrl: coverUrl };
 }
 
+// ---- publishedschedule provider ----
+//
+// Unlike every provider above, this one makes zero HTTP requests at now-
+// playing time - there's no live feed to poll. The "data" is a one-time,
+// hand-transcribed copy of the station's own published weekly schedule
+// (station.schedule, e.g. GRACEFM_SCHEDULE), and "now playing" is purely a
+// function of what time it is right now. See
+// radio-station-published-schedule-notes.md for the full rationale, the
+// transcription format, and per-station notes/known quirks.
+//
+// station.schedule shape:
+//   timezone   - IANA zone the published times are in (e.g. "America/Denver")
+//                so "now" gets converted into the schedule's own timezone,
+//                not hardcoded to any one station's zone.
+//   saturday, sunday, weekday - arrays of { time: "HH:MM" (24h, already in
+//                `timezone`), program, host } entries. "weekday" is the
+//                single Mon-Fri lineup that repeats identically all five
+//                days, except for weekdayOverridesByDay below.
+//   weekdayOverridesByDay (optional) - { MON|TUE|WED|THU|FRI: [ ...same
+//                entry shape... ] }, merged into `weekday` ONLY on that one
+//                specific day. Currently used by exactly one entry
+//                (GraceFM's Wednesday-only Midweek Service overriding its
+//                generic 7:00 PM weekday slot) - a one-off place to put an
+//                actual day-specific exception, not a general "day-
+//                qualified time" syntax meant to be used speculatively.
+//
+// Every entry - a single daily program, one airing of a program that
+// repeats several times a day, or a MUSIC filler block - is just a start-
+// time marker. There's deliberately no separate "duration" field anywhere:
+// a program airs until the next marker, whatever time that next marker
+// happens to start, so the same lookup logic handles both the dense Sunday/
+// weekday grids (wall-to-wall, no gaps) and Saturday's sparser grid with
+// explicit MUSIC ranges without special-casing either one. (A MUSIC block's
+// own human-readable end time in the source page always lines up with the
+// next entry's start - the code never needs to look at it.)
+function scheduleTimeToMinutes(hhmm) {
+  const parts = hhmm.split(':');
+  return (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+}
+
+// Finds whichever entry started most recently relative to nowMinutes - the
+// entry with the largest start time that's still <= now. Wraps around
+// midnight (an 11:30 PM entry stays "current" until the next entry, even if
+// that's the following day's first one) by defaulting to the last entry in
+// sorted order before scanning forward.
+function findCurrentScheduleEntry(entries, nowMinutes) {
+  if (!entries || !entries.length) return null;
+  const sorted = entries.slice().sort(function(a, b) {
+    return scheduleTimeToMinutes(a.time) - scheduleTimeToMinutes(b.time);
+  });
+  let current = sorted[sorted.length - 1];
+  for (let i = 0; i < sorted.length; i++) {
+    if (scheduleTimeToMinutes(sorted[i].time) <= nowMinutes) current = sorted[i];
+  }
+  return current;
+}
+
+const WEEKDAY_OVERRIDE_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+
+// Uses fetchAndParse purely so it can return { title, artist, coverUrl }
+// without ever calling fetch() at all - not because it needs multiple HTTP
+// calls or a station-specific field like the providers above it do. Intl
+// with an explicit timeZone gives DST-aware local time in the schedule's
+// own zone with no manual UTC-offset math and no extra dependency, since
+// Cloudflare Workers ship full ICU/timezone data.
+async function fetchPublishedScheduleNowPlaying(station) {
+  const schedule = station.schedule;
+  if (!schedule) throw new Error('Station ' + station.displayName + ' has no schedule configured');
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: schedule.timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+
+  const partsByType = {};
+  parts.forEach(function(p) { partsByType[p.type] = p.value; });
+  const dayCode = partsByType.weekday.toUpperCase(); // e.g. "WED", "SAT"
+  // Some runtimes format midnight as "24:00" rather than "00:00" - normalize
+  // so scheduleTimeToMinutes never sees an out-of-range hour.
+  const hour = parseInt(partsByType.hour, 10) % 24;
+  const nowMinutes = (hour * 60) + parseInt(partsByType.minute, 10);
+
+  let entries;
+  if (dayCode === 'SAT') {
+    entries = schedule.saturday;
+  } else if (dayCode === 'SUN') {
+    entries = schedule.sunday;
+  } else {
+    entries = schedule.weekday;
+    const overridesToday = schedule.weekdayOverridesByDay && WEEKDAY_OVERRIDE_CODES.indexOf(dayCode) !== -1
+      ? schedule.weekdayOverridesByDay[dayCode]
+      : null;
+    if (overridesToday && overridesToday.length) entries = entries.concat(overridesToday);
+  }
+
+  const match = findCurrentScheduleEntry(entries, nowMinutes);
+  return {
+    title: match ? match.program : '',
+    artist: match ? (match.host || '') : '',
+    coverUrl: null
+  };
+}
+
 async function fetchStationNowPlaying(station) {
   const provider = RADIO_PROVIDERS[station.provider];
   if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
@@ -3463,7 +3626,12 @@ async function fetchStationNowPlaying(station) {
     displayName: station.displayName,
     title: parsed.title,
     artist: parsed.artist,
-    coverUrl: parsed.coverUrl || null,
+    // staticCoverUrl (optional, any provider) wins over whatever the
+    // provider itself returned - see the RADIO_STATIONS field comment. Lets
+    // a station with a real logo but no per-track artwork source (like
+    // publishedschedule, which always returns coverUrl: null) show
+    // something better than a blank mini player.
+    coverUrl: station.staticCoverUrl || parsed.coverUrl || null,
     streamUrl: station.streamUrl,
     // Optional, hand-entered display-only fields - never shown in the
     // ticker (that only ever renders displayName + now-playing text), just
@@ -3472,7 +3640,14 @@ async function fetchStationNowPlaying(station) {
     // on the RADIO_STATIONS entry, (2) pass it through here AND in the
     // error fallback below, (3) render it in the browse panel row.
     cityState: station.cityState || null,
-    homePage: station.homePage || null
+    homePage: station.homePage || null,
+    // True only for stations on the publishedschedule provider - lets the
+    // frontend add a small "scheduled" callout in the mini player (see
+    // updateMiniPlayerNowPlaying in index.html) without hand-flagging each
+    // station individually. Not shown in the ticker or browse panel -
+    // there's no room for it there, and the ticker is the one place a
+    // best-effort guess and a confirmed live feed should look identical.
+    scheduled: station.provider === 'publishedschedule'
   };
 }
 
@@ -3501,10 +3676,11 @@ async function handleRadio(request, ctx) {
         displayName: station.displayName,
         title: null,
         artist: null,
-        coverUrl: null,
+        coverUrl: station.staticCoverUrl || null,
         streamUrl: station.streamUrl,
         cityState: station.cityState || null,
         homePage: station.homePage || null,
+        scheduled: station.provider === 'publishedschedule',
         error: err.message
       };
     }

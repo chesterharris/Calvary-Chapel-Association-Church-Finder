@@ -5713,7 +5713,14 @@
   // jarring restart, so this can and should update immediately every poll.
   function updateMiniPlayerNowPlaying(station) {
     radioPlayerStation.textContent = station.displayName;
-    radioPlayerNowPlaying.textContent = formatNowPlaying(station);
+    // station.scheduled (publishedschedule provider only - see
+    // fetchStationNowPlaying in the Worker) means this text is inferred
+    // from a published schedule, not a live feed - a small, plain-text
+    // "· scheduled" suffix here is enough transparency without needing an
+    // icon or tooltip. Mini player only, same as the rest of this
+    // function's DOM - the ticker and browse panel intentionally look
+    // identical whether a station's data is live or scheduled.
+    radioPlayerNowPlaying.textContent = formatNowPlaying(station) + (station.scheduled ? ' · scheduled' : '');
 
     // Cover art only exists for SecureNetSystems/SoCast stations (Icecast
     // and Futuri have no equivalent field, so coverUrl is null there) -
