@@ -5779,6 +5779,21 @@
     } catch (err) {
       // Not fatal to playback either way - just no CarPlay/lock-screen text.
     }
+    // Without this, iOS derives its own position/duration from the audio
+    // element's buffered range - some of these live streams apparently
+    // expose a short rolling seekable window rather than reporting no
+    // duration at all, which was making iOS treat it like an on-demand
+    // clip (scrubber + 10-second skip buttons) instead of a live broadcast,
+    // overriding the previoustrack/nexttrack handlers below regardless of
+    // what they're set to. duration: Infinity is the Media Session API's
+    // documented way to say "this is live, there's nothing to seek."
+    if ('setPositionState' in navigator.mediaSession) {
+      try {
+        navigator.mediaSession.setPositionState({ duration: Infinity, position: 0, playbackRate: 1 });
+      } catch (err) {
+        // Fine either way - covered by the metadata try/catch above too.
+      }
+    }
   }
 
   // Alphabetical across every configured station (favorited or not) - a
