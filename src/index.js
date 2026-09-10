@@ -11,6 +11,7 @@
 
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
+import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2168,13 +2169,24 @@ const RADIO_STATIONS = [
     streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
   },
   {
+    // Same rationale as GraceFM above - WJWD/WJCZ/WTZY (Calvary Radio
+    // Network) has no live metadata feed either, so this is inferred from
+    // its own published schedule instead. streamUrl below is unchanged and
+    // confirmed live/playable independent of this change - see
+    // radio-station-published-schedule-notes.md for the transcription
+    // itself, the two judgment calls made in it (a real overnight gap, and
+    // a genuine Sunday/Monday schedule conflict), and src/radioSchedules/wjwd.js.
     displayName: 'WJWD',
     cityState: 'Marshall, WI',
     homePage: 'https://jesuspeoplefm.com',
-    provider: 'icecast',
-    host: 'lunar.citrus3.com:8034',
-    mount: 'stream',
-    streamUrl: 'https://lunar.citrus3.com:8034/stream'
+    provider: 'publishedschedule',
+    schedule: WJWD_SCHEDULE,
+    streamUrl: 'https://lunar.citrus3.com:8034/stream',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM's staticCoverUrl above. Built from Larry's own WJWD badge
+    // image (low-res source, ~186x183) using the same rounded-square
+    // treatment.
+    staticCoverUrl: '/wjwd-icon.png'
   },
   {
     displayName: 'EQUIP FM',

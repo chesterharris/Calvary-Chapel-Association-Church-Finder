@@ -215,9 +215,8 @@ not just the data.
 
 ### WJWD / WJCZ / WTZY (Marshall, WI - Calvary Radio Network)
 
-Second data point, not yet wired up as of this writing (currently still the
-grandfathered no-metadata `icecast` entry - see `radio-station-providers-notes.md`).
-Kept here for when that upgrade happens:
+Second station wired up on this provider, 2026-09-10. Data lives in
+`src/radioSchedules/wjwd.js`.
 
 - Source page (`Calvary Radio Network`) hosts three separate simulcast
   groups on one site - WHLP; WQKO/WOJC/WJCO/WJCI/WJCY; and WJWD/WJCZ/WTZY -
@@ -234,5 +233,42 @@ Kept here for when that upgrade happens:
   two separate table rows. Confirms repeats don't need special transcription
   syntax either way (see "Transcription format" above).
 - Host names are already correctly cased in the source (e.g. "Mike
-  MacIntosh", "J Vernon McGee") - no title-casing needed at all for this
-  one, unlike GraceFM.
+  MacIntosh") - no title-casing needed at all for this one, unlike GraceFM.
+  Two names were inconsistent between tables on the source site itself and
+  had to be canonicalized: "Mark Rekcowski" (weekday) vs "Mark Rekcowsky"
+  (Saturday), same host/program - kept the weekday spelling; and
+  "J Vernon McGee" (Saturday) vs "J. Vernon Mcgee" (Sunday, twice) - both
+  are the well-known "Thru The Bible" teacher, properly "J. Vernon McGee" -
+  used that spelling everywhere.
+- Timezone: `America/Chicago` (Marshall, WI).
+- Two judgment calls, not verbatim source data - both are late-night/low-
+  traffic hours and Larry said to go with best guess and adjust later if he
+  can confirm firsthand:
+  - **Sunday night has a real 4-hour gap** in the source table itself
+    (nothing listed between 9:00 PM "The Word For Today" and 1:00 AM "Thru
+    The Bible" the next table over). Per Larry's call: "The Word For Today"
+    is credited for one hour (9-10pm), then an explicit "Unknown
+    Programming" placeholder covers the rest, rather than over-crediting a
+    real program for 4 hours it likely didn't actually run.
+  - **Sunday's table tail conflicts with the weekday grid.** Sunday's own
+    listing includes 1:00/2:00/3:00 AM entries (Thru The Bible / The
+    Cleansing Word / A Sure Foundation) that directly contradict the
+    weekday grid's Late Nights lineup for that same clock window. Every
+    table on this site starts at 4:00 AM, suggesting a 4am-4am broadcast
+    day - so Sunday's tail is read as what actually airs heading into
+    Monday morning specifically, not calendar Sunday. Modeled as a `MON`
+    entry in `weekdayOverridesByDay` (same mechanism as GraceFM's
+    Wednesday override) rather than folded into Sunday's own array; it
+    overrides the weekday grid's 1am and 2am slots only, and leaves the
+    2:30am Cornerstone Connection slot alone since Sunday's table has
+    nothing at that specific time.
+  - Not investigated: the same 4am-4am boundary logic would suggest
+    Saturday's own table tail (12am/1am/2am) similarly carries into Sunday
+    morning, and Friday's weekday Late Nights lineup into Saturday morning.
+    Left as plain per-table data for now since nothing conflicts there (no
+    competing entries the way Sunday/Monday had) - only the Mon/Sun case
+    above needed a fix.
+- Logo: `staticCoverUrl: '/wjwd-icon.png'`, approved 2026-09-10. Same
+  rounded-square treatment as GraceFM's icon, built from Larry's own WJWD
+  badge image - source was low-resolution (~186x183), so it's a bit soft
+  scaled up, but confirmed as an improvement over no image.
