@@ -136,9 +136,10 @@
      scroll), but the map shrinks to leave exactly enough room for it
      rather than the bar floating on top of live map content. Toggled via
      .player-open on #app - see showMiniPlayer()/hideMiniPlayer(). Height
-     (56px) matches .radio-player-bar's height below. */
+     (74px) matches .radio-player-bar's height below - keep these two in
+     sync if either changes. */
   .player-open #map {
-    margin-bottom: 56px;
+    margin-bottom: 74px;
   }
   .leaflet-popup-content-wrapper {
     background: var(--paper);
@@ -1084,12 +1085,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Same 2-line-clamp treatment as .mp-nowplaying (mobile picker) and
+     .radio-player-nowplaying (mini player) - one accessibility fix applied
+     consistently everywhere this text appears, not just where it was
+     first reported. */
   .radio-browse-row-nowplaying {
-    font-size: 11.5px;
+    font-size: 13px;
+    line-height: 1.3;
     opacity: 0.75;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
   }
   .radio-browse-row-meta {
     font-size: 11px;
@@ -1861,12 +1869,15 @@
      Pinned to the bottom of the viewport rather than a side panel, so it
      never competes with the map for screen width - visitors can keep
      exploring the map while it plays. */
+  /* Height grew from 56px to fit .radio-player-nowplaying's 2-line clamp
+     below (was a single truncated line) - see .player-open #map above,
+     which has to stay in sync with this value. */
   .radio-player-bar {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 56px;
+    height: 74px;
     background: var(--ink);
     border-top: 2px solid var(--brass);
     display: none;
@@ -1914,11 +1925,14 @@
     color: var(--brass);
   }
   .radio-player-nowplaying {
-    font-size: 13px;
+    font-size: 14.5px;
+    line-height: 1.25;
     color: var(--paper);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
   }
   .radio-player-close {
     flex-shrink: 0;
@@ -2222,15 +2236,25 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Bumped from 14.5px and allowed to wrap to 2 lines (same
+     display:-webkit-box/-webkit-line-clamp technique as .live-now-title
+     above) instead of a single truncated line - low-vision readers
+     flagged the old single-line version as hard to read, and most now-
+     playing text was already getting cut off with "…" well before the
+     row's edge anyway. Only genuinely long strings still end in "…" now,
+     at the end of the 2nd line instead of partway through the 1st. */
   .mp-nowplaying {
     margin-top: 3px;
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 14.5px;
+    font-size: 16px;
+    line-height: 1.3;
     color: var(--ink);
     opacity: 0.8;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
   }
   /* A short rule, not a border, so it reads as "separator between two
      distinct facts" rather than a wrapped continuation of the now-playing
