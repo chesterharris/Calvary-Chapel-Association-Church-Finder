@@ -2266,6 +2266,51 @@
   .mp-star.favorited { color: var(--brass); }
   .mp-star svg { width: 24px; height: 24px; }
 
+  /* ---- Mobile station picker "dock" ----
+     Sits between .mp-topbar and .mp-list as a normal flex sibling (NOT an
+     overlay) - this is what makes it push the list down rather than cover
+     part of it. Holds at most one row: whichever station is currently
+     playing/paused, rendered here instead of in the scrollable list below
+     (see renderMobileRadioPicker), so it's always in view no matter how
+     far the list itself is scrolled - the whole point of this feature (see
+     MOBILE-BUILD-NOTES.md, "station disappears when picked").
+     :empty collapses it to nothing when no station is active, so the "no
+     station selected" view is untouched - same list, same spacing, dock
+     just isn't there. */
+  .mp-dock:not(:empty) {
+    flex-shrink: 0;
+    padding: 12px 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .mp-dock-label {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--evergreen);
+    margin: 0 2px 6px;
+  }
+  @keyframes mpDockIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mpRowReturn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mpRowPulse {
+    0% { background: var(--paper); }
+    40% { background: rgba(47,75,60,0.14); }
+    100% { background: var(--paper); }
+  }
+  .mp-dock-entering { animation: mpDockIn 220ms ease-out; }
+  .mp-row-entering { animation: mpRowReturn 220ms ease-out; }
+  .mp-row-pulse { animation: mpRowPulse 220ms ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .mp-dock-entering, .mp-row-entering, .mp-row-pulse { animation: none; }
+  }
+
   /* ---- Mobile conferences pane (phones only, see #mobileConferencesPane) ----
      Reuses .mp-list for scrolling/padding, but its own row style below
      instead of .mp-row - a conference entry has no play/favorite action,
@@ -2793,6 +2838,7 @@
     <div class="mp-topbar-title mp-topbar-title-tight">Station Picker</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
+  <div id="mpDock" class="mp-dock"></div>
   <div id="mpList" class="mp-list"></div>
 </div>
 
@@ -5753,18 +5799,36 @@
   // require a native iOS app with a CarPlay entitlement from Apple -
   // out of scope for a website.
   //
-  // Two iOS Safari quirks shaped the choices below:
-  //   - Artwork bigger than ~128x128 tends to render as a blurry/grey box
-  //     instead of being scaled down, so GraceFM/WJWD's own logos get a
-  //     small dedicated coverThumbUrl just for this (see RADIO_STATIONS'
-  //     staticCoverThumbUrl in src/index.js) while the mini player keeps
-  //     using the bigger coverUrl. Every other station just passes along
-  //     whatever coverUrl it already has (a provider's own live art, or
-  //     nothing) - no attempt to filter those out pre-emptively.
-  //   - Setting a seekbackward/seekforward handler makes iOS show 10-second
-  //     skip buttons INSTEAD of previous/next-track buttons. Deliberately
-  //     not setting those handlers here, so previoustrack/nexttrack (wired
-  //     below to switching stations, not seeking) are what show up.
+  // Artwork bigger than ~128x128 tends to render as a blurry/grey box
+  // instead of being scaled down, so GraceFM/WJWD's own logos get a small
+  // dedicated coverThumbUrl just for this (see RADIO_STATIONS'
+  // staticCoverThumbUrl in src/index.js) while the mini player keeps using
+  // the bigger coverUrl. Every other station just passes along whatever
+  // coverUrl it already has (a provider's own live art, or nothing) - no
+  // attempt to filter those out pre-emptively. Confirmed working - station
+  // name, live program/host text, and artwork all show up correctly on
+  // the Lock Screen and CarPlay's Now Playing screen (2026-09-10/11).
+  //
+  // KNOWN LIMITATION, not expected to be fixed here (confirmed 2026-09-11,
+  // decided not worth the rewrite it'd take): previoustrack/nexttrack below
+  // are wired to switch stations and ARE the spec-correct way to ask iOS
+  // for previous/next buttons instead of seek controls. In practice, iOS
+  // still shows its own 10-second skip buttons for these streams and routes
+  // taps to a real native seek on the stream's own buffer, bypassing these
+  // handlers entirely - confirmed by watching an actual scrubber/position
+  // appear only after tapping skip, and by setting
+  // navigator.mediaSession.setPositionState({ duration: Infinity, ... })
+  // (the documented way to mark a session as a live/unbounded stream) with
+  // no change in behavior. Best understanding: WebKit is choosing the
+  // button set based on whether the underlying <audio> element's own
+  // buffered range is seekable at all (true for most continuous network
+  // streams, live or not), independent of which Media Session actions a
+  // page registers - not something fixable from here short of replacing
+  // plain <audio src="..."> playback with a MediaSource Extensions-based
+  // player built to never expose a seekable range, which is a much bigger
+  // rewrite with its own real risk of new playback bugs. The handlers are
+  // left in place anyway (harmless, and would "just work" for free if a
+  // future iOS/Safari version changes this).
   const hasMediaSession = 'mediaSession' in window.navigator;
 
   function updateMediaSessionMetadata(station) {
@@ -5955,6 +6019,7 @@
   // manual close, or the countdown hitting zero) leave things in exactly
   // the same end state.
   function stopRadioPlayback() {
+    const wasPlayingName = currentPlayingDisplayName;
     radioAudio.pause();
     radioAudio.removeAttribute('src');
     radioAudio.load();
@@ -5966,6 +6031,13 @@
     if (hasMediaSession) {
       navigator.mediaSession.metadata = null;
       navigator.mediaSession.playbackState = 'none';
+    }
+    // If the picker's open, the dock needs to empty out and that station
+    // needs to reappear in the list - same animated "it moved, not
+    // vanished" treatment as picking a different station (see the
+    // mobileRadioPicker click handler), just in reverse.
+    if (document.body.classList.contains('mobile-picker-open')) {
+      renderMobileRadioPicker({ returningStationName: wasPlayingName });
     }
   }
 
@@ -6386,6 +6458,22 @@
       radioAudio.pause();
     }
   });
+  // Targeted update, not a full renderMobileRadioPicker() - a play/pause
+  // event doesn't change WHICH station is active, only its play state, so
+  // this just swaps the one row's icon in place (whichever container it's
+  // currently in, dock or list). A full re-render here would also wipe out
+  // the dock/return entrance animation (see the click handler and
+  // stopRadioPlayback below) if one happened to still be mid-flight.
+  function updateMobilePickerPlayIcon() {
+    if (!document.body.classList.contains('mobile-picker-open') || !currentPlayingDisplayName) return;
+    const btn = document.querySelector('#mobileRadioPicker .mp-row[data-station-name="' + CSS.escape(currentPlayingDisplayName) + '"] .mp-playbtn');
+    if (!btn) return;
+    const isAudibly = !radioAudio.paused;
+    btn.classList.toggle('is-playing', isAudibly);
+    btn.innerHTML = isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG;
+    btn.setAttribute('aria-label', (isAudibly ? 'Pause ' : 'Play ') + currentPlayingDisplayName);
+  }
+
   radioAudio.addEventListener('play', function() {
     radioPlayPauseBtn.textContent = '⏸';
     radioPlayPauseBtn.setAttribute('aria-label', 'Pause');
@@ -6395,13 +6483,13 @@
     // Keep the mobile picker's active-row icon (play vs. pause) in sync
     // regardless of which control - the picker row itself, the desktop
     // mini player, or a lock-screen/hardware media key - triggered it.
-    if (document.body.classList.contains('mobile-picker-open')) renderMobileRadioPicker();
+    updateMobilePickerPlayIcon();
   });
   radioAudio.addEventListener('pause', function() {
     radioPlayPauseBtn.textContent = '▶';
     radioPlayPauseBtn.setAttribute('aria-label', 'Play');
     if (hasMediaSession) navigator.mediaSession.playbackState = 'paused';
-    if (document.body.classList.contains('mobile-picker-open')) renderMobileRadioPicker();
+    updateMobilePickerPlayIcon();
   });
 
   radioPlayerCloseBtn.addEventListener('click', function() {
@@ -6464,34 +6552,66 @@
     return names.map(function(n) { return byName[n]; });
   }
 
-  function renderMobileRadioPicker() {
+  // Builds one station row's markup - shared by the dock and the list
+  // below, so a docked station and a plain list entry look and behave
+  // identically apart from which container holds them. extraRowClass is
+  // for the transient animation classes only (see renderMobileRadioPicker).
+  function buildMobilePickerRowHtml(s, favorites, extraRowClass) {
+    const isFav = favorites.indexOf(s.displayName) !== -1;
+    const isActive = s.displayName === currentPlayingDisplayName;
+    const isAudibly = isActive && !radioAudio.paused;
+    const metaHtml = s.cityState
+      ? '<div class="mp-meta-divider"></div><div class="mp-meta">' + escapeHtml(s.cityState) + '</div>'
+      : '';
+    return '<div class="mp-row' + (isActive ? ' mp-row-active' : '') + (extraRowClass ? ' ' + extraRowClass : '') + '" data-station-name="' + escapeHtml(s.displayName) + '">' +
+      '<button type="button" class="mp-playbtn' + (isAudibly ? ' is-playing' : '') + '" tabindex="-1" aria-label="' + (isAudibly ? 'Pause' : 'Play') + ' ' + escapeHtml(s.displayName) + '">' +
+        (isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG) +
+      '</button>' +
+      '<div class="mp-info">' +
+        '<div class="mp-name">' + escapeHtml(s.displayName) + '</div>' +
+        '<div class="mp-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
+        metaHtml +
+      '</div>' +
+      '<button type="button" class="mp-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
+        buildFavoriteStarSvg(isFav) +
+      '</button>' +
+    '</div>';
+  }
+
+  // The currently-playing (or paused-but-active) station renders ONCE, in
+  // the fixed dock above the list - never duplicated into the scrollable
+  // list below - so it's always in view no matter how far the list itself
+  // is scrolled, instead of the old behavior of reordering it to the top
+  // of the same scrollable area (which is what made it seem to "disappear"
+  // when picked from further down the list - see MOBILE-BUILD-NOTES.md).
+  //
+  // opts is only for the brief entrance animation right after a station is
+  // picked (see the mobileRadioPicker click handler below) or stops playing
+  // (see stopRadioPlayback): { dockEntering: bool, returningStationName }.
+  function renderMobileRadioPicker(opts) {
+    opts = opts || {};
+    const dockEl = document.getElementById('mpDock');
     const listEl = document.getElementById('mpList');
     if (!radioStations || !radioStations.length) {
+      dockEl.innerHTML = '';
       listEl.innerHTML = '<div class="mp-empty">Loading stations…</div>';
       return;
     }
     const favorites = getFavoriteStationNames();
     const ordered = getMobilePickerOrderedStations();
-    listEl.innerHTML = ordered.map(function(s) {
-      const isFav = favorites.indexOf(s.displayName) !== -1;
-      const isActive = s.displayName === currentPlayingDisplayName;
-      const isAudibly = isActive && !radioAudio.paused;
-      const metaHtml = s.cityState
-        ? '<div class="mp-meta-divider"></div><div class="mp-meta">' + escapeHtml(s.cityState) + '</div>'
-        : '';
-      return '<div class="mp-row' + (isActive ? ' mp-row-active' : '') + '" data-station-name="' + escapeHtml(s.displayName) + '">' +
-        '<button type="button" class="mp-playbtn' + (isAudibly ? ' is-playing' : '') + '" tabindex="-1" aria-label="' + (isAudibly ? 'Pause' : 'Play') + ' ' + escapeHtml(s.displayName) + '">' +
-          (isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG) +
-        '</button>' +
-        '<div class="mp-info">' +
-          '<div class="mp-name">' + escapeHtml(s.displayName) + '</div>' +
-          '<div class="mp-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
-          metaHtml +
-        '</div>' +
-        '<button type="button" class="mp-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
-          buildFavoriteStarSvg(isFav) +
-        '</button>' +
-      '</div>';
+    const byName = {};
+    radioStations.forEach(function(s) { byName[s.displayName] = s; });
+    const dockedStation = currentPlayingDisplayName ? byName[currentPlayingDisplayName] : null;
+
+    dockEl.innerHTML = dockedStation
+      ? '<div class="mp-dock-label">Now Playing</div>' +
+        buildMobilePickerRowHtml(dockedStation, favorites, opts.dockEntering ? 'mp-dock-entering' : '')
+      : '';
+
+    const rest = dockedStation ? ordered.filter(function(s) { return s.displayName !== dockedStation.displayName; }) : ordered;
+    listEl.innerHTML = rest.map(function(s) {
+      const extra = (opts.returningStationName && s.displayName === opts.returningStationName) ? 'mp-row-entering' : '';
+      return buildMobilePickerRowHtml(s, favorites, extra);
     }).join('');
   }
 
@@ -6760,7 +6880,13 @@
     applyMobilePrimaryRowLayout(e.matches);
   });
 
-  document.getElementById('mpList').addEventListener('click', function(e) {
+  // Listens on the whole picker (dock + list + topbar), not just #mpList -
+  // the dock is now a separate sibling container holding the same kind of
+  // row, and this one handler covers a tap landing in either place. A tap
+  // on the topbar (e.g. the back button, which has its own listener) just
+  // finds no .mp-star/.mp-row match below and falls through harmlessly.
+  const MOBILE_PICKER_DOCK_DELAY_MS = 160;
+  document.getElementById('mobileRadioPicker').addEventListener('click', function(e) {
     const starBtn = e.target.closest('.mp-star');
     if (starBtn) {
       // Star toggle only - matches the desktop panel's frozen-order
@@ -6777,13 +6903,24 @@
     const station = radioStations.find(function(s) { return s.displayName === name; });
     if (!station) return;
     if (name === currentPlayingDisplayName) {
-      // Already the active station - the whole row is the play/pause
-      // toggle, not just the icon.
+      // Already the active station (docked) - the whole row is the
+      // play/pause toggle, not just the icon.
       if (radioAudio.paused) { radioAudio.play(); } else { radioAudio.pause(); }
-    } else {
-      playStation(station);
-      renderMobileRadioPicker();
+      return;
     }
+    // Switching to a different station. Pulse the tapped row right where
+    // the driver's thumb already is, THEN move it into the dock a beat
+    // later - reads as "that one moved up there", not "that one vanished
+    // and a different list appeared" (the actual bug report this whole
+    // dock exists to fix). previousName may be null (nothing was playing
+    // yet) - renderMobileRadioPicker below just no-ops the return
+    // animation in that case, nothing to animate back into the list.
+    const previousName = currentPlayingDisplayName;
+    row.classList.add('mp-row-pulse');
+    setTimeout(function() {
+      playStation(station);
+      renderMobileRadioPicker({ dockEntering: true, returningStationName: previousName });
+    }, MOBILE_PICKER_DOCK_DELAY_MS);
   });
 
   loadRadioTicker();
