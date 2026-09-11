@@ -2623,6 +2623,15 @@ const RADIO_STATIONS = [
     // schedule notes doc for why the shadowed original wasn't used).
     staticCoverUrl: '/gracefm-icon.png',
     staticCoverThumbUrl: '/gracefm-icon-128.png'
+  },
+  {
+    displayName: 'Hope FM',
+    cityState: 'Medford Lakes, NJ',
+    homePage: 'https://hopefm.net/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WVBV',
+    streamUrl: 'https://ice26.securenetsystems.net/WVBV'
   }
 ];
 

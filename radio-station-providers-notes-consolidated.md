@@ -115,7 +115,7 @@ applies.
 
 **Stations currently configured:** EQUIP FM, WIAM, DOVE FM, REVIVE FM,
 The Truth (TN) / WZTH, The Truth (GA) / WZTG, Truth FM / WZTM,
-Crossover / KCHG, KVNG, CSN International / CSNAAC.
+Crossover / KCHG, KVNG, CSN International / CSNAAC, Hope FM / WVBV.
 
 **CSN International (Twin Falls, ID) / CSNAAC** — added 2026-09-03.
 subdomain `streamdb4web.securenetsystems.net`, `streamUrl` confirmed from
@@ -216,6 +216,22 @@ path this time (live traffic vs. manual XML fetch).
 Skip per the no-generic-placeholder policy above, same as GraceFM. Revisit
 only if the station's metadata pipeline gets fixed on SecureNetSystems'
 end.
+
+**Hope FM / WVBV (Medford Lakes, NJ)** — added 2026-09-11, the radio
+ministry of Calvary Chapel Marlton (`hopefm.net`). Larry supplied the XML
+feed URL and a real sample response directly (title "A Moment of Truth" /
+artist "Gary Clark", `<cover>` empty), so subdomain/callSign didn't need
+separate discovery this time: `subdomain`
+`streamdb4web.securenetsystems.net`, `callSign` `WVBV`. This is the
+Cirrus Encore player template (`/cirrusencore/{callSign}`, same family as
+the plain `/v5/` stations elsewhere in this file, distinct from KGPS's
+`/cwa/` template above) - page title and on-page slogan both read "Hope
+FM". `streamUrl` (`https://ice26.securenetsystems.net/WVBV`) taken from
+the player page's `streamSrcDB`/`streamSRC` JS variables, same convention
+as every other station in this section - confirmed against the response,
+not guessed from the XML endpoint. Same `streamdb4web` subdomain as WZTG/
+WZTM/CSNAAC above, different `ice` edge host (`ice26`, shared with WZTG/
+WZTM specifically).
 
 ---
 
