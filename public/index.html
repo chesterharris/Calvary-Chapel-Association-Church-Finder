@@ -2517,16 +2517,16 @@
       </div>
     </div>
     <div class="header-actions">
-      <button id="btnLiveNow" class="btn btn-live" style="display:none;">🔴 <span id="liveNowCount">0</span> churches live now</button>
+      <button id="btnLiveNow" class="btn btn-live" style="display:none;" title="See which churches are streaming live right now">🔴 <span id="liveNowCount">0</span> churches live now</button>
       <!-- Initial content above is just a safe default before JS first
            runs - updateLiveNowUi() fully owns this button's text, class,
            and visibility from the first load onward, across all three
            states (live / upcoming countdown / no streams yet). -->
-      <button id="btnAddLocation" class="btn btn-ember">+ Add Location</button>
-      <button id="btnManageLocations" class="btn btn-outline">Manage Locations</button>
-      <button id="btnManageFeaturedVideo" class="btn btn-outline">Manage Featured Video</button>
-      <button id="btnRadioBrowse" class="btn btn-outline">📻 All Stations</button>
-      <button id="btnFeedback" class="btn btn-outline">Feedback</button>
+      <button id="btnAddLocation" class="btn btn-ember" title="Admin-only: add a new church location">+ Add Location</button>
+      <button id="btnManageLocations" class="btn btn-outline" title="Admin-only: edit or remove existing church locations">Manage Locations</button>
+      <button id="btnManageFeaturedVideo" class="btn btn-outline" title="Admin-only: set the featured video link shown on the map">Manage Featured Video</button>
+      <button id="btnRadioBrowse" class="btn btn-outline" title="Browse and search all radio stations">📻 All Stations</button>
+      <button id="btnFeedback" class="btn btn-outline" title="Send feedback or report an issue">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
       <span id="adminArea" class="admin-area">
         <a href="#" id="adminSignInLink" class="admin-link">Admin</a>
