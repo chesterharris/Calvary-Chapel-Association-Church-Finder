@@ -1077,20 +1077,21 @@
     flex: 1;
     min-width: 0;
   }
+  /* This whole row - name, now-playing, and the meta line below - was
+     sized for the old narrow desktop-only dropdown. It's since become a
+     full-screen mobile pane too (see .mobile-browse-open), where these
+     same sizes read as too small next to the rest of the mobile chrome -
+     bumped together, same as the mobile station picker's own row got. */
   .radio-browse-row-name {
     font-weight: 700;
     color: var(--evergreen);
-    font-size: 13px;
+    font-size: 16px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Same 2-line-clamp treatment as .mp-nowplaying (mobile picker) and
-     .radio-player-nowplaying (mini player) - one accessibility fix applied
-     consistently everywhere this text appears, not just where it was
-     first reported. */
   .radio-browse-row-nowplaying {
-    font-size: 13px;
+    font-size: 14.5px;
     line-height: 1.3;
     opacity: 0.75;
     display: -webkit-box;
@@ -1099,10 +1100,12 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  /* Also covers "Station website" (.radio-browse-homepage-link below),
+     which has no font-size of its own and inherits this. */
   .radio-browse-row-meta {
-    font-size: 11px;
+    font-size: 13px;
     opacity: 0.65;
-    margin-top: 2px;
+    margin-top: 3px;
   }
   .radio-browse-homepage-link {
     color: var(--brass);
