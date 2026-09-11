@@ -894,6 +894,36 @@
     opacity: 0.5;
     cursor: default;
   }
+  /* Icons reuse the exact colors/shapes already used elsewhere for these
+     same concepts - the flag on a church's Featured toggle
+     (buildFeaturedFlagSvg), the star on its Favorite toggle
+     (buildFavoriteStarSvg), and the ember-red pulsing dot on a live
+     YouTube badge (.popup-live-dot) - so a user who's already seen those
+     on a church listing recognizes these filter rows at a glance instead
+     of learning a second, checkbox-only icon language. Always shown
+     "on"/filled, since these label what the filter does, not a toggle
+     state of their own. */
+  .filter-row-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+  .filter-row-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+  .filter-row-icon-featured { color: var(--evergreen); }
+  .filter-row-icon-favorite { color: var(--brass); }
+  .filter-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ember);
+    flex-shrink: 0;
+    animation: popupLivePulse 2.2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .filter-live-dot { animation: none; }
+  }
   #radioBrowsePanel {
     width: 420px;
   }
@@ -2919,14 +2949,21 @@
   <div id="liveNowFilters" class="live-now-filters">
     <label id="liveOnlyFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="liveOnlyFilterCb" disabled>
+      <span class="filter-live-dot" aria-hidden="true"></span>
       <span>Show only live churches on the map</span>
     </label>
     <label id="featuredFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="featuredFilterCb">
+      <span class="filter-row-icon filter-row-icon-featured" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h12l-3.2 4L17 12H5z"/></svg>
+      </span>
       <span>Featured Streams only</span>
     </label>
     <label id="favoritesFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="favoritesFilterCb">
+      <span class="filter-row-icon filter-row-icon-favorite" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </span>
       <span>Favorites only</span>
     </label>
   </div>
