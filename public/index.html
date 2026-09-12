@@ -100,32 +100,16 @@
   header .header-title {
     display: flex;
     align-items: center;
-    gap: 10px;
     min-width: 0;
   }
+  /* Full wordmark logo (icon + "CCA FINDER" + subtext), replacing the old
+     small icon + <h1>/.sub text pair. Height-based sizing, width auto, so
+     it scales as one unit and keeps the SVG's own proportions. */
   .header-logo {
     flex-shrink: 0;
-    border-radius: 6px;
-  }
-  .header-title-text {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  header h1 {
-    margin: 0;
-    font-size: 23px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-  header .sub {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 12px;
-    opacity: 0.85;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    height: 44px;
+    width: auto;
+    max-width: 100%;
   }
   #map {
     flex: 1;
@@ -396,15 +380,6 @@
     align-items: center;
     gap: 8px;
   }
-  .search-label {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--paper);
-    opacity: 0.85;
-    white-space: nowrap;
-  }
   #searchInput {
     font-family: 'Helvetica Neue', Arial, sans-serif;
     font-size: 13px;
@@ -584,11 +559,9 @@
       text-align: left;
       flex-wrap: wrap;
     }
-    /* Compact branding: logo + title only, subtitle dropped - the original
-       problem statement called out the full branding block as part of the
-       space eaten before the map. */
-    header .header-title-text .sub { display: none; }
-    header h1 { font-size: 19px; }
+    /* Compact branding: the logo shrinks a bit to save space before the
+       map, same idea as the old logo+title/subtitle pairing it replaced. */
+    .header-logo { height: 34px; }
     /* Search moves to its own full-width row below title+hamburger, and
        its separate label line is dropped in favor of the input's existing
        placeholder - one fewer line before the map. */
@@ -598,7 +571,6 @@
       justify-content: stretch;
     }
     header .search-wrap { width: 100%; }
-    header .search-label { display: none; }
     #searchInput { width: 100%; box-sizing: border-box; }
     /* Add Location / Manage Locations / All Stations / Feedback / Live
        Debug / Admin all move into the hamburger menu (see markup above) -
@@ -2503,16 +2475,11 @@
 <div id="app">
   <header>
     <div class="header-title">
-      <img src="/android-chrome-192x192.png" alt="" class="header-logo" width="40" height="40">
-      <div class="header-title-text">
-        <h1>CCA Finder</h1>
-        <div class="sub">Church Hub</div>
-      </div>
+      <img src="/CCA-Finder-logo.svg" alt="CCA Finder - Calvary Chapel Association" class="header-logo">
     </div>
     <div class="search-column">
       <div class="search-wrap">
-        <label class="search-label" for="searchInput">Search</label>
-        <input type="text" id="searchInput" placeholder="Search churches..." autocomplete="off">
+        <input type="text" id="searchInput" placeholder="Search churches..." autocomplete="off" aria-label="Search churches">
         <button type="button" id="searchClearBtn" title="Clear search" style="display: block;">×</button>
       </div>
     </div>
