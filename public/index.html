@@ -899,6 +899,15 @@
   #radioBrowsePanel {
     width: 420px;
   }
+  /* Desktop-only width for the Live Debug pane - must stay above the
+     720px full-screen-takeover media query below so that query's
+     width:100% wins on phones (equal ID-selector specificity means the
+     later rule in source order wins; this used to live below that query
+     and silently overrode it, stranding the pane at 520px - wider than
+     most phones - and dragging "Run Check Now" off-screen). */
+  #liveDebugPanel {
+    width: 520px;
+  }
   /* Hidden by default (desktop) - see the 720px rule below, where these
      take over from the "x" close button for #radioBrowsePanel,
      #liveNowPanel, #liveDebugPanel and #managePanel, the four panes still
@@ -1198,9 +1207,6 @@
   }
   .radio-ticker-empty-cta:hover { text-decoration: underline; }
   .radio-ticker-empty-cta svg { width: 15px; height: 15px; }
-  #liveDebugPanel {
-    width: 520px;
-  }
   .live-debug-toolbar {
     display: flex;
     align-items: center;
@@ -1237,6 +1243,15 @@
   .live-debug-toolbar-actions .btn[disabled] {
     opacity: 0.6;
     cursor: default;
+  }
+  /* .btn-outline (Refresh) is styled paper-on-transparent for the
+     evergreen header it was originally built for - same fix already
+     applied to .modal .btn-outline and .side-panel-footer .btn, needed
+     here too since this toolbar sits on the side-panel's paper
+     background, where that combination is invisible. */
+  .live-debug-toolbar-actions .btn-outline {
+    color: var(--evergreen);
+    border-color: var(--line);
   }
   .live-debug-spinner {
     display: inline-block;
