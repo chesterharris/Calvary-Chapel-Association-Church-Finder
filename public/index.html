@@ -4505,8 +4505,20 @@
     const haystack = [c.name, c.pastor, c.address, c.citystatezip]
       .filter(Boolean)
       .join(' ');
-    const re = new RegExp('\\b' + escapeRegExp(term) + '\\b', 'i');
-    return re.test(haystack);
+    // Each word of the query is matched independently (AND across words)
+    // rather than requiring the whole query to appear as one exact
+    // contiguous phrase. A couple hundred imported records have a stray
+    // double space in a field (most often between a pastor's first and
+    // last name, e.g. "Brian  Williams"), which silently broke phrase
+    // search - "Brian Williams" found nothing even though "Brian" and
+    // "Williams" separately did. Matching word-by-word fixes that
+    // regardless of whether the underlying data ever gets cleaned up,
+    // and as a side benefit no longer cares about field order either.
+    const words = term.split(/\s+/).filter(Boolean);
+    return words.every(function(word) {
+      const re = new RegExp('\\b' + escapeRegExp(word) + '\\b', 'i');
+      return re.test(haystack);
+    });
   }
 
   function matchesScoreFilter(c) {
