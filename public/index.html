@@ -4500,11 +4500,20 @@
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  // Curly/typographic apostrophe variants normalized to a plain ' so a
+  // name like "O'Neill" matches regardless of which apostrophe character
+  // was typed into the search box vs. stored in the data (copy-pasted
+  // names very often carry a curly ' or ' instead of a plain ').
+  const APOSTROPHE_RE = /[\u2018\u2019\u02BC\u02BB\u2032\`]/g;
+  function normalizeApostrophes(str) {
+    return str.replace(APOSTROPHE_RE, "'");
+  }
+
   function matchesSearch(c, term) {
     if (!term) return true;
-    const haystack = [c.name, c.pastor, c.address, c.citystatezip]
+    const haystack = normalizeApostrophes([c.name, c.pastor, c.address, c.citystatezip]
       .filter(Boolean)
-      .join(' ');
+      .join(' '));
     // Each word of the query is matched independently (AND across words)
     // rather than requiring the whole query to appear as one exact
     // contiguous phrase. A couple hundred imported records have a stray
@@ -4514,7 +4523,7 @@
     // "Williams" separately did. Matching word-by-word fixes that
     // regardless of whether the underlying data ever gets cleaned up,
     // and as a side benefit no longer cares about field order either.
-    const words = term.split(/\s+/).filter(Boolean);
+    const words = normalizeApostrophes(term).split(/\s+/).filter(Boolean);
     return words.every(function(word) {
       const re = new RegExp('\\b' + escapeRegExp(word) + '\\b', 'i');
       return re.test(haystack);
