@@ -1295,7 +1295,35 @@ async function checkChurchLive(youtubeUrl) {
   const startDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
   const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
 
-  const videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
+  let videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
+
+  // "isLive:true but no videoId" is its own failure condition, distinct
+  // from the outright fetch failures fetchLivePageWithRetry already
+  // guards against above - this is a "successful" 200 response that
+  // happens to be the stripped shape YouTube sometimes serves our
+  // datacenter IP (see the videoIdJsonMatch comment above: confirmed in
+  // production to omit videoId/title/everything else while still saying
+  // isLive:true). Confirmed 2026-09 in production: this can persist
+  // across multiple 2-minute cron cycles for a given church rather than
+  // clearing on its own, silently defeating the Live Now embed (no
+  // videoId means the frontend can't embed OR thumbnail the stream, and
+  // falls back to a bare channel link) for however long it lasts. One
+  // extra fetch, specifically gated on this exact combination, gives it
+  // a second chance within the SAME check rather than only across cron
+  // cycles. If this retry also comes up empty, videoId simply stays
+  // null exactly as it did before this change - no new failure mode,
+  // just one more chance to avoid the existing one.
+  if (!videoId) {
+    try {
+      const retryHtml = await fetchLivePage(liveUrl);
+      const retryCanonicalMatch = retryHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
+      const retryVideoIdJsonMatch = retryHtml.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+      videoId = retryCanonicalMatch ? retryCanonicalMatch[1] : (retryVideoIdJsonMatch ? retryVideoIdJsonMatch[1] : null);
+    } catch (err) {
+      // Retry fetch itself failed (timeout, network error) - leave
+      // videoId null, same as if this retry didn't exist.
+    }
+  }
   // The og: meta tags are raw HTML attribute content, so they can contain
   // entities like &amp; or &#39; that need decoding before display -
   // confirmed in production (a church's description showed literal
