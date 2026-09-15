@@ -629,6 +629,62 @@
     align-items: center;
     justify-content: center;
   }
+  /* Live Now video lightbox - reuses .modal-overlay for the dimmed,
+     full-viewport backdrop (same look as the admin/location/feedback
+     modals) but needs its own box instead of .modal, since .modal caps
+     out at max-width:420px - sized for forms, not video. z-index sits
+     above every existing modal (highest prior use was 2600) so it can
+     never end up underneath one.
+     Sizing is viewport-driven rather than breakpoint-driven on purpose:
+     width:min(94vw, 94vh*16/9) with aspect-ratio:16/9 fills whichever
+     dimension is the binding constraint - side-to-side on a narrow/tall
+     view, top-to-bottom on a wide desktop window - without distorting
+     the video or needing separate rules per device. That's what makes
+     one lightbox correct on a phone, an iPad in either orientation, and
+     a desktop window without any device-specific branching. */
+  .video-lightbox-overlay {
+    z-index: 3000;
+  }
+  .video-lightbox-box {
+    position: relative;
+    width: min(94vw, calc(94vh * 16 / 9));
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  }
+  .video-lightbox-box #videoLightboxPlayer,
+  .video-lightbox-box #videoLightboxPlayer iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .video-lightbox-close {
+    position: absolute;
+    top: -40px;
+    right: 0;
+    color: #fff;
+    font-size: 28px;
+    z-index: 1;
+  }
+  @media (max-width: 720px) {
+    /* No room above the box for an external close button on a phone-
+       width screen - overlay it in the corner instead. */
+    .video-lightbox-close {
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      line-height: 32px;
+      text-align: center;
+      font-size: 22px;
+    }
+  }
   .modal {
     background: var(--paper);
     color: var(--ink);
@@ -2767,6 +2823,18 @@
   </div>
 </div>
 
+<!-- Live Now video lightbox. Deliberately NOT closing #liveNowPanel when
+     this opens (see openLiveVideoLightbox()) - the panel stays open
+     underneath the whole time, so closing this lightbox drops the user
+     straight back into the still-open list to pick another stream,
+     rather than needing to reopen it. -->
+<div id="videoLightboxOverlay" class="modal-overlay video-lightbox-overlay" style="display: none;">
+  <div class="video-lightbox-box">
+    <button type="button" id="videoLightboxCloseBtn" class="btn-close video-lightbox-close" title="Close" aria-label="Close video">&times;</button>
+    <div id="videoLightboxPlayer"></div>
+  </div>
+</div>
+
 <div id="feedbackModal" class="modal-overlay" style="display: none;">
   <div class="modal admin-modal">
     <h2>Feedback</h2>
@@ -3025,6 +3093,11 @@
      switcher) keeps working completely unchanged - the vector basemap just
      renders underneath them. -->
 <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.3/leaflet-maplibre-gl.js"></script>
+<!-- YouTube IFrame Player API - powers the Live Now video lightbox
+     (see openLiveVideoLightbox()/onYouTubeIframeAPIReady() below). Loads
+     asynchronously and calls the global onYouTubeIframeAPIReady() itself
+     once ready - that's a contract of this API, not a name we chose. -->
+<script src="https://www.youtube.com/iframe_api"></script>
 <script>
   let churches = []; // populated by loadChurchesFromServer() at startup
   let liveChurchIds = new Set(); // ids of churches currently live, from the latest live-status check
@@ -4097,11 +4170,26 @@
     const channelUrl = card.getAttribute('data-channel-url');
     const c = findChurchById(churchId);
     if (c) {
-      closeLiveNowPanel();
+      // Deliberately NOT closing the Live Now panel here when the
+      // lightbox is about to open (see the videoId branch below) - it
+      // stays open behind the lightbox so closing the lightbox drops
+      // the user straight back into the list. It's still closed on the
+      // fallback paths below, matching the pre-lightbox behavior.
       const lat = parseFloat(c.lat);
       const lng = parseFloat(c.lng);
       if (!isNaN(lat) && !isNaN(lng)) map.setView([lat, lng], 14);
     }
+    // embedAllowed is only ever explicitly false for a church we've
+    // confirmed doesn't allow it (see apply-embed-allowed.mjs) -
+    // anything else (true, or not set yet because we haven't checked)
+    // attempts the embed. A church wrongly left in that state still
+    // falls back correctly via handleLightboxPlayerError's onError
+    // handling (error 101/150) rather than sitting on a dead black box.
+    if (videoId && (!c || c.embedAllowed !== false)) {
+      openLiveVideoLightbox(videoId);
+      return;
+    }
+    closeLiveNowPanel();
     if (videoId) {
       window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId), '_blank', 'noopener');
     } else if (channelUrl) {
@@ -4171,6 +4259,96 @@
     const numericId = Number(id);
     return churches.find(function(c) { return c.id === numericId; });
   }
+
+  // ---- Live Now video lightbox ----
+  //
+  // One reusable YT.Player instance rather than destroying/rebuilding the
+  // iframe per click - switching streams is just loadVideoById() on the
+  // same instance. Loaded from youtube-nocookie.com (an undocumented but
+  // long-standing, widely-used player parameter - see host below) so no
+  // YouTube tracking cookie is set until someone actually presses play.
+  //
+  // The IFrame API loads asynchronously (see the <script> tag above) and
+  // calls onYouTubeIframeAPIReady() itself once ready - if a church card
+  // gets clicked before that fires, pendingLightboxVideoId holds the
+  // videoId so it plays as soon as the player exists instead of the
+  // click silently doing nothing.
+  let ytLightboxPlayer = null;
+  let ytApiReady = false;
+  let pendingLightboxVideoId = null;
+  let currentLightboxVideoId = null;
+
+  // Safety net for a church we thought allowed embedding (embedAllowed
+  // true, or not checked yet) but genuinely doesn't - error 101/150 is
+  // YouTube's own "owner does not allow this to be played in embedded
+  // players" code. Rather than a dead black box, fall back to exactly
+  // the same window.open the non-embeddable path already uses.
+  function handleLightboxPlayerError(event) {
+    if (event.data === 101 || event.data === 150 || event.data === 100) {
+      const videoId = currentLightboxVideoId;
+      closeVideoLightbox();
+      if (videoId) {
+        window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId), '_blank', 'noopener');
+      }
+    }
+  }
+
+  function onYouTubeIframeAPIReady() {
+    ytApiReady = true;
+    ytLightboxPlayer = new YT.Player('videoLightboxPlayer', {
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: { autoplay: 1, playsinline: 1, rel: 0 },
+      events: { onError: handleLightboxPlayerError }
+    });
+    if (pendingLightboxVideoId) {
+      const videoId = pendingLightboxVideoId;
+      pendingLightboxVideoId = null;
+      currentLightboxVideoId = videoId;
+      ytLightboxPlayer.loadVideoById(videoId);
+    }
+  }
+  // Assigned onto window explicitly - the IFrame API looks up this exact
+  // global name itself, so it has to be reachable as window.<name>, not
+  // just an in-scope function declaration in some bundlers/strict
+  // contexts. Harmless belt-and-suspenders here either way.
+  window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+
+  function openLiveVideoLightbox(videoId) {
+    document.getElementById('videoLightboxOverlay').style.display = 'flex';
+    currentLightboxVideoId = videoId;
+    if (ytApiReady && ytLightboxPlayer && typeof ytLightboxPlayer.loadVideoById === 'function') {
+      ytLightboxPlayer.loadVideoById(videoId);
+    } else {
+      pendingLightboxVideoId = videoId;
+    }
+  }
+
+  function closeVideoLightbox() {
+    document.getElementById('videoLightboxOverlay').style.display = 'none';
+    pendingLightboxVideoId = null;
+    currentLightboxVideoId = null;
+    // stopVideo(), not pauseVideo() - these are live broadcasts, not
+    // on-demand video, and pausing a live stream can leave the player
+    // holding an awkward buffered position rather than cleanly ending
+    // it. This also guarantees the audio actually stops the moment the
+    // lightbox closes, rather than continuing behind the still-open
+    // Live Now panel.
+    if (ytLightboxPlayer && typeof ytLightboxPlayer.stopVideo === 'function') {
+      try { ytLightboxPlayer.stopVideo(); } catch (err) { /* player not ready yet - nothing to stop */ }
+    }
+  }
+
+  document.getElementById('videoLightboxCloseBtn').addEventListener('click', closeVideoLightbox);
+  // Click on the dimmed backdrop itself (not a click that bubbled up from
+  // inside the video box) also closes it - standard lightbox behavior.
+  document.getElementById('videoLightboxOverlay').addEventListener('click', function(e) {
+    if (e.target.id === 'videoLightboxOverlay') closeVideoLightbox();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('videoLightboxOverlay').style.display !== 'none') {
+      closeVideoLightbox();
+    }
+  });
 
   const map = L.map('map', {
     scrollWheelZoom: true,
