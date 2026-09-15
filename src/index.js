@@ -1313,8 +1313,22 @@ async function checkChurchLive(youtubeUrl) {
   // cycles. If this retry also comes up empty, videoId simply stays
   // null exactly as it did before this change - no new failure mode,
   // just one more chance to avoid the existing one.
+  //
+  // Waits LIVE_CHECK_RETRY_DELAY_MS first, same as fetchLivePageWithRetry's
+  // own retry above - confirmed in production (2026-09) that firing the
+  // retry back-to-back with no gap wasn't saving every case. Also matches
+  // the "Fourth real-world false-positive pattern" a few lines up
+  // (isLive:true with nothing else, seen across SEVERAL churches at
+  // once - Casa Grande/Antelope Valley/South OC then, four different
+  // churches in one Live Now snapshot now): this looks like a
+  // time-windowed condition on our Worker's own IP/session rather than
+  // something particular to any one church's page, so a short pause
+  // before trying again is at least aimed at the right thing - though
+  // if the degraded window runs longer than this delay, it won't help
+  // every time, and that's worth watching rather than assuming solved.
   if (!videoId) {
     try {
+      await sleep(LIVE_CHECK_RETRY_DELAY_MS);
       const retryHtml = await fetchLivePage(liveUrl);
       const retryCanonicalMatch = retryHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
       const retryVideoIdJsonMatch = retryHtml.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
