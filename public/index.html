@@ -4932,7 +4932,19 @@
           '<span class="popup-live-badge-live"><span class="popup-live-dot" aria-hidden="true"></span>Live</span>' +
           '<span class="popup-live-badge-now">Now</span>' +
           '</span>';
-        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
+        // href/target stay pointed at the plain YouTube fallback (same as
+        // the non-live branch below) so a church we can't embed, or one
+        // with no videoId yet, still opens correctly with zero JS - the
+        // wirePopupButtons click handler below only intercepts (via
+        // preventDefault) the specific case where a lightbox is actually
+        // possible: a known videoId AND embedding not explicitly blocked
+        // (c.embedAllowed !== false) - the identical rule already used by
+        // the liveNowList click handler above.
+        const liveVideoId = (liveEntry && liveEntry.videoId) ? liveEntry.videoId : '';
+        popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') +
+          '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener" class="popup-live-lightbox-link"' +
+          ' data-live-video-id="' + escapeHtml(liveVideoId) + '"' +
+          ' data-embed-allowed="' + (c.embedAllowed === false ? 'false' : 'true') + '">' + ytLabel + '</a></div>';
       } else {
         popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
       }
@@ -5139,6 +5151,26 @@
         if (confirm('Remove this location from the map?')) {
           deleteChurch(deleteBtn.getAttribute('data-delete-id'));
           map.closePopup();
+        }
+      });
+    }
+    // The map popup's "LIVE NOW" badge - a real <a target="_blank"> link
+    // to the plain YouTube fallback URL by default (see buildPopupHtml),
+    // so it still works correctly with zero JS if this listener somehow
+    // doesn't attach. Only intercepted (preventDefault) when a lightbox
+    // is actually possible: a known videoId AND embedding not explicitly
+    // blocked for this church - otherwise the click falls through to the
+    // anchor's own href/target, opening YouTube in a new tab exactly as
+    // it always has. Mirrors the identical videoId/embedAllowed rule the
+    // liveNowList click handler already applies.
+    const liveLightboxLink = el.querySelector('.popup-live-lightbox-link');
+    if (liveLightboxLink) {
+      liveLightboxLink.addEventListener('click', function(e) {
+        const videoId = liveLightboxLink.getAttribute('data-live-video-id');
+        const embedAllowed = liveLightboxLink.getAttribute('data-embed-allowed') !== 'false';
+        if (videoId && embedAllowed) {
+          e.preventDefault();
+          openLiveVideoLightbox(videoId);
         }
       });
     }
