@@ -662,28 +662,29 @@
     height: 100%;
     border: 0;
   }
+  /* Originally positioned 40px ABOVE the box (top:-40px), on the
+     assumption there'd be room up there - wrong assumption: the box can
+     be up to 94% of the viewport (min(94vw, 94vh*16/9)), which on a
+     typical desktop/laptop window leaves less than 40px of margin above
+     it, often none. That rendered the button off the top edge of the
+     browser window - present in the DOM, wired up correctly, just not
+     visible or reachable. Anchoring it INSIDE the box's own top-right
+     corner instead (same treatment the phone-width media query used
+     to reserve for narrow screens only) doesn't depend on any external
+     margin existing at all, so it applies at every width now. */
   .video-lightbox-close {
     position: absolute;
-    top: -40px;
-    right: 0;
+    top: 6px;
+    right: 6px;
+    background: rgba(0,0,0,0.55);
     color: #fff;
-    font-size: 28px;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    text-align: center;
+    font-size: 22px;
     z-index: 1;
-  }
-  @media (max-width: 720px) {
-    /* No room above the box for an external close button on a phone-
-       width screen - overlay it in the corner instead. */
-    .video-lightbox-close {
-      top: 6px;
-      right: 6px;
-      background: rgba(0,0,0,0.55);
-      border-radius: 50%;
-      width: 32px;
-      height: 32px;
-      line-height: 32px;
-      text-align: center;
-      font-size: 22px;
-    }
   }
   .modal {
     background: var(--paper);
