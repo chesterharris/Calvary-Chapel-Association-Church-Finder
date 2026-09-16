@@ -696,10 +696,25 @@
      on hover. Qualifying with the button's own id raises specificity
      above .btn-close so the background always applies, hover or not. */
   #videoLightboxCloseBtn.video-lightbox-close {
+    /* -webkit-appearance/appearance:none strips the browser's own native
+       button chrome (confirmed in production this is what iPadOS Safari
+       was drawing on top of our explicit width/height, squashing the
+       circle into an oval with an off-center X - other browsers happened
+       to render close enough to a plain box that this went unnoticed).
+       box-sizing:border-box + padding:0 then guarantee width/height ARE
+       the actual rendered box everywhere, with nothing added on top. */
+    -webkit-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    padding: 0;
     position: static;
     margin: 0 6px;
-    background: #fff;
-    color: #111;
+    /* Paper - the palette's own "text-on-dark" token (see
+       CCA-Finder-Color-Palette.md) - reads as part of the app's existing
+       design language instead of a plain, stark white circle, while
+       staying light enough for strong contrast against the black header. */
+    background: var(--paper);
+    color: var(--ink);
     border-radius: 50%;
     width: 32px;
     height: 32px;
@@ -711,7 +726,7 @@
     border: 0;
   }
   #videoLightboxCloseBtn.video-lightbox-close:hover {
-    background: #ddd;
+    background: var(--line);
   }
   .modal {
     background: var(--paper);
