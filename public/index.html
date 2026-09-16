@@ -645,38 +645,50 @@
   .video-lightbox-overlay {
     z-index: 3000;
   }
+  /* History: first tried top:-40px (above the box) - off the top edge of
+     the browser, unreachable. Then tried an absolute-positioned circular
+     badge INSIDE the box's own top-right corner - that put it in the same
+     screen-space YouTube's own native player controls (volume/CC/settings
+     gear) render into, so it was visually lost among/behind YouTube's own
+     UI. YouTube's native controls claim every corner of the video itself
+     (title top-left, icons top-right, Live+scrubber bottom-left, expand +
+     logo bottom-right), so no corner-overlay position on the video is
+     safe. Fix: give the close button its own dedicated header strip ABOVE
+     the video area, entirely outside the iframe's own screen-space. */
   .video-lightbox-box {
     position: relative;
-    width: min(94vw, calc(94vh * 16 / 9));
-    aspect-ratio: 16 / 9;
+    display: flex;
+    flex-direction: column;
+    width: min(94vw, calc((94vh - 40px) * 16 / 9));
     background: #000;
     border-radius: 4px;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.45);
   }
-  .video-lightbox-box #videoLightboxPlayer,
-  .video-lightbox-box #videoLightboxPlayer iframe {
+  .video-lightbox-header {
+    flex: 0 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: #000;
+  }
+  .video-lightbox-video-area {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+  .video-lightbox-video-area #videoLightboxPlayer,
+  .video-lightbox-video-area #videoLightboxPlayer iframe {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
   }
-  /* Originally positioned 40px ABOVE the box (top:-40px), on the
-     assumption there'd be room up there - wrong assumption: the box can
-     be up to 94% of the viewport (min(94vw, 94vh*16/9)), which on a
-     typical desktop/laptop window leaves less than 40px of margin above
-     it, often none. That rendered the button off the top edge of the
-     browser window - present in the DOM, wired up correctly, just not
-     visible or reachable. Anchoring it INSIDE the box's own top-right
-     corner instead (same treatment the phone-width media query used
-     to reserve for narrow screens only) doesn't depend on any external
-     margin existing at all, so it applies at every width now. */
   .video-lightbox-close {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    background: rgba(0,0,0,0.55);
+    position: static;
+    margin: 0 6px;
+    background: rgba(255,255,255,0.12);
     color: #fff;
     border-radius: 50%;
     width: 32px;
@@ -684,7 +696,11 @@
     line-height: 32px;
     text-align: center;
     font-size: 22px;
-    z-index: 1;
+    cursor: pointer;
+    border: 0;
+  }
+  .video-lightbox-close:hover {
+    background: rgba(255,255,255,0.25);
   }
   .modal {
     background: var(--paper);
@@ -2882,8 +2898,12 @@
      rather than needing to reopen it. -->
 <div id="videoLightboxOverlay" class="modal-overlay video-lightbox-overlay" style="display: none;">
   <div class="video-lightbox-box">
-    <button type="button" id="videoLightboxCloseBtn" class="btn-close video-lightbox-close" title="Close" aria-label="Close video">&times;</button>
-    <div id="videoLightboxPlayer"></div>
+    <div class="video-lightbox-header">
+      <button type="button" id="videoLightboxCloseBtn" class="btn-close video-lightbox-close" title="Close" aria-label="Close video">&times;</button>
+    </div>
+    <div class="video-lightbox-video-area">
+      <div id="videoLightboxPlayer"></div>
+    </div>
   </div>
 </div>
 
