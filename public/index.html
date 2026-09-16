@@ -1424,6 +1424,28 @@
     white-space: pre-wrap;
     word-break: break-all;
   }
+  .live-debug-sample-actions {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px 2px;
+  }
+  .live-debug-sample-btn {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11px;
+    padding: 4px 9px;
+    border-radius: 3px;
+    border: 1px solid var(--evergreen);
+    background: transparent;
+    color: var(--evergreen);
+    cursor: pointer;
+  }
+  .live-debug-sample-btn:hover { background: rgba(0,0,0,0.05); }
+  .live-debug-samples-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
   .live-debug-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -4057,34 +4079,88 @@
       html += '</tbody></table>';
     }
 
-    // Diagnostic-only (see recordLiveCheckDebugSample in index.js): raw
-    // HTML samples captured whenever a church came back isLive:true but
-    // BOTH the original fetch and the videoId-retry failed to find a
-    // videoId. Lets us see what YouTube actually served instead of
-    // guessing - e.g. whether it's a normal page just missing the two
-    // fields we check (in which case checking more fields would help) or
-    // something else entirely, like a consent/interstitial page (in which
-    // case it wouldn't). Most-recent-first, already reversed server-side.
+    // Diagnostic-only (see recordLiveCheckDebugSample / findLiveCheckDiag
+    // nosticLandmarks in index.js): whenever a church came back isLive:
+    // true but BOTH the original fetch and the videoId-retry failed to
+    // find a videoId, we search that response for the exact fields our
+    // detection logic depends on and record which were actually present.
+    // A first version of this tried capturing a raw chunk of the page
+    // instead - even at 500,000 characters, a real capture landed
+    // entirely inside YouTube's own feature-flag/experiments blob before
+    // ever reaching the per-video section, so it never actually answered
+    // the question. Searching the whole response for specific fields,
+    // rather than capturing a size-limited chunk of it, can't be fooled
+    // by page size the same way. Most-recent-first, already reversed
+    // server-side.
+    const LIVE_DEBUG_LANDMARK_LABELS = {
+      canonicalLink: 'Canonical link (watch?v=...)',
+      videoDetailsWithVideoId: '"videoDetails" with a videoId',
+      isLiveBroadcastMeta: 'isLiveBroadcast meta tag',
+      videoDetailsKeyPresentLoose: '"videoDetails" key present (any shape)',
+      liveBroadcastDetailsPresent: '"liveBroadcastDetails" key present',
+      itemPropIdentifierMeta: 'itemprop="identifier" meta tag',
+      ytInitialPlayerResponsePresent: 'ytInitialPlayerResponse script',
+      ytInitialDataPresent: 'ytInitialData script'
+    };
+    function buildLiveDebugAttemptHtml(label, htmlLength, prefix, landmarks, fetchError) {
+      let out = '<div class="live-debug-sample-label">' + label +
+        (htmlLength != null ? ' &ndash; ' + htmlLength + ' chars total' : '') + '</div>';
+      if (fetchError) {
+        out += '<div class="live-debug-sample-meta"><div>Fetch failed: ' + escapeHtmlDebug(fetchError) + '</div></div>';
+        return out;
+      }
+      if (landmarks) {
+        out += '<table class="live-debug-table"><thead><tr><th>Field checkChurchLive looks for</th><th>Found?</th></tr></thead><tbody>';
+        Object.keys(LIVE_DEBUG_LANDMARK_LABELS).forEach(function(key) {
+          const l = landmarks[key];
+          out += '<tr><td>' + LIVE_DEBUG_LANDMARK_LABELS[key] + '</td><td>' + (l && l.found ? '✅ yes' : '❌ no') + '</td></tr>';
+        });
+        out += '</tbody></table>';
+        // Show context only for fields that WERE found - proof of the
+        // actual shape, in case it's present but subtly different from
+        // what our real regex expects.
+        Object.keys(LIVE_DEBUG_LANDMARK_LABELS).forEach(function(key) {
+          const l = landmarks[key];
+          if (l && l.found && l.snippet) {
+            out += '<div class="live-debug-sample-label">' + LIVE_DEBUG_LANDMARK_LABELS[key] + ' &ndash; context:</div>';
+            out += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(l.snippet) + '</pre>';
+          }
+        });
+      }
+      out += '<div class="live-debug-sample-label">Start of response (first ' + (prefix ? prefix.length : 0) + ' chars):</div>';
+      out += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(prefix || '(empty)') + '</pre>';
+      return out;
+    }
     if (data.debugSamples && data.debugSamples.length) {
-      html += '<div class="live-debug-section-title">Recent Failed-Fetch Samples (' + data.debugSamples.length + ')</div>';
-      data.debugSamples.forEach(function(s) {
+      html += '<div class="live-debug-samples-header-actions">' +
+        '<div class="live-debug-section-title" style="margin:0;">Recent Failed-Fetch Samples (' + data.debugSamples.length + ')</div>' +
+        '<button type="button" class="live-debug-sample-btn" id="liveDebugDownloadAllBtn">⬇ Download All (JSON)</button>' +
+        '</div>';
+      data.debugSamples.forEach(function(s, i) {
         const churchLabel = s.churchName ? escapeHtmlDebug(s.churchName) : ('Church #' + (s.churchId != null ? s.churchId : '?'));
         html += '<details class="live-debug-group">';
         html += '<summary>' + churchLabel + ' &ndash; ' + formatRelativeTime(s.capturedAt) + '</summary>';
-        html += '<div class="live-debug-sample-meta">';
-        html += '<div>Live URL: ' + escapeHtmlDebug(s.liveUrl || '-') + '</div>';
-        html += '<div>First attempt: ' + (s.firstAttemptHtmlLength != null ? s.firstAttemptHtmlLength + ' chars' : '-') + '</div>';
-        html += '<div>Retry attempt: ' + (s.retryAttemptHtmlLength != null
-          ? s.retryAttemptHtmlLength + ' chars'
-          : (s.retryFetchError ? 'retry fetch failed - ' + escapeHtmlDebug(s.retryFetchError) : '-')) + '</div>';
-        html += '</div>';
-        const firstTruncated = s.firstAttemptSnippet && s.firstAttemptHtmlLength != null && s.firstAttemptSnippet.length < s.firstAttemptHtmlLength;
-        html += '<div class="live-debug-sample-label">First attempt' + (firstTruncated ? ' (truncated - response was longer than what we captured)' : '') + ':</div>';
-        html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.firstAttemptSnippet || '(empty)') + '</pre>';
-        if (s.retryAttemptSnippet) {
-          const retryTruncated = s.retryAttemptHtmlLength != null && s.retryAttemptSnippet.length < s.retryAttemptHtmlLength;
-          html += '<div class="live-debug-sample-label">Retry attempt' + (retryTruncated ? ' (truncated - response was longer than what we captured)' : '') + ':</div>';
-          html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.retryAttemptSnippet) + '</pre>';
+        html += '<div class="live-debug-sample-actions">' +
+          '<button type="button" class="live-debug-sample-btn live-debug-copy-sample-btn" data-sample-index="' + i + '">📋 Copy JSON</button>' +
+          '<button type="button" class="live-debug-sample-btn live-debug-download-sample-btn" data-sample-index="' + i + '">⬇ Download JSON</button>' +
+          '</div>';
+        html += '<div class="live-debug-sample-meta"><div>Live URL: ' + escapeHtmlDebug(s.liveUrl || '-') + '</div></div>';
+        html += buildLiveDebugAttemptHtml('First attempt', s.firstAttemptHtmlLength, s.firstAttemptPrefix, s.firstAttemptLandmarks, null);
+        // The retry only ever runs because the first attempt already
+        // failed to find a videoId - if the retry came back showing the
+        // exact same length, the exact same fields found/not-found, and
+        // the exact same starting text, repeating the whole table and
+        // snippets a second time is just noise, not new evidence. Only
+        // show it in full when something actually differs (or the retry
+        // fetch itself failed).
+        const retryIdentical = !s.retryFetchError &&
+          s.firstAttemptHtmlLength === s.retryAttemptHtmlLength &&
+          s.firstAttemptPrefix === s.retryAttemptPrefix &&
+          JSON.stringify(s.firstAttemptLandmarks) === JSON.stringify(s.retryAttemptLandmarks);
+        if (retryIdentical) {
+          html += '<div class="live-debug-sample-label">Retry attempt &ndash; same length, same fields found, and the same starting text as the first attempt (not shown again).</div>';
+        } else {
+          html += buildLiveDebugAttemptHtml('Retry attempt', s.retryAttemptHtmlLength, s.retryAttemptPrefix, s.retryAttemptLandmarks, s.retryFetchError);
         }
         html += '</details>';
       });
@@ -4092,6 +4168,69 @@
 
     liveDebugContent.innerHTML = html;
   }
+
+  // Shared by the per-sample Copy/Download buttons below - briefly swaps
+  // the button's own label to confirm success/failure rather than using a
+  // separate toast/alert, so it reads correctly no matter which button
+  // (of possibly several open at once) was clicked.
+  function copyTextToClipboard(text, button) {
+    const original = button ? button.textContent : null;
+    const restore = function() {
+      if (button) setTimeout(function() { button.textContent = original; }, 1500);
+    };
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      if (button) button.textContent = '⚠️ Copy unsupported';
+      restore();
+      return;
+    }
+    navigator.clipboard.writeText(text).then(function() {
+      if (button) button.textContent = '✅ Copied';
+      restore();
+    }).catch(function() {
+      if (button) button.textContent = '⚠️ Copy failed';
+      restore();
+    });
+  }
+
+  function downloadJsonFile(filename, dataObj) {
+    const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // Delegated (not per-button) since the samples list is rebuilt via
+  // innerHTML on every refresh - one listener attached once here keeps
+  // working across re-renders instead of needing to be re-attached each
+  // time. liveDebugLastData (set at the top of renderLiveDebugContent) is
+  // the current source of truth for what's actually on screen.
+  liveDebugContent.addEventListener('click', function(e) {
+    const copyBtn = e.target.closest('.live-debug-copy-sample-btn');
+    if (copyBtn) {
+      const idx = Number(copyBtn.getAttribute('data-sample-index'));
+      const sample = liveDebugLastData && liveDebugLastData.debugSamples && liveDebugLastData.debugSamples[idx];
+      if (sample) copyTextToClipboard(JSON.stringify(sample, null, 2), copyBtn);
+      return;
+    }
+    const downloadBtn = e.target.closest('.live-debug-download-sample-btn');
+    if (downloadBtn) {
+      const idx = Number(downloadBtn.getAttribute('data-sample-index'));
+      const sample = liveDebugLastData && liveDebugLastData.debugSamples && liveDebugLastData.debugSamples[idx];
+      if (sample) {
+        const label = (sample.churchName || 'church').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        downloadJsonFile('live-check-sample-' + label + '.json', sample);
+      }
+      return;
+    }
+    if (e.target.closest('#liveDebugDownloadAllBtn')) {
+      downloadJsonFile('live-check-debug-samples.json', (liveDebugLastData && liveDebugLastData.debugSamples) || []);
+    }
+  });
 
   async function loadLiveDebugStatus() {
     try {

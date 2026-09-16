@@ -829,34 +829,77 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // Diagnostic-only: when a church comes back isLive:true but BOTH the
 // original fetch and the videoId-retry (below) fail to find a videoId, we
 // don't actually know what YouTube served us instead - only that our
-// regexes didn't match anything. Rather than keep guessing blind, this
-// captures both attempts' raw HTML so the admin debug panel can show what
-// the response actually looked like. Purely diagnostic - never read by
+// regexes didn't match anything. Purely diagnostic - never read by
 // anything that affects live-status results, so a failure to write it is
 // always safe to ignore.
 //
-// IMPORTANT (confirmed in production, first real capture 2026-09): the
-// first version of this capped each snippet at 4000 characters, on the
-// assumption a "stripped" page would be short. Real captures showed
-// otherwise - even a normal, fully-formed page starts with several KB of
-// generic boilerplate (WIZ_global_data, ytcfg, inline error handlers -
-// the same on every YouTube page whether live or not) BEFORE reaching the
-// canonical link/meta tags/videoDetails JSON our regexes actually check.
-// 4000 characters never got past that boilerplate, so every capture so
-// far only ever showed "a normal page is loading" and nothing about
-// whether the fields we need are actually present further in. Raised
-// substantially so captures actually reach the part of the page that
-// matters; sample count lowered to compensate for the larger size (still
-// comfortably inside a single KV value's 25MB limit even at the new
-// size - see the size math below).
+// IMPORTANT (confirmed in production, 2026-09, across two attempts at
+// this): capturing a raw PREFIX of the page - first the first 4000
+// characters, then (when that proved to just be YouTube's own
+// boilerplate script/error-handler code, identical on every page whether
+// live or not) raised to 500,000 characters - still wasn't enough. A real
+// capture at the 500,000-character cap turned out to have landed entirely
+// inside YouTube's own feature-flag/experiments blob (a huge, effectively
+// unbounded list of internal flag NAMES like "web_enable_canonical_url_
+// manager":true - confirmed by inspecting the actual capture: every
+// "canonical" match in it was one of THESE, not a real <link
+// rel="canonical"> tag). No fixed prefix size can be trusted to get past
+// this, since the blob's size isn't something we control or can predict.
+//
+// So instead of capturing a prefix at all, findLiveCheckDiagnosticLandmarks
+// (below) searches the FULL html string - however large - for the exact
+// handful of fields checkChurchLive's own regexes depend on, and only the
+// small snippet of context around whichever ones are actually FOUND gets
+// stored. This can never be defeated by page size, and stays small
+// regardless, so the sample cap can be generous again.
 const LIVE_CHECK_DEBUG_SAMPLES_KV_KEY = 'live-check-debug-samples';
-const LIVE_CHECK_DEBUG_SAMPLES_MAX = 5; // oldest dropped once exceeded
-// 500,000 chars (~500KB) per attempt. Worst case: 5 samples x 2 attempts x
-// 500,000 chars = 5,000,000 chars (~5MB) - well under the 25MB per-value
-// KV limit. A real YouTube page is very unlikely to need anywhere near
-// this much to reach its meta/JSON section, so in practice this should
-// rarely if ever actually truncate.
-const LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS = 500000;
+const LIVE_CHECK_DEBUG_SAMPLES_MAX = 15; // oldest dropped once exceeded
+// Small - just enough to eyeball whether the page even looks like a
+// normal YouTube page at all (e.g. spotting a consent/interstitial page,
+// which would look completely different from the very first characters).
+const LIVE_CHECK_DEBUG_PREFIX_CHARS = 2000;
+// How much surrounding context to keep around each landmark match found
+// by findLiveCheckDiagnosticLandmarks - enough to read the real tag/JSON
+// shape, not so much it drags in unrelated neighboring content.
+const LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS = 150;
+const LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS = 350;
+
+// Diagnostic-only. Searches the given (full-size, unmodified) HTML string
+// for the specific fields checkChurchLive's own detection logic checks
+// for, plus a couple of looser/broader variants of the same fields, so we
+// can tell "the field is genuinely absent from this response" apart from
+// "the field is there, just not in the exact shape our regex expects."
+// Returns an object keyed by field name, each either {found:false} or
+// {found:true, snippet} with a small window of surrounding text.
+function findLiveCheckDiagnosticLandmarks(html) {
+  const checks = [
+    // Exact patterns checkChurchLive itself uses:
+    { key: 'canonicalLink', pattern: /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/ },
+    { key: 'videoDetailsWithVideoId', pattern: /"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/ },
+    { key: 'isLiveBroadcastMeta', pattern: /<meta itemprop="isLiveBroadcast" content="True">/i },
+    // Looser variants - present without the exact shape we require would
+    // mean the FIELD is there but our specific regex is what's failing,
+    // a meaningfully different finding from the field being absent.
+    { key: 'videoDetailsKeyPresentLoose', pattern: /"videoDetails":\{/ },
+    { key: 'liveBroadcastDetailsPresent', pattern: /"liveBroadcastDetails":\{/ },
+    { key: 'itemPropIdentifierMeta', pattern: /<meta itemprop="identifier" content="([^"]*)">/ },
+    // Confirms whether YouTube's larger per-video data blocks are even
+    // present in the response at all, regardless of their contents.
+    { key: 'ytInitialPlayerResponsePresent', pattern: /ytInitialPlayerResponse\s*=/ },
+    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ }
+  ];
+  const landmarks = {};
+  checks.forEach(function(c) {
+    const match = html.match(c.pattern);
+    if (match) {
+      const start = Math.max(0, match.index - LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS);
+      landmarks[c.key] = { found: true, snippet: html.slice(start, match.index + LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS) };
+    } else {
+      landmarks[c.key] = { found: false };
+    }
+  });
+  return landmarks;
+}
 
 // Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
 // unresolved-live tracking below (see there for why a second, cross-cycle
@@ -1415,10 +1458,12 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
         youtubeUrl: youtubeUrl,
         liveUrl: liveUrl,
         firstAttemptHtmlLength: html.length,
-        firstAttemptSnippet: html.slice(0, LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS),
+        firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
+        firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
         retryFetchError: retryFetchError,
         retryAttemptHtmlLength: retryHtml ? retryHtml.length : null,
-        retryAttemptSnippet: retryHtml ? retryHtml.slice(0, LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS) : null
+        retryAttemptPrefix: retryHtml ? retryHtml.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS) : null,
+        retryAttemptLandmarks: retryHtml ? findLiveCheckDiagnosticLandmarks(retryHtml) : null
       });
     }
   }
