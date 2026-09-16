@@ -4102,7 +4102,7 @@
       ytInitialPlayerResponsePresent: 'ytInitialPlayerResponse script',
       ytInitialDataPresent: 'ytInitialData script'
     };
-    function buildLiveDebugAttemptHtml(label, htmlLength, prefix, landmarks, fetchError) {
+    function buildLiveDebugAttemptHtml(label, htmlLength, prefix, landmarks, fetchError, videoIdOccurrences) {
       let out = '<div class="live-debug-sample-label">' + label +
         (htmlLength != null ? ' &ndash; ' + htmlLength + ' chars total' : '') + '</div>';
       if (fetchError) {
@@ -4127,6 +4127,25 @@
           }
         });
       }
+      // Every bare "videoId":"..." found ANYWHERE in the page (see
+      // findAllVideoIdOccurrences in index.js) - not anchored to
+      // "videoDetails":{, since a live broadcast's real videoDetails
+      // object may just be shaped differently. Comparing these actual
+      // IDs against the real one (open the /live page yourself and copy
+      // it from the URL bar) is what tells us which occurrence, if any,
+      // is the genuine broadcast rather than a recommended video or chat
+      // reference.
+      if (videoIdOccurrences) {
+        out += '<div class="live-debug-sample-label">Every "videoId" found in the response (' + videoIdOccurrences.length + '):</div>';
+        if (!videoIdOccurrences.length) {
+          out += '<div class="live-debug-sample-meta"><div>(none at all - not even an unrelated/recommended video)</div></div>';
+        } else {
+          videoIdOccurrences.forEach(function(occ, idx) {
+            out += '<div class="live-debug-sample-meta"><div>#' + (idx + 1) + ': <strong>' + escapeHtmlDebug(occ.videoId) + '</strong></div></div>';
+            out += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(occ.snippet) + '</pre>';
+          });
+        }
+      }
       out += '<div class="live-debug-sample-label">Start of response (first ' + (prefix ? prefix.length : 0) + ' chars):</div>';
       out += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(prefix || '(empty)') + '</pre>';
       return out;
@@ -4145,22 +4164,23 @@
           '<button type="button" class="live-debug-sample-btn live-debug-download-sample-btn" data-sample-index="' + i + '">⬇ Download JSON</button>' +
           '</div>';
         html += '<div class="live-debug-sample-meta"><div>Live URL: ' + escapeHtmlDebug(s.liveUrl || '-') + '</div></div>';
-        html += buildLiveDebugAttemptHtml('First attempt', s.firstAttemptHtmlLength, s.firstAttemptPrefix, s.firstAttemptLandmarks, null);
+        html += buildLiveDebugAttemptHtml('First attempt', s.firstAttemptHtmlLength, s.firstAttemptPrefix, s.firstAttemptLandmarks, null, s.firstAttemptVideoIdOccurrences);
         // The retry only ever runs because the first attempt already
         // failed to find a videoId - if the retry came back showing the
-        // exact same length, the exact same fields found/not-found, and
-        // the exact same starting text, repeating the whole table and
-        // snippets a second time is just noise, not new evidence. Only
-        // show it in full when something actually differs (or the retry
-        // fetch itself failed).
+        // exact same length, the exact same fields found/not-found, the
+        // exact same starting text, AND the exact same videoId
+        // occurrences, repeating the whole table and snippets a second
+        // time is just noise, not new evidence. Only show it in full when
+        // something actually differs (or the retry fetch itself failed).
         const retryIdentical = !s.retryFetchError &&
           s.firstAttemptHtmlLength === s.retryAttemptHtmlLength &&
           s.firstAttemptPrefix === s.retryAttemptPrefix &&
-          JSON.stringify(s.firstAttemptLandmarks) === JSON.stringify(s.retryAttemptLandmarks);
+          JSON.stringify(s.firstAttemptLandmarks) === JSON.stringify(s.retryAttemptLandmarks) &&
+          JSON.stringify(s.firstAttemptVideoIdOccurrences || []) === JSON.stringify(s.retryAttemptVideoIdOccurrences || []);
         if (retryIdentical) {
-          html += '<div class="live-debug-sample-label">Retry attempt &ndash; same length, same fields found, and the same starting text as the first attempt (not shown again).</div>';
+          html += '<div class="live-debug-sample-label">Retry attempt &ndash; identical to the first attempt in every way we checked (not shown again).</div>';
         } else {
-          html += buildLiveDebugAttemptHtml('Retry attempt', s.retryAttemptHtmlLength, s.retryAttemptPrefix, s.retryAttemptLandmarks, s.retryFetchError);
+          html += buildLiveDebugAttemptHtml('Retry attempt', s.retryAttemptHtmlLength, s.retryAttemptPrefix, s.retryAttemptLandmarks, s.retryFetchError, s.retryAttemptVideoIdOccurrences);
         }
         html += '</details>';
       });

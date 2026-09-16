@@ -901,6 +901,32 @@ function findLiveCheckDiagnosticLandmarks(html) {
   return landmarks;
 }
 
+// Diagnostic-only, and deliberately NOT anchored to "videoDetails" (unlike
+// videoDetailsWithVideoId above) - a live broadcast's real videoDetails
+// object may simply have different keys before videoId, or be shaped
+// differently altogether, which would silently defeat an anchored regex
+// even though a real videoId is sitting right there. This instead finds
+// EVERY bare "videoId":"..." occurrence anywhere in the page - recommended
+// videos, chat replies, and the actual broadcast's own entry all use this
+// same shape - so we can see every candidate and its surrounding context,
+// rather than betting everything on one specific nesting. Capped so a
+// page with many unrelated videoId references (e.g. a sidebar of
+// recommended videos) can't blow up the stored sample.
+const LIVE_CHECK_DEBUG_MAX_VIDEOID_OCCURRENCES = 15;
+function findAllVideoIdOccurrences(html) {
+  const pattern = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
+  const occurrences = [];
+  let match;
+  while ((match = pattern.exec(html)) !== null && occurrences.length < LIVE_CHECK_DEBUG_MAX_VIDEOID_OCCURRENCES) {
+    const start = Math.max(0, match.index - LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS);
+    occurrences.push({
+      videoId: match[1],
+      snippet: html.slice(start, match.index + LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS)
+    });
+  }
+  return occurrences;
+}
+
 // Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
 // unresolved-live tracking below (see there for why a second, cross-cycle
 // mechanism is needed for churches whose pages come back with no startDate
@@ -1460,10 +1486,12 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
         firstAttemptHtmlLength: html.length,
         firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
         firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
+        firstAttemptVideoIdOccurrences: findAllVideoIdOccurrences(html),
         retryFetchError: retryFetchError,
         retryAttemptHtmlLength: retryHtml ? retryHtml.length : null,
         retryAttemptPrefix: retryHtml ? retryHtml.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS) : null,
-        retryAttemptLandmarks: retryHtml ? findLiveCheckDiagnosticLandmarks(retryHtml) : null
+        retryAttemptLandmarks: retryHtml ? findLiveCheckDiagnosticLandmarks(retryHtml) : null,
+        retryAttemptVideoIdOccurrences: retryHtml ? findAllVideoIdOccurrences(retryHtml) : null
       });
     }
   }
