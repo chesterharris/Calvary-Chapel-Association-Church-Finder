@@ -4703,7 +4703,7 @@
     // and as a side benefit no longer cares about field order either.
     const words = normalizeApostrophes(term).split(/\s+/).filter(Boolean);
     return words.every(function(word) {
-      const re = new RegExp('\\b' + escapeRegExp(word) + '\\b', 'i');
+      const re = new RegExp('\\b' + escapeRegExp(word), 'i');
       return re.test(haystack);
     });
   }
