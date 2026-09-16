@@ -1909,11 +1909,19 @@ async function checkAllChurchesLive(env) {
     // being a value carried in the persisted map - a church checked three
     // batch-rotations ago shouldn't still claim "checked this cycle" just
     // because that field was left over from whenever it last ran.
-    const fullResults = candidates.map(function(c) {
+    // batchNumber (1-based, for display) is this church's position in the
+    // same sorted `candidates` list batchCandidates was sliced from above -
+    // Math.floor(index / LIVE_CHECK_BATCH_SIZE) always lands on the exact
+    // batch that church's turn comes up in, since both use the identical
+    // stable id-sorted ordering. Recomputed fresh every cycle for every
+    // eligible church (not just this cycle's batch), so it stays correct
+    // as churches are added/removed and batchCount shifts.
+    const fullResults = candidates.map(function(c, index) {
       const entry = mergedResults[c.id];
       const checkedThisCycle = !!batchIds[c.id];
-      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle });
-      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle };
+      const batchNumber = Math.floor(index / LIVE_CHECK_BATCH_SIZE) + 1;
+      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle, batchNumber: batchNumber });
+      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle, batchNumber: batchNumber };
     });
 
     const liveOnly = fullResults.filter(function(r) { return r.isLive; });
