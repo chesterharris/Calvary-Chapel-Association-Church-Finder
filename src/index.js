@@ -826,6 +826,18 @@ const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
 // after a short pause before giving up on that church for this cycle.
 const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 
+// Diagnostic-only: when a church comes back isLive:true but BOTH the
+// original fetch and the videoId-retry (below) fail to find a videoId, we
+// don't actually know what YouTube served us instead - only that our
+// regexes didn't match anything. Rather than keep guessing blind, this
+// captures a size-capped snippet of both attempts' raw HTML so the admin
+// debug panel can show what the response actually looked like. Purely
+// diagnostic - never read by anything that affects live-status results,
+// so a failure to write it is always safe to ignore.
+const LIVE_CHECK_DEBUG_SAMPLES_KV_KEY = 'live-check-debug-samples';
+const LIVE_CHECK_DEBUG_SAMPLES_MAX = 20; // oldest dropped once exceeded
+const LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS = 4000; // per attempt, not per sample
+
 // Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
 // unresolved-live tracking below (see there for why a second, cross-cycle
 // mechanism is needed for churches whose pages come back with no startDate
@@ -974,6 +986,36 @@ async function recordStalledCycleNote(env, progress, elapsedMs) {
   // never overwrites the "what actually happened last" section the rest
   // of the debug panel reads from.
   await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify(Object.assign({}, debugPrevious, { history: history })));
+}
+
+// Diagnostic-only capture (see LIVE_CHECK_DEBUG_SAMPLES_KV_KEY above) for
+// the "isLive:true but no videoId, even after the retry" case. Stores a
+// truncated snippet of BOTH the original and retry attempts' raw HTML, so
+// the debug panel can show whether YouTube served a normal-but-incomplete
+// page (some other metadata still present, just not the fields we check)
+// or something else entirely (e.g. a consent/interstitial page with
+// almost nothing on it). Best-effort: read-modify-write against a single
+// KV key with no locking, so a lost write under rare concurrent access is
+// acceptable here - this never affects what the public site shows.
+async function recordLiveCheckDebugSample(env, sample) {
+  try {
+    const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY);
+    let samples = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) samples = parsed;
+      } catch (err) {
+        // Corrupt/unexpected value - start fresh rather than throwing.
+      }
+    }
+    samples.push(Object.assign({ capturedAt: new Date().toISOString() }, sample));
+    while (samples.length > LIVE_CHECK_DEBUG_SAMPLES_MAX) samples.shift();
+    await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY, JSON.stringify(samples));
+  } catch (err) {
+    // Diagnostic capture failing is never allowed to break the actual
+    // live check - swallow it.
+  }
 }
 
 async function loadStaggerState(env) {
@@ -1141,7 +1183,7 @@ async function fetchLivePageWithRetry(liveUrl) {
   }
 }
 
-async function checkChurchLive(youtubeUrl) {
+async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
   const liveUrl = buildLiveCheckUrl(youtubeUrl);
   const html = await fetchLivePageWithRetry(liveUrl);
 
@@ -1327,15 +1369,37 @@ async function checkChurchLive(youtubeUrl) {
   // if the degraded window runs longer than this delay, it won't help
   // every time, and that's worth watching rather than assuming solved.
   if (!videoId) {
+    let retryHtml = null;
+    let retryFetchError = null;
     try {
       await sleep(LIVE_CHECK_RETRY_DELAY_MS);
-      const retryHtml = await fetchLivePage(liveUrl);
+      retryHtml = await fetchLivePage(liveUrl);
       const retryCanonicalMatch = retryHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
       const retryVideoIdJsonMatch = retryHtml.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
       videoId = retryCanonicalMatch ? retryCanonicalMatch[1] : (retryVideoIdJsonMatch ? retryVideoIdJsonMatch[1] : null);
     } catch (err) {
       // Retry fetch itself failed (timeout, network error) - leave
       // videoId null, same as if this retry didn't exist.
+      retryFetchError = err && err.message ? err.message : String(err);
+    }
+
+    // Still no videoId after both attempts - capture what we actually got
+    // back so the admin debug panel can show it (see
+    // recordLiveCheckDebugSample above). `env` is only passed in from the
+    // real cron/manual-check path (see checkAllChurchesLive) - guarded so
+    // this never throws if checkChurchLive is ever called without it.
+    if (!videoId && env) {
+      await recordLiveCheckDebugSample(env, {
+        churchId: churchId != null ? churchId : null,
+        churchName: churchName || null,
+        youtubeUrl: youtubeUrl,
+        liveUrl: liveUrl,
+        firstAttemptHtmlLength: html.length,
+        firstAttemptSnippet: html.slice(0, LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS),
+        retryFetchError: retryFetchError,
+        retryAttemptHtmlLength: retryHtml ? retryHtml.length : null,
+        retryAttemptSnippet: retryHtml ? retryHtml.slice(0, LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS) : null
+      });
     }
   }
   // The og: meta tags are raw HTML attribute content, so they can contain
@@ -1610,7 +1674,7 @@ async function checkAllChurchesLive(env) {
 
       try {
         const churchCheckStartedAt = Date.now();
-        const status = await checkChurchLive(c.youtubeUrl);
+        const status = await checkChurchLive(c.youtubeUrl, env, c.id, c.name);
         const churchCheckMs = Date.now() - churchCheckStartedAt;
         // channelUrl is the fallback the frontend links to when videoId is
         // null (confirmed in production: YouTube can serve a stripped page
@@ -1929,9 +1993,13 @@ async function handleDebugLiveCheckStatus(request, env) {
   const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
   const staggerRaw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
   const lastErrorRaw = await env.CHURCHES_KV.get(LIVE_CHECK_LAST_ERROR_KV_KEY);
+  const debugSamplesRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY);
   const data = raw ? JSON.parse(raw) : { latestCycle: null, history: [] };
   data.currentStaggerState = staggerRaw ? JSON.parse(staggerRaw) : { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
   data.lastCronError = lastErrorRaw ? JSON.parse(lastErrorRaw) : null;
+  // Most-recent-first - the panel cares about what's happening lately, not
+  // the oldest still-retained sample.
+  data.debugSamples = debugSamplesRaw ? JSON.parse(debugSamplesRaw).slice().reverse() : [];
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });

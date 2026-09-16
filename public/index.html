@@ -1395,6 +1395,35 @@
   .live-debug-group[open] summary::before { transform: rotate(90deg); }
   .live-debug-group table.live-debug-table { margin-top: 0; }
   .live-debug-group p { padding: 0 10px 8px; margin: 0; }
+  .live-debug-sample-meta {
+    padding: 0 10px 6px;
+    font-size: 11.5px;
+    opacity: 0.8;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .live-debug-sample-label {
+    padding: 0 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    opacity: 0.7;
+    margin-top: 4px;
+  }
+  .live-debug-sample-html {
+    margin: 4px 10px 10px;
+    padding: 8px;
+    background: #111;
+    color: #ddd;
+    border-radius: 3px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 10.5px;
+    line-height: 1.4;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
   .live-debug-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -4026,6 +4055,37 @@
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';
       });
       html += '</tbody></table>';
+    }
+
+    // Diagnostic-only (see recordLiveCheckDebugSample in index.js): raw
+    // HTML samples captured whenever a church came back isLive:true but
+    // BOTH the original fetch and the videoId-retry failed to find a
+    // videoId. Lets us see what YouTube actually served instead of
+    // guessing - e.g. whether it's a normal page just missing the two
+    // fields we check (in which case checking more fields would help) or
+    // something else entirely, like a consent/interstitial page (in which
+    // case it wouldn't). Most-recent-first, already reversed server-side.
+    if (data.debugSamples && data.debugSamples.length) {
+      html += '<div class="live-debug-section-title">Recent Failed-Fetch Samples (' + data.debugSamples.length + ')</div>';
+      data.debugSamples.forEach(function(s) {
+        const churchLabel = s.churchName ? escapeHtmlDebug(s.churchName) : ('Church #' + (s.churchId != null ? s.churchId : '?'));
+        html += '<details class="live-debug-group">';
+        html += '<summary>' + churchLabel + ' &ndash; ' + formatRelativeTime(s.capturedAt) + '</summary>';
+        html += '<div class="live-debug-sample-meta">';
+        html += '<div>Live URL: ' + escapeHtmlDebug(s.liveUrl || '-') + '</div>';
+        html += '<div>First attempt: ' + (s.firstAttemptHtmlLength != null ? s.firstAttemptHtmlLength + ' chars' : '-') + '</div>';
+        html += '<div>Retry attempt: ' + (s.retryAttemptHtmlLength != null
+          ? s.retryAttemptHtmlLength + ' chars'
+          : (s.retryFetchError ? 'retry fetch failed - ' + escapeHtmlDebug(s.retryFetchError) : '-')) + '</div>';
+        html += '</div>';
+        html += '<div class="live-debug-sample-label">First attempt (start of response):</div>';
+        html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.firstAttemptSnippet || '(empty)') + '</pre>';
+        if (s.retryAttemptSnippet) {
+          html += '<div class="live-debug-sample-label">Retry attempt (start of response):</div>';
+          html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.retryAttemptSnippet) + '</pre>';
+        }
+        html += '</details>';
+      });
     }
 
     liveDebugContent.innerHTML = html;
