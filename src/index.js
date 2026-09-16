@@ -1426,7 +1426,27 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
   const startDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
   const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
 
-  let videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : null);
+  // Second fallback source, for a page shape where even the videoDetails
+  // JSON above is entirely absent (confirmed in production, 2026-09,
+  // Golgota Delpest: canonical link, videoDetails-with-videoId, and every
+  // other field this function normally relies on were ALL missing, yet
+  // the page plainly had a live broadcast on it). Diagnosed via the admin
+  // debug panel's "every videoId in the page" search: the page had
+  // several different videoId values, but only one - tagged
+  // updatedMetadataEndpoint - stayed IDENTICAL across two fetches a
+  // second and a half apart, and was independently confirmed against the
+  // real /live page's own videoId. Every OTHER occurrence was a
+  // recommended/autoplay-next suggestion (tracking param decodes to
+  // "related-auto") that changed between the two fetches - exactly the
+  // kind of unrelated match a bare "videoId" search would risk grabbing.
+  // updatedMetadataEndpoint is YouTube's live viewer-count refresh
+  // mechanism, which only exists for the video actually being watched -
+  // a suggested/related video has no reason to need one - so anchoring on
+  // it keeps this specific to the real broadcast the same way the
+  // videoDetails anchor above does for the shape it covers.
+  const updatedMetadataVideoIdMatch = html.match(/"updatedMetadataEndpoint":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+
+  let videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : (updatedMetadataVideoIdMatch ? updatedMetadataVideoIdMatch[1] : null));
 
   // "isLive:true but no videoId" is its own failure condition, distinct
   // from the outright fetch failures fetchLivePageWithRetry already
@@ -1465,7 +1485,8 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
       retryHtml = await fetchLivePage(liveUrl);
       const retryCanonicalMatch = retryHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
       const retryVideoIdJsonMatch = retryHtml.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
-      videoId = retryCanonicalMatch ? retryCanonicalMatch[1] : (retryVideoIdJsonMatch ? retryVideoIdJsonMatch[1] : null);
+      const retryUpdatedMetadataVideoIdMatch = retryHtml.match(/"updatedMetadataEndpoint":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+      videoId = retryCanonicalMatch ? retryCanonicalMatch[1] : (retryVideoIdJsonMatch ? retryVideoIdJsonMatch[1] : (retryUpdatedMetadataVideoIdMatch ? retryUpdatedMetadataVideoIdMatch[1] : null));
     } catch (err) {
       // Retry fetch itself failed (timeout, network error) - leave
       // videoId null, same as if this retry didn't exist.
