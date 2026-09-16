@@ -685,7 +685,17 @@
     height: 100%;
     border: 0;
   }
-  .video-lightbox-close {
+  /* videoLightboxCloseBtn also carries the shared .btn-close class (used
+     for other panels' close buttons elsewhere in this file). That rule
+     - defined later below - sets background:none/border:none, and at
+     equal class-selector specificity the later rule in the stylesheet
+     wins, so it was silently cancelling the white background below at
+     rest. Only :hover showed through, because a :hover selector counts
+     as more specific than a plain class and so beats .btn-close
+     regardless of order - which is exactly why the button only appeared
+     on hover. Qualifying with the button's own id raises specificity
+     above .btn-close so the background always applies, hover or not. */
+  #videoLightboxCloseBtn.video-lightbox-close {
     position: static;
     margin: 0 6px;
     background: #fff;
@@ -700,7 +710,7 @@
     cursor: pointer;
     border: 0;
   }
-  .video-lightbox-close:hover {
+  #videoLightboxCloseBtn.video-lightbox-close:hover {
     background: #ddd;
   }
   .modal {
