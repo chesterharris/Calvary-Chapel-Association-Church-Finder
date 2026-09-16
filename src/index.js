@@ -830,13 +830,33 @@ const LIVE_CHECK_RETRY_DELAY_MS = 1500;
 // original fetch and the videoId-retry (below) fail to find a videoId, we
 // don't actually know what YouTube served us instead - only that our
 // regexes didn't match anything. Rather than keep guessing blind, this
-// captures a size-capped snippet of both attempts' raw HTML so the admin
-// debug panel can show what the response actually looked like. Purely
-// diagnostic - never read by anything that affects live-status results,
-// so a failure to write it is always safe to ignore.
+// captures both attempts' raw HTML so the admin debug panel can show what
+// the response actually looked like. Purely diagnostic - never read by
+// anything that affects live-status results, so a failure to write it is
+// always safe to ignore.
+//
+// IMPORTANT (confirmed in production, first real capture 2026-09): the
+// first version of this capped each snippet at 4000 characters, on the
+// assumption a "stripped" page would be short. Real captures showed
+// otherwise - even a normal, fully-formed page starts with several KB of
+// generic boilerplate (WIZ_global_data, ytcfg, inline error handlers -
+// the same on every YouTube page whether live or not) BEFORE reaching the
+// canonical link/meta tags/videoDetails JSON our regexes actually check.
+// 4000 characters never got past that boilerplate, so every capture so
+// far only ever showed "a normal page is loading" and nothing about
+// whether the fields we need are actually present further in. Raised
+// substantially so captures actually reach the part of the page that
+// matters; sample count lowered to compensate for the larger size (still
+// comfortably inside a single KV value's 25MB limit even at the new
+// size - see the size math below).
 const LIVE_CHECK_DEBUG_SAMPLES_KV_KEY = 'live-check-debug-samples';
-const LIVE_CHECK_DEBUG_SAMPLES_MAX = 20; // oldest dropped once exceeded
-const LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS = 4000; // per attempt, not per sample
+const LIVE_CHECK_DEBUG_SAMPLES_MAX = 5; // oldest dropped once exceeded
+// 500,000 chars (~500KB) per attempt. Worst case: 5 samples x 2 attempts x
+// 500,000 chars = 5,000,000 chars (~5MB) - well under the 25MB per-value
+// KV limit. A real YouTube page is very unlikely to need anywhere near
+// this much to reach its meta/JSON section, so in practice this should
+// rarely if ever actually truncate.
+const LIVE_CHECK_DEBUG_SAMPLE_HTML_MAX_CHARS = 500000;
 
 // Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
 // unresolved-live tracking below (see there for why a second, cross-cycle

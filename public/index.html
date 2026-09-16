@@ -4078,10 +4078,12 @@
           ? s.retryAttemptHtmlLength + ' chars'
           : (s.retryFetchError ? 'retry fetch failed - ' + escapeHtmlDebug(s.retryFetchError) : '-')) + '</div>';
         html += '</div>';
-        html += '<div class="live-debug-sample-label">First attempt (start of response):</div>';
+        const firstTruncated = s.firstAttemptSnippet && s.firstAttemptHtmlLength != null && s.firstAttemptSnippet.length < s.firstAttemptHtmlLength;
+        html += '<div class="live-debug-sample-label">First attempt' + (firstTruncated ? ' (truncated - response was longer than what we captured)' : '') + ':</div>';
         html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.firstAttemptSnippet || '(empty)') + '</pre>';
         if (s.retryAttemptSnippet) {
-          html += '<div class="live-debug-sample-label">Retry attempt (start of response):</div>';
+          const retryTruncated = s.retryAttemptHtmlLength != null && s.retryAttemptSnippet.length < s.retryAttemptHtmlLength;
+          html += '<div class="live-debug-sample-label">Retry attempt' + (retryTruncated ? ' (truncated - response was longer than what we captured)' : '') + ':</div>';
           html += '<pre class="live-debug-sample-html">' + escapeHtmlDebug(s.retryAttemptSnippet) + '</pre>';
         }
         html += '</details>';
