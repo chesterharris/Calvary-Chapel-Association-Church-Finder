@@ -4515,18 +4515,46 @@
     }
   }
 
-  function onYouTubeIframeAPIReady() {
-    ytApiReady = true;
+  // Builds the actual YT.Player instance - deliberately NOT called eagerly
+  // from onYouTubeIframeAPIReady below. Confirmed in production (2026-09):
+  // the IFrame API script calls that global callback itself as soon as
+  // IT finishes loading, which happens right at page load - long before
+  // anyone has clicked a Live Now card - while #videoLightboxOverlay is
+  // still display:none. Constructing YT.Player against a hidden (zero-
+  // size) container produced a black, silently-broken player and a
+  // console error ("Expected value to be of type number, but found null
+  // instead.") that never recovered even after the overlay later became
+  // visible - a well-documented failure mode of this API. Building it
+  // here instead, only once openLiveVideoLightbox has already made the
+  // overlay visible, means the container has real dimensions the first
+  // time the player is ever created. width/height are passed as a
+  // defensive fallback for the same "the API wants a number, not nothing"
+  // class of bug - the CSS on #videoLightboxPlayer's generated iframe
+  // (position:absolute; inset:0; width/height:100%) is what actually
+  // controls its visible size regardless of these.
+  function createLightboxPlayer(videoId) {
+    currentLightboxVideoId = videoId;
     ytLightboxPlayer = new YT.Player('videoLightboxPlayer', {
       host: 'https://www.youtube-nocookie.com',
+      width: '640',
+      height: '360',
+      videoId: videoId,
       playerVars: { autoplay: 1, playsinline: 1, rel: 0 },
       events: { onError: handleLightboxPlayerError }
     });
+  }
+
+  function onYouTubeIframeAPIReady() {
+    ytApiReady = true;
+    // Only reached if the user managed to click a Live Now card before
+    // the (usually near-instant) IFrame API script finished loading -
+    // openLiveVideoLightbox already made the overlay visible and stashed
+    // the videoId below in that case, so the container is safely visible
+    // by the time we get here too.
     if (pendingLightboxVideoId) {
       const videoId = pendingLightboxVideoId;
       pendingLightboxVideoId = null;
-      currentLightboxVideoId = videoId;
-      ytLightboxPlayer.loadVideoById(videoId);
+      createLightboxPlayer(videoId);
     }
   }
   // Assigned onto window explicitly - the IFrame API looks up this exact
@@ -4536,9 +4564,21 @@
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
   function openLiveVideoLightbox(videoId) {
+    // Made visible BEFORE any player work below - createLightboxPlayer's
+    // first-ever call depends on the container already being visible at
+    // that point (see the comment on createLightboxPlayer above).
     document.getElementById('videoLightboxOverlay').style.display = 'flex';
     currentLightboxVideoId = videoId;
-    if (ytApiReady && ytLightboxPlayer && typeof ytLightboxPlayer.loadVideoById === 'function') {
+    if (!ytApiReady) {
+      // IFrame API script hasn't finished loading yet (unusual, but
+      // possible on a slow connection) - onYouTubeIframeAPIReady picks
+      // this up and builds the player once it fires.
+      pendingLightboxVideoId = videoId;
+      return;
+    }
+    if (!ytLightboxPlayer) {
+      createLightboxPlayer(videoId);
+    } else if (typeof ytLightboxPlayer.loadVideoById === 'function') {
       ytLightboxPlayer.loadVideoById(videoId);
     } else {
       pendingLightboxVideoId = videoId;
