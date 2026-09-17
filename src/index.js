@@ -2414,6 +2414,41 @@ const RADIO_STATIONS = [
     streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
   },
   {
+    // Caster.fm (Sapir.caster.fm)-hosted station - see the `casterfm`
+    // provider (near parseIcecastJson) for why this needs its own provider
+    // instead of reusing `icecast` above, despite the underlying stream
+    // being Icecast-compatible. mountPath must include the leading slash -
+    // that's exactly how it's keyed in the JSON response.
+    // Confirmed via a real response from
+    // https://sapircast.caster.fm:12380/admin/publicstats.json on
+    // 2026-09-17. streamUrl uses https on the same host:port since that
+    // status endpoint itself answers over https; the mount's own
+    // "listenurl" field in that response says plain http
+    // ("http://sapircast.caster.fm:12380/g4UKb"), but Caster.fm appears to
+    // report that unconditionally regardless of what the server actually
+    // supports, and a plain-http stream embedded on this site's https pages
+    // would be blocked/upgraded by the browser anyway - worth Larry
+    // confirming actual playback once live, and falling back to the
+    // http listenurl if https turns out not to work.
+    displayName: 'CCFF',
+    cityState: 'Fergus Falls, MN',
+    homePage: 'https://ccfergusfalls.com/radio/',
+    provider: 'casterfm',
+    host: 'sapircast.caster.fm:12380',
+    mountPath: '/g4UKb',
+    streamUrl: 'https://sapircast.caster.fm:12380/g4UKb',
+    // Static station logo, not per-program art - Caster.fm's JSON never
+    // includes cover art, same situation as plain Icecast. Shadow-free
+    // treatment built from CCFF's own circular badge logo, matching the
+    // GraceFM/WJWD/KEWR convention (see the published-schedule notes doc) -
+    // scaled near-full-bleed like WJWD's icon since the source mark is
+    // already a circular badge with little natural margin, rather than
+    // GraceFM/KEWR's ~80%-of-frame treatment for their more rectangular
+    // line-art marks.
+    staticCoverUrl: '/ccff-icon.png',
+    staticCoverThumbUrl: '/ccff-icon-128.png'
+  },
+  {
     // Same rationale as GraceFM above - WJWD/WJCZ/WTZY (Calvary Radio
     // Network) has no live metadata feed either, so this is inferred from
     // its own published schedule instead. streamUrl below is unchanged and
@@ -3018,6 +3053,61 @@ function parseIcecastJson(rawJson, station) {
   return { title: bareTitle, artist: '', coverUrl: null };
 }
 
+// Extracts now-playing info from a Caster.fm (Sapir.caster.fm)-hosted
+// server's /admin/publicstats.json endpoint. The underlying stream is
+// Icecast-compatible, but this is deliberately a separate provider from
+// `icecast` above rather than a branch inside it, because nearly every
+// assumption `parseIcecastJson`/its buildNowPlayingUrl make is different
+// here: the path isn't status-json.xsl and takes no ?mount= filter (it
+// always returns every mount the server hosts, whether there's one or
+// several); the top-level shape is an ARRAY - a small
+// { name: "icestats", ns: ... } header element followed by the real stats
+// object - not a single { icestats: {...} } object; "source" inside that
+// stats object is keyed BY MOUNT PATH (e.g. "/g4UKb") rather than being a
+// single object or a homogeneous array; and the now-playing field is
+// called "display-title", not "title". Confirmed via a real response
+// (CCFF, Fergus Falls, MN, 2026-09-17).
+function parseCasterFmJson(rawJson, station) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Caster.fm JSON response');
+  }
+
+  const statsEntry = Array.isArray(data) ? data.find(function(entry) { return entry && entry.source; }) : null;
+  const sourcesByMount = statsEntry && statsEntry.source;
+  if (!sourcesByMount || typeof sourcesByMount !== 'object') {
+    return { title: '', artist: '', coverUrl: null };
+  }
+
+  // Prefer the station's own configured mount path if given (in case a
+  // server ever hosts more than one), otherwise just take whichever mount
+  // is present - most Caster.fm plans only host a single stream.
+  const mountKey = station && station.mountPath && sourcesByMount[station.mountPath]
+    ? station.mountPath
+    : Object.keys(sourcesByMount)[0];
+  const source = mountKey ? sourcesByMount[mountKey] : null;
+
+  const rawTitle = source && typeof source['display-title'] === 'string' ? source['display-title'].trim() : '';
+  if (!rawTitle) return { title: '', artist: '', coverUrl: null };
+
+  // Same "Artist - Track" convention as Icecast's own title field - see
+  // parseIcecastJson above for the split rationale and its edge cases
+  // (noArtistSplit, bare "- Title" stripping). Not wired up here yet since
+  // CCFF's real responses haven't shown either edge case, but the same
+  // station-level opt-outs could be added later if needed.
+  const sepIndex = rawTitle.indexOf(' - ');
+  if (sepIndex !== -1) {
+    return {
+      artist: rawTitle.slice(0, sepIndex).trim(),
+      title: rawTitle.slice(sepIndex + 3).trim(),
+      coverUrl: null
+    };
+  }
+  return { title: rawTitle, artist: '', coverUrl: null };
+}
+
 // Extracts now-playing info from a Futuri/streamon.fm "current.json"
 // metadata endpoint. Confirmed via a real response to return a one-element
 // array (not a bare object like Icecast's single-mount case) using ID3
@@ -3457,6 +3547,12 @@ const RADIO_PROVIDERS = {
       return 'https://' + station.host + '/status-json.xsl?mount=/' + station.mount;
     },
     parse: parseIcecastJson
+  },
+  casterfm: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/admin/publicstats.json';
+    },
+    parse: parseCasterFmJson
   },
   futuri: {
     buildNowPlayingUrl: function(station) {
