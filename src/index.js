@@ -2421,22 +2421,22 @@ const RADIO_STATIONS = [
     // that's exactly how it's keyed in the JSON response.
     // Confirmed via a real response from
     // https://sapircast.caster.fm:12380/admin/publicstats.json on
-    // 2026-09-17. streamUrl uses https on the same host:port since that
-    // status endpoint itself answers over https; the mount's own
-    // "listenurl" field in that response says plain http
-    // ("http://sapircast.caster.fm:12380/g4UKb"), but Caster.fm appears to
-    // report that unconditionally regardless of what the server actually
-    // supports, and a plain-http stream embedded on this site's https pages
-    // would be blocked/upgraded by the browser anyway - worth Larry
-    // confirming actual playback once live, and falling back to the
-    // http listenurl if https turns out not to work.
+    // 2026-09-17. streamUrl was first guessed as https on the same
+    // host:port (matching the status endpoint), but that guess was wrong -
+    // confirmed 2026-09-17 that hitting the mount over https on port 12380
+    // triggers a browser HTTP Basic Auth prompt (almost certainly Icecast's
+    // /admin/ vhost catching the https side of that port rather than the
+    // public mount). Reverted to the plain http URL from the station's own
+    // "listenurl" field, which is what's actually confirmed playable - a
+    // mixed-content warning from this site's https pages is the lesser
+    // problem compared to a login wall blocking playback outright.
     displayName: 'CCFF',
     cityState: 'Fergus Falls, MN',
     homePage: 'https://ccfergusfalls.com/radio/',
     provider: 'casterfm',
     host: 'sapircast.caster.fm:12380',
     mountPath: '/g4UKb',
-    streamUrl: 'https://sapircast.caster.fm:12380/g4UKb',
+    streamUrl: 'http://sapircast.caster.fm:12380/g4UKb',
     // Static station logo, not per-program art - Caster.fm's JSON never
     // includes cover art, same situation as plain Icecast. Shadow-free
     // treatment built from CCFF's own circular badge logo, matching the
