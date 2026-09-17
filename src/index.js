@@ -463,7 +463,7 @@ function parseConferences(rawHtml) {
   return results;
 }
 
-// ---- Church data (Workers KV) ----
+// ---- Church data (Workers KV) -----
 //
 // All church records live in KV under a single key, "churches", as one JSON
 // array. The public map reads this via GET /api/churches. The admin panel
