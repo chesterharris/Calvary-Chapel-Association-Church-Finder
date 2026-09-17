@@ -272,3 +272,72 @@ Second station wired up on this provider, 2026-09-10. Data lives in
   rounded-square treatment as GraceFM's icon, built from Larry's own WJWD
   badge image - source was low-resolution (~186x183), so it's a bit soft
   scaled up, but confirmed as an improvement over no image.
+
+### KEWR - Enduring Word Radio (Cedar Rapids, IA)
+
+Third station wired up on this provider, 2026-09-17. Data lives in
+`src/radioSchedules/kewr.js`.
+
+- Source: `https://enduringwordradio.com/schedule/`, transcribed 2026-09-17
+  from raw page source Larry supplied directly (not WebFetch's markdown
+  summary - see below on why).
+- Live365-hosted (mount `a36509`). Checked the Live365 JSON API
+  (`https://api.live365.com/station/a36509`) first, per the standing policy
+  of always trying that endpoint before assuming a station needs HLS
+  chasing - confirmed genuinely dead here too: `current-track`/`last-played`
+  come back empty/missing even though the stream itself
+  (`https://streaming.live365.com/a36509`) is live and playable. Same
+  "dead metadata pipeline, not a quiet moment" situation as GraceFM's
+  SecureNetSystems feed, just on a different platform.
+- Source splits Monday-Friday across two separate tables - a daytime one and
+  a "Monday - Friday (Overnight)" one - that hand off cleanly at the day
+  boundary. Merged into one continuous 24-hour `weekday` array in
+  `kewr.js`. Two rows were dropped as artifacts of that split, not real
+  programming: the daytime table's own last row is a plain "See Overnight
+  Broadcast Schedule" pointer (not a program), and the overnight table's
+  final 5:00 AM row duplicates the daytime table's first entry - the lookup
+  wraps around on its own, so keeping both would just be redundant, not
+  wrong.
+- Two naming inconsistencies, both resolved by canonicalizing rather than
+  picking one table as more authoritative:
+  - **"God Sword" vs "GodSword"** - the 7:30 AM and 8:00 PM airings are the
+    same program with the same host (Ken Graves), spelled differently
+    depending on which table row you read. Canonicalized to "GodSword"
+    throughout.
+  - **"Mike Macintosh"** - misspelled on the source page itself (confirmed
+    via raw page source, not a WebFetch artifact - see below). Larry
+    confirmed the correct spelling is "Mike MacIntosh"; corrected in the
+    11:30 AM weekday entry.
+- **WebFetch's HTML-to-markdown summarization proved unreliable for this
+  transcription** - a first pass through WebFetch rendered inconsistent
+  results on exactly the kind of detail that matters here (name casing,
+  spacing). Rather than trust an AI-summarized fetch for verbatim text,
+  Larry supplied the actual raw page source directly (same approach already
+  used for other stations' investigations), which is what the transcription
+  above is drawn from. Worth remembering for any future station: raw source
+  the user provides is the trusted input for exact-text transcription,
+  WebFetch is not.
+- Timezone: `America/Chicago` (Cedar Rapids, IA).
+- **One judgment call, not verbatim source data**: the shared
+  Saturday/Sunday table has nothing listed for Sunday past 8:00 PM (its only
+  day-specific note is a Saturday-only 8:30-11:30 PM "Praise & Worship"
+  block). Per Larry's call ("we don't really know what is happening during
+  those hours and thankfully the listenership in the wee hours of the night
+  is low"), a single `Praise & Worship` filler entry was added at 8:30 PM,
+  Sunday only - using the station's own existing generic filler category
+  rather than crediting a real program for hours it likely didn't run. That
+  one addition also happens to cover the Saturday-night-into-Sunday-morning
+  stretch (11:30 PM Saturday - 5:00 AM Sunday) for free, via the normal
+  wraparound lookup, since Sunday's array otherwise has no entries before
+  5:00 AM. No `weekdayOverridesByDay` needed for KEWR (unlike WJWD) - its
+  Sunday table has no early-morning entries that would conflict with the
+  weekday grid, so the weekday array just takes over cleanly at true
+  midnight Monday.
+- Logo: `staticCoverUrl: '/kewr-icon.png'` / `staticCoverThumbUrl:
+  '/kewr-icon-128.png'`, approved 2026-09-17 as part of Larry's standing
+  instruction to match this same rounded-square, shadow-free treatment for
+  any future static icons. Source SVG
+  (`https://enduringwordradio.com/_astro/logo.9ba32d78_2nBtmL.svg`) couldn't
+  be downloaded directly (blocked by the org's egress policy) - Larry to
+  supply the file directly, same as GraceFM/WJWD's source images.
+- 60-day re-check reminder: **2026-11-16**.
