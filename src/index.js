@@ -2564,7 +2564,7 @@ const RADIO_STATIONS = [
   },
   {
     displayName: 'WGSS',
-    cityState: 'Amityville, NY',
+    cityState: 'Copiague, NY',
     homePage: 'https://www.godstillspeaks.com/',
     provider: 'radiomast',
     streamUrl: 'https://streams.radiomast.io/bbe3faf2-3aa6-440a-9e1f-06b766d9bd70'
