@@ -12,6 +12,7 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
 import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
+import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2855,6 +2856,31 @@ const RADIO_STATIONS = [
     // schedule notes doc for why the shadowed original wasn't used).
     staticCoverUrl: '/gracefm-icon.png',
     staticCoverThumbUrl: '/gracefm-icon-128.png'
+  },
+  {
+    // Same pattern as GraceFM above - KEWR's Live365 JSON endpoint
+    // (api.live365.com/station/a36509) was checked first per the usual
+    // policy and confirmed dead: current-track/last-played come back empty
+    // even though the stream itself (streaming.live365.com/a36509) plays
+    // fine. Its publicly published weekly schedule
+    // (enduringwordradio.com/schedule) stands in for real-time metadata
+    // instead - see radio-station-published-schedule-notes.md for the full
+    // rationale (including the two source-page naming inconsistencies
+    // resolved and the added Sunday-evening filler entry) and the
+    // transcription itself in src/radioSchedules/kewr.js. A 60-day manual
+    // re-check against the live page is scheduled for 2026-11-16.
+    displayName: 'KEWR - Enduring Word Radio',
+    cityState: 'Cedar Rapids, IA',
+    homePage: 'https://enduringwordradio.com/',
+    provider: 'publishedschedule',
+    schedule: KEWR_SCHEDULE,
+    streamUrl: 'https://streaming.live365.com/a36509',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM's staticCoverUrl above. Shadow-free, rounded-square treatment
+    // built from the station's own logo, matching the GraceFM/WJWD
+    // convention (see the published-schedule notes doc).
+    staticCoverUrl: '/kewr-icon.png',
+    staticCoverThumbUrl: '/kewr-icon-128.png'
   },
   {
     displayName: 'Hope FM',
