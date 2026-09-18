@@ -6984,8 +6984,16 @@
 
     const ordered = getOrderedRadioStations();
     const query = radioBrowseSearchQuery.trim().toLowerCase();
+    // Matches on the station name as well as its current "now playing"
+    // program title/host (same fields formatNowPlaying() displays in the
+    // row) - a user searching for a show or a familiar host's name
+    // shouldn't come up empty just because it's not the station's own name.
     const filtered = query
-      ? ordered.filter(function(s) { return s.displayName.toLowerCase().indexOf(query) !== -1; })
+      ? ordered.filter(function(s) {
+          return s.displayName.toLowerCase().indexOf(query) !== -1 ||
+            (s.title && s.title.toLowerCase().indexOf(query) !== -1) ||
+            (s.artist && s.artist.toLowerCase().indexOf(query) !== -1);
+        })
       : ordered;
 
     if (!filtered.length) {
