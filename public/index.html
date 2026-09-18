@@ -4158,7 +4158,17 @@
       liveBroadcastDetailsPresent: '"liveBroadcastDetails" key present',
       itemPropIdentifierMeta: 'itemprop="identifier" meta tag',
       ytInitialPlayerResponsePresent: 'ytInitialPlayerResponse script',
-      ytInitialDataPresent: 'ytInitialData script'
+      ytInitialDataPresent: 'ytInitialData script',
+      // Added alongside the "live but missing metadata" capture case (see
+      // checkChurchLive in index.js) - once videoId started resolving via
+      // a buried/unusual location instead of going missing outright, the
+      // open question became whether description/startDate are ALSO
+      // sitting somewhere unusual, or genuinely gone from this page shape.
+      ogTitleMetaPresent: 'og:title meta tag present',
+      ogDescriptionMetaPresent: 'og:description meta tag present',
+      shortDescriptionKeyPresentLoose: '"shortDescription" key present (any shape)',
+      startTimestampKeyPresentLoose: '"startTimestamp" key present (any shape)',
+      startedStreamingPhrasePresent: '"Started streaming..." text present'
     };
     function buildLiveDebugAttemptHtml(label, htmlLength, prefix, landmarks, fetchError, videoIdOccurrences) {
       let out = '<div class="live-debug-sample-label">' + label +
@@ -4210,18 +4220,37 @@
     }
     if (data.debugSamples && data.debugSamples.length) {
       html += '<div class="live-debug-samples-header-actions">' +
-        '<div class="live-debug-section-title" style="margin:0;">Recent Failed-Fetch Samples (' + data.debugSamples.length + ')</div>' +
+        '<div class="live-debug-section-title" style="margin:0;">Recent Diagnostic Samples (' + data.debugSamples.length + ')</div>' +
         '<button type="button" class="live-debug-sample-btn" id="liveDebugDownloadAllBtn">⬇ Download All (JSON)</button>' +
         '</div>';
       data.debugSamples.forEach(function(s, i) {
         const churchLabel = s.churchName ? escapeHtmlDebug(s.churchName) : ('Church #' + (s.churchId != null ? s.churchId : '?'));
+        // Two different reasons a sample gets captured (see
+        // recordLiveCheckDebugSample call sites in checkChurchLive):
+        // "no-videoid" - couldn't resolve a videoId at all, even after
+        // retry (older samples predating this field also fall here).
+        // "live-but-missing-metadata" - videoId DID resolve (often via
+        // the buried updatedMetadataEndpoint fallback) but the church is
+        // confirmed live with description/startDate still missing - the
+        // case this label helps distinguish from an outright fetch
+        // failure, since it's a successful check, just an incomplete one.
+        const reasonLabel = s.reason === 'live-but-missing-metadata'
+          ? '⚠️ Live, missing metadata'
+          : '❌ No videoId';
         html += '<details class="live-debug-group">';
-        html += '<summary>' + churchLabel + ' &ndash; ' + formatRelativeTime(s.capturedAt) + '</summary>';
+        html += '<summary>' + churchLabel + ' &ndash; ' + reasonLabel + ' &ndash; ' + formatRelativeTime(s.capturedAt) + '</summary>';
         html += '<div class="live-debug-sample-actions">' +
           '<button type="button" class="live-debug-sample-btn live-debug-copy-sample-btn" data-sample-index="' + i + '">📋 Copy JSON</button>' +
           '<button type="button" class="live-debug-sample-btn live-debug-download-sample-btn" data-sample-index="' + i + '">⬇ Download JSON</button>' +
           '</div>';
         html += '<div class="live-debug-sample-meta"><div>Live URL: ' + escapeHtmlDebug(s.liveUrl || '-') + '</div></div>';
+        if (s.reason === 'live-but-missing-metadata') {
+          const missingList = ['missingTitle', 'missingDescription', 'missingStartDate']
+            .filter(function(k) { return s[k]; })
+            .map(function(k) { return k.replace('missing', ''); });
+          html += '<div class="live-debug-sample-meta"><div>Resolved videoId: <strong>' + escapeHtmlDebug(s.resolvedVideoId || '-') + '</strong></div>' +
+            '<div>Missing: ' + (missingList.length ? escapeHtmlDebug(missingList.join(', ')) : 'none') + '</div></div>';
+        }
         html += buildLiveDebugAttemptHtml('First attempt', s.firstAttemptHtmlLength, s.firstAttemptPrefix, s.firstAttemptLandmarks, null, s.firstAttemptVideoIdOccurrences);
         // The retry only ever runs because the first attempt already
         // failed to find a videoId - if the retry came back showing the
@@ -4230,15 +4259,23 @@
         // occurrences, repeating the whole table and snippets a second
         // time is just noise, not new evidence. Only show it in full when
         // something actually differs (or the retry fetch itself failed).
-        const retryIdentical = !s.retryFetchError &&
-          s.firstAttemptHtmlLength === s.retryAttemptHtmlLength &&
-          s.firstAttemptPrefix === s.retryAttemptPrefix &&
-          JSON.stringify(s.firstAttemptLandmarks) === JSON.stringify(s.retryAttemptLandmarks) &&
-          JSON.stringify(s.firstAttemptVideoIdOccurrences || []) === JSON.stringify(s.retryAttemptVideoIdOccurrences || []);
-        if (retryIdentical) {
-          html += '<div class="live-debug-sample-label">Retry attempt &ndash; identical to the first attempt in every way we checked (not shown again).</div>';
+        // "live-but-missing-metadata" samples never attempt a retry at
+        // all (see checkChurchLive - that capture point sits well past
+        // the videoId retry block, on a church that's already resolved
+        // successfully), so there's no retry section to show for them.
+        if (s.reason === 'live-but-missing-metadata') {
+          // No retry section for this sample type.
         } else {
-          html += buildLiveDebugAttemptHtml('Retry attempt', s.retryAttemptHtmlLength, s.retryAttemptPrefix, s.retryAttemptLandmarks, s.retryFetchError, s.retryAttemptVideoIdOccurrences);
+          const retryIdentical = !s.retryFetchError &&
+            s.firstAttemptHtmlLength === s.retryAttemptHtmlLength &&
+            s.firstAttemptPrefix === s.retryAttemptPrefix &&
+            JSON.stringify(s.firstAttemptLandmarks) === JSON.stringify(s.retryAttemptLandmarks) &&
+            JSON.stringify(s.firstAttemptVideoIdOccurrences || []) === JSON.stringify(s.retryAttemptVideoIdOccurrences || []);
+          if (retryIdentical) {
+            html += '<div class="live-debug-sample-label">Retry attempt &ndash; identical to the first attempt in every way we checked (not shown again).</div>';
+          } else {
+            html += buildLiveDebugAttemptHtml('Retry attempt', s.retryAttemptHtmlLength, s.retryAttemptPrefix, s.retryAttemptLandmarks, s.retryFetchError, s.retryAttemptVideoIdOccurrences);
+          }
         }
         html += '</details>';
       });

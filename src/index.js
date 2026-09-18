@@ -889,7 +889,26 @@ function findLiveCheckDiagnosticLandmarks(html) {
     // Confirms whether YouTube's larger per-video data blocks are even
     // present in the response at all, regardless of their contents.
     { key: 'ytInitialPlayerResponsePresent', pattern: /ytInitialPlayerResponse\s*=/ },
-    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ }
+    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ },
+    // Added once videoId started resolving via a buried/unusual location
+    // (updatedMetadataEndpoint) instead of going missing entirely - the
+    // open question at that point became whether description/startDate
+    // are ALSO sitting somewhere unusual on this page shape, or genuinely
+    // not present at all. Presence-only (not captured/anchored), same
+    // reasoning as the "Loose" checks above: tells us the KEY exists
+    // somewhere on the page, even if not in the one specific nested shape
+    // checkChurchLive's own regexes require.
+    { key: 'ogTitleMetaPresent', pattern: /<meta property="og:title"/ },
+    { key: 'ogDescriptionMetaPresent', pattern: /<meta property="og:description"/ },
+    { key: 'shortDescriptionKeyPresentLoose', pattern: /"shortDescription":/ },
+    { key: 'startTimestampKeyPresentLoose', pattern: /"startTimestamp":/ },
+    // The human-readable "Started streaming X ago" text shown on a live
+    // page - present tense/progressive, distinct from a finished video's
+    // past-tense phrasing (confirmed in earlier investigation). A hit
+    // here without startTimestampKeyPresentLoose above would mean the
+    // JSON field itself is gone but the same information survives in
+    // plain rendered text somewhere on the page.
+    { key: 'startedStreamingPhrasePresent', pattern: /Started streaming/i }
   ];
   const landmarks = {};
   checks.forEach(function(c) {
@@ -1507,6 +1526,7 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
         churchName: churchName || null,
         youtubeUrl: youtubeUrl,
         liveUrl: liveUrl,
+        reason: 'no-videoid',
         firstAttemptHtmlLength: html.length,
         firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
         firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
@@ -1606,6 +1626,36 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
         viewCount !== null && viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
       return { isLive: false, status: 'not_live' };
     }
+  }
+
+  // Genuinely live, and (thanks to the updatedMetadataEndpoint fallback
+  // above) videoId now resolves almost every time - but that fallback
+  // only ever recovers videoId specifically. If description/startDate
+  // are STILL missing at this point, capture a sample the same way the
+  // old "no videoId at all" case did, so the admin debug panel can show
+  // whether those fields are also sitting somewhere unusual on this page
+  // (see the new landmarks above) or are genuinely absent. This fires
+  // independently of the videoId retry block above/its own capture -
+  // that one only ever triggers when videoId is STILL null after retry,
+  // which the fallback now mostly prevents, leaving this as the only
+  // place that still captures a sample for a church that resolved fine
+  // but is missing the rest of its display data.
+  if (env && (!description || !startDate)) {
+    await recordLiveCheckDebugSample(env, {
+      churchId: churchId != null ? churchId : null,
+      churchName: churchName || null,
+      youtubeUrl: youtubeUrl,
+      liveUrl: liveUrl,
+      reason: 'live-but-missing-metadata',
+      resolvedVideoId: videoId,
+      missingTitle: !title,
+      missingDescription: !description,
+      missingStartDate: !startDate,
+      firstAttemptHtmlLength: html.length,
+      firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
+      firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
+      firstAttemptVideoIdOccurrences: findAllVideoIdOccurrences(html)
+    });
   }
 
   return {
