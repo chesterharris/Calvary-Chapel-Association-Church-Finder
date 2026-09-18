@@ -998,6 +998,14 @@
   #radioBrowsePanel {
     width: 420px;
   }
+  /* Matches #radioBrowsePanel above - both share the same fully flexible
+     .live-now-card/.radio-browse-row layouts (fixed-size thumbnail/icon,
+     everything else flex:1 with ellipsis truncation), so there's no
+     content reason for Live Now to stay narrower at the base .side-panel
+     width of 320px. Purely cosmetic consistency between the two panes. */
+  #liveNowPanel {
+    width: 420px;
+  }
   /* Desktop-only width for the Live Debug pane - must stay above the
      720px full-screen-takeover media query below so that query's
      width:100% wins on phones (equal ID-selector specificity means the
