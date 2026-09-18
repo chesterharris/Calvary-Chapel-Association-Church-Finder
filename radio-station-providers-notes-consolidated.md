@@ -217,6 +217,15 @@ Skip per the no-generic-placeholder policy above, same as GraceFM. Revisit
 only if the station's metadata pipeline gets fixed on SecureNetSystems'
 end.
 
+**UPDATE 2026-09-18: added after all, via the `publishedschedule` provider**
+rather than the dead XML feed above - Larry re-confirmed the identical
+soft-404 response and supplied the station's published schedule directly.
+See `radio-station-published-schedule-notes.md` for the full rationale,
+KGPS's specific transcription notes (including the seasonal Summer/Winter
+slot-swap judgment call), and the transcription itself in
+`src/radioSchedules/kgps.js`. `streamUrl` above is confirmed still
+live/playable independent of the metadata pipeline being dead.
+
 **Hope FM / WVBV (Medford Lakes, NJ)** — added 2026-09-11, the radio
 ministry of Calvary Chapel Marlton (`hopefm.net`). Larry supplied the XML
 feed URL and a real sample response directly (title "A Moment of Truth" /

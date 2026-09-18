@@ -341,3 +341,85 @@ Third station wired up on this provider, 2026-09-17. Data lives in
   be downloaded directly (blocked by the org's egress policy) - Larry to
   supply the file directly, same as GraceFM/WJWD's source images.
 - 60-day re-check reminder: **2026-11-16**.
+
+### KGPS "The Way" (Kingman, AZ)
+
+Fourth station wired up on this provider, 2026-09-18. Data lives in
+`src/radioSchedules/kgps.js`.
+
+- Source: `https://www.kgps.org/`'s published schedule page, transcribed
+  2026-09-18 from raw page source Larry supplied directly.
+- Previously investigated and rejected outright (see "KGPS 'The Way'
+  (Kingman, AZ)" in `radio-station-providers-notes-consolidated.md`) - its
+  XML now-playing feed (`player_status_update/KGPS.xml`) returns HTTP 200
+  with a soft-404 error page body ("The system cannot find the file
+  specified"). Larry re-confirmed the identical broken response 2026-09-18
+  and supplied the published schedule instead, so this is the first
+  previously-rejected station brought back via this provider rather than one
+  caught fresh. `streamUrl` (`https://ice5.securenetsystems.net/KGPS`) is
+  unchanged from the original investigation and was already confirmed
+  live/playable then - the metadata pipeline and the stream itself are
+  independent, same as every other station on this provider.
+- Source page is a Wix rich-text block (`<p>` tags, no structured table or
+  accordion markup like GraceFM/WJWD/KEWR) - three plain-text day sections
+  (a "Weekdays" block covering the full Mon-Fri 24 hours, then "Saturday",
+  then "Sunday"), each just a flat list of `TIME  Program - Host` lines with
+  no consistent chronological ordering in the source itself (Saturday's list
+  in particular starts mid-morning before looping back to midnight) -
+  reordered chronologically during transcription; order doesn't affect the
+  lookup itself, but keeping the data files sorted matches every other
+  station's convention here.
+- Two judgment calls, not verbatim source data - both flagged to Larry for
+  confirmation whenever he happens to be listening at those hours:
+  - **A genuine seasonal Summer/Winter slot swap.** The weekday grid's
+    3:00-4:31pm block lists two pairs of programs (Calvary Live / Grace Upon
+    Grace, and Washington Watch / Light on the Hill) that trade places by an
+    hour depending on a "Summer" or "Winter" tag in the source text itself -
+    e.g. Calvary Live at 3:00pm is tagged "Summertime", the same slot's
+    4:00pm entry is tagged "Wintertime". Read as the live simulcast's
+    *origin* station observing DST while Arizona's own clock doesn't, so the
+    arrival time (in Kingman's clock) shifts twice a year. This schedule
+    format has no seasonal concept (`weekdayOverridesByDay` is deliberately
+    day-of-week only, not a generalized mechanism - see "One-off overrides"
+    above), so `kgps.js` just hardcodes the Summer lineup (accurate as of
+    the September 2026 transcription date) and drops the Winter-tagged
+    duplicates. Needs a manual swap back to Winter around when DST ends
+    (first Sunday of November) and back to Summer again in spring - flagged
+    directly in the schedule file's own header comment so it isn't missed.
+  - **An unresolved same-slot conflict with no tag to break the tie.** Unlike
+    the Summer/Winter pairs above, the weekday grid's 7:00pm slot lists two
+    unrelated, unqualified programs - "Movieguide" and "Answers in Genesis -
+    Ken Ham" - with nothing in the source distinguishing which one is the
+    real booking versus a stray duplicate. Kept "Answers in Genesis" (it
+    already recurs elsewhere in the same schedule at 1:00am) and dropped
+    "Movieguide".
+- One transcription cleanup, not a judgment call: Saturday's table lists
+  "Grace Infusion - Mike Nimer" twice within two minutes of each other
+  (6:00am and 6:02am) - the same kind of stray duplicate row KEWR's
+  overnight/daytime table split produced. Kept the 6:02am instance (matches
+  its position relative to the surrounding entries) and dropped the 6:00am
+  one.
+- No `weekdayOverridesByDay` needed for the Sat/Sun or Sun/Mon boundaries
+  (unlike WJWD) - this station's weekday grid genuinely starts at midnight,
+  and neither Friday-into-Saturday nor Sunday-into-Monday has a conflicting
+  tail the way WJWD's Sunday table did. The one override this station does
+  need is a plain Friday-night one: the source carves out a two-hour
+  "Christian Rock Music" block at 10:30pm/11:30pm Fridays only, replacing
+  the generic weekday GodSword/Hope from the Word slots - modeled as a `FRI`
+  entry in `weekdayOverridesByDay`, same mechanism as GraceFM's Wednesday
+  override and WJWD's Monday override.
+- Timezone: `America/Phoenix` (Kingman, AZ - Arizona doesn't observe DST, so
+  this one never needs a timezone-side adjustment, only the schedule-side
+  Summer/Winter swap noted above).
+- Logo: `staticCoverUrl: '/kgps-icon.png'` / `staticCoverThumbUrl:
+  '/kgps-icon-128.png'`, supplied 2026-09-18 - a compass/GPS-pin graphic
+  (the pun being the call sign itself), not the station's own branding, but
+  Larry's choice for this one. The station's own page only exposes a
+  generic SecureNetSystems default logo/album-art placeholder, so this
+  wasn't a case of picking a graphic over a usable real logo. Background
+  removed from the supplied source (a flat white background around a
+  vector-style mark, cleanly separable via a border-connected flood fill -
+  no soft-edge halo to worry about) and given the same shadow-free,
+  rounded-square black treatment as GraceFM/WJWD/KEWR's icons, mark scaled
+  to the same ~80% of frame.
+- 60-day re-check reminder: **2026-11-17**.

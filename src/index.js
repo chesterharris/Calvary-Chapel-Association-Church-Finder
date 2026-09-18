@@ -13,6 +13,7 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
 import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
 import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
+import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2923,6 +2924,36 @@ const RADIO_STATIONS = [
     // convention (see the published-schedule notes doc).
     staticCoverUrl: '/kewr-icon.png',
     staticCoverThumbUrl: '/kewr-icon-128.png'
+  },
+  {
+    // Previously investigated and rejected (see "KGPS 'The Way' (Kingman,
+    // AZ)" in radio-station-providers-notes-consolidated.md) - its XML
+    // now-playing feed (player_status_update/KGPS.xml) returns HTTP 200
+    // with a soft-404 error page body ("The system cannot find the file
+    // specified"), same dead-metadata-pipeline situation as GraceFM/KEWR
+    // above, just confirmed via live Network traffic rather than a manual
+    // fetch. Larry re-confirmed the same broken response 2026-09-18 and
+    // supplied the station's published weekly schedule directly, so it's
+    // wired up here the same way GraceFM/WJWD/KEWR were - see
+    // radio-station-published-schedule-notes.md for the full rationale, the
+    // seasonal Summer/Winter slot-swap judgment call, and the transcription
+    // itself in src/radioSchedules/kgps.js. streamUrl below is unchanged
+    // from the original investigation and confirmed live/playable
+    // independent of the dead metadata feed. A 60-day manual re-check
+    // against the live page is scheduled for 2026-11-17.
+    id: 'kgps',
+    displayName: 'KGPS',
+    cityState: 'Kingman, AZ',
+    homePage: 'https://www.kgps.org/',
+    provider: 'publishedschedule',
+    schedule: KGPS_SCHEDULE,
+    streamUrl: 'https://ice5.securenetsystems.net/KGPS',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM/WJWD/KEWR's staticCoverUrl above. Larry's own compass/GPS-pin
+    // graphic (a nod to the call sign), given the same shadow-free,
+    // rounded-square treatment as the other publishedschedule icons.
+    staticCoverUrl: '/kgps-icon.png',
+    staticCoverThumbUrl: '/kgps-icon-128.png'
   },
   {
     id: 'hopefm',
