@@ -607,22 +607,45 @@ async function handleDeleteChurch(request, env) {
 
 // ---- Featured video (Workers KV) ----
 //
-// A single admin-managed, non-scrolling banner for one occasional
-// non-live video link (e.g. a conference on-demand recording) - distinct
+// An admin-managed, non-scrolling banner for one or two occasional
+// non-live video links (e.g. a conference on-demand recording) - distinct
 // from the scrolling Conference/Radio tickers. Managed via "Manage
-// Featured Video" in the admin hamburger menu.
+// Featured Video" in the admin hamburger menu. Visitors only ever see at
+// most one of these at a time; a second one can be queued up to take
+// over automatically once the first goes offline.
 //
-// Stored in KV under FEATURED_VIDEO_KV_KEY as one JSON object:
-//   { linkText, url, onlineDate, offlineDate, version, updatedAt }
+// Stored in KV under FEATURED_VIDEO_KV_KEY as:
+//   { nextVersion, entries: [current, upNext?] }
+// where each entry is:
+//   { linkText, url, mediaType, mediaId, onlineDate, offlineDate,
+//     autoStart, version, updatedAt }
 //
-// version only increments when linkText or url actually changes (see
-// handleSaveFeaturedVideo below) - editing just the online/offline dates
-// on an otherwise-unchanged entry keeps the same version, so a visitor
-// who already dismissed this entry (see the frontend's
+// entries[0] ("current") always carries its own explicit onlineDate
+// (null meaning "already online", same meaning this field has always
+// had). entries[1] ("up next"), if present, either chains off
+// entries[0].offlineDate (autoStart: true, the default - its own
+// onlineDate isn't stored, just recomputed on every read by
+// resolveFeaturedVideoState) or carries its own explicit onlineDate when
+// autoStart is false, i.e. the admin deliberately wants a gap before it
+// starts (or a fixed start date regardless of when "current" actually
+// goes offline).
+//
+// The array is re-anchored on every save: whatever the admin submits as
+// "Now Showing" becomes entries[0] with its effective onlineDate baked
+// in explicitly (see handleGetFeaturedVideoAdmin, which hands that
+// resolved value back for the form to prefill/re-save), and "Up Next"
+// becomes entries[1]. This keeps the stored array at 0-2 entries always -
+// no history accumulates, and nothing later ever depends on an entry
+// that's already been overwritten.
+//
+// version only increments on an entry when its own linkText or url
+// actually changes (see resolveEntryVersion below) - editing just the
+// dates on an otherwise-unchanged entry keeps its version the same, so a
+// visitor who already dismissed that content (see the frontend's
 // cca-featured-video-dismissed-version localStorage key) does not see it
-// again purely because the admin extended its offline date. Entering
-// different linkText/url is treated as a new entry: version increments,
-// and every visitor sees it again regardless of any prior dismissal.
+// again purely because the admin extended its offline date. Versions are
+// drawn from a single incrementing nextVersion counter shared across
+// both slots so numbers never collide as content moves between them.
 //
 // onlineDate/offlineDate are plain YYYY-MM-DD date-picker values (no
 // time component) - compared lexically against "today" in the same
@@ -630,35 +653,117 @@ async function handleDeleteChurch(request, env) {
 
 const FEATURED_VIDEO_KV_KEY = 'featured-video';
 
-async function loadFeaturedVideo(env) {
+async function loadFeaturedVideoStore(env) {
   const raw = await env.CHURCHES_KV.get(FEATURED_VIDEO_KV_KEY);
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return { nextVersion: 1, entries: [] };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { nextVersion: 1, entries: [] };
+  }
+  // Backward compat: the old shape was a single record object, not
+  // { nextVersion, entries }. Treat it as a one-entry "current" queue,
+  // no upNext - migrated only in memory here, nothing is written back
+  // until the admin's next save.
+  if (!parsed || !Array.isArray(parsed.entries)) {
+    if (parsed && typeof parsed === 'object' && parsed.linkText) {
+      const media = parseYouTubeMedia(parsed.url);
+      const migrated = Object.assign({}, parsed, { mediaType: media.mediaType, mediaId: media.mediaId });
+      return { nextVersion: (parsed.version || 0) + 1, entries: [migrated] };
+    }
+    return { nextVersion: 1, entries: [] };
+  }
+  return parsed;
 }
 
-async function saveFeaturedVideoRecord(env, record) {
-  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(record));
+async function saveFeaturedVideoStore(env, store) {
+  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(store));
 }
 
 function todayDateString() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Visible = fully configured, at or past its online date (or none set),
-// and not yet past its offline date. Only the PUBLIC endpoint applies
-// this - the admin endpoint always returns the raw record so the Manage
-// Featured Video form can prefill even a scheduled or expired entry.
-function isFeaturedVideoVisible(record, today) {
-  if (!record || !record.linkText || !record.url || !record.offlineDate) return false;
-  if (record.onlineDate && record.onlineDate > today) return false;
-  if (record.offlineDate <= today) return false;
-  return true;
+// Recognizes a YouTube single-video link (any of the common URL shapes)
+// vs. a playlist link vs. anything else. mediaId is the bare video or
+// playlist id with no surrounding URL - exactly what the IFrame Player
+// API's videoId/list params expect. Anything not recognized as YouTube
+// falls back to mediaType 'other', which the public banner treats as a
+// plain link (opens in a new tab, no lightbox attempt).
+function parseYouTubeMedia(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return { mediaType: 'other', mediaId: null };
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch (err) {
+    return { mediaType: 'other', mediaId: null };
+  }
+  const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
+  const isYouTubeHost = host === 'youtube.com' || host === 'youtube-nocookie.com' || host === 'youtu.be';
+  if (!isYouTubeHost) return { mediaType: 'other', mediaId: null };
+
+  const v = u.searchParams.get('v');
+  if (v) return { mediaType: 'video', mediaId: v };
+
+  if (host === 'youtu.be' && u.pathname.length > 1) {
+    return { mediaType: 'video', mediaId: u.pathname.slice(1).split('/')[0] };
+  }
+
+  const embedMatch = u.pathname.match(/^\/embed\/([A-Za-z0-9_-]{6,})$/);
+  if (embedMatch) return { mediaType: 'video', mediaId: embedMatch[1] };
+
+  const list = u.searchParams.get('list');
+  if (list) return { mediaType: 'playlist', mediaId: list };
+
+  return { mediaType: 'other', mediaId: null };
+}
+
+// Walks the (at most 2-entry) stored queue and, given today's date,
+// figures out which entry is currently showing to visitors ("current")
+// and which one is on deck ("next"). entries[0] is current whenever
+// today falls in its [onlineDate, offlineDate) window; entries[1], if
+// present, only becomes current once entries[0] has gone offline -
+// either because it chains off that offline date (autoStart) or because
+// its own explicit onlineDate has arrived. Only one of the two can ever
+// be current at a time by construction: autoStart can't overlap, and an
+// explicit onlineDate is validated at save time to not overlap either.
+function resolveFeaturedVideoState(entries, today) {
+  const list = Array.isArray(entries) ? entries : [];
+  let current = null;
+  let next = null;
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i];
+    let effectiveOnlineDate;
+    if (i === 0) {
+      effectiveOnlineDate = entry.onlineDate || null;
+    } else {
+      const prev = list[i - 1];
+      effectiveOnlineDate = entry.autoStart === false ? (entry.onlineDate || null) : (prev.offlineDate || null);
+    }
+    const isOnline = !effectiveOnlineDate || effectiveOnlineDate <= today;
+    const isOffline = !!entry.offlineDate && entry.offlineDate <= today;
+    if (isOnline && !isOffline) {
+      if (!current) current = Object.assign({}, entry, { effectiveOnlineDate: effectiveOnlineDate });
+    } else if (!isOffline && !next) {
+      next = Object.assign({}, entry, { effectiveOnlineDate: effectiveOnlineDate });
+    }
+  }
+  return { current: current, next: next };
 }
 
 async function handleGetFeaturedVideo(request, env) {
-  const record = await loadFeaturedVideo(env);
+  const store = await loadFeaturedVideoStore(env);
   const today = todayDateString();
-  const visible = isFeaturedVideoVisible(record, today)
-    ? { linkText: record.linkText, url: record.url, version: record.version }
+  const record = resolveFeaturedVideoState(store.entries, today).current;
+  const visible = (record && record.linkText && record.url)
+    ? {
+        linkText: record.linkText,
+        url: record.url,
+        version: record.version,
+        mediaType: record.mediaType || 'other',
+        mediaId: record.mediaId || null
+      }
     : null;
   return new Response(JSON.stringify(visible), {
     headers: {
@@ -677,10 +782,92 @@ async function handleGetFeaturedVideoAdmin(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-  const record = await loadFeaturedVideo(env);
-  return new Response(JSON.stringify(record), {
+  const store = await loadFeaturedVideoStore(env);
+  const today = todayDateString();
+  const state = resolveFeaturedVideoState(store.entries, today);
+  // The admin form always edits the resolved current/next pair, not raw
+  // array positions - so a "Now Showing" that's chain-derived (its
+  // predecessor already expired) still shows its real effective online
+  // date here, ready to be re-saved explicitly.
+  return new Response(JSON.stringify({
+    current: state.current ? {
+      linkText: state.current.linkText,
+      url: state.current.url,
+      onlineDate: state.current.effectiveOnlineDate,
+      offlineDate: state.current.offlineDate
+    } : null,
+    upNext: state.next ? {
+      linkText: state.next.linkText,
+      url: state.next.url,
+      autoStart: state.next.autoStart !== false,
+      onlineDate: state.next.autoStart === false ? state.next.effectiveOnlineDate : null,
+      offlineDate: state.next.offlineDate
+    } : null
+  }), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
+}
+
+// Assigns a version to an incoming slot: reuses the previous version for
+// that slot if the content (linkText/url) is unchanged, otherwise draws
+// the next number off the shared counter. previousEntry is whatever
+// resolveFeaturedVideoState reported as current/next at save time - i.e.
+// exactly what the admin was shown - so this is always comparing against
+// the right prior content even after a chain-derived promotion.
+function resolveEntryVersion(previousEntry, linkText, url, counter) {
+  if (previousEntry && previousEntry.linkText === linkText && previousEntry.url === url && previousEntry.version) {
+    return previousEntry.version;
+  }
+  const version = counter.next;
+  counter.next += 1;
+  return version;
+}
+
+// Validates and normalizes one incoming slot ({linkText, url, onlineDate,
+// offlineDate, autoStart}). Only the "Up Next" slot passes
+// allowAutoStart: true, since "Now Showing" always carries its own plain
+// onlineDate (same as the single-entry form always has). minOnlineDate,
+// passed for "Up Next" only, blocks an explicit online date that would
+// overlap "Now Showing"'s run.
+function normalizeFeaturedVideoSlot(incoming, opts) {
+  const linkText = incoming && typeof incoming.linkText === 'string' ? incoming.linkText.trim() : '';
+  const url = incoming && typeof incoming.url === 'string' ? incoming.url.trim() : '';
+  const offlineDate = incoming && typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
+  const onlineDateRaw = incoming && typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate : null;
+  const autoStart = opts.allowAutoStart ? (incoming && incoming.autoStart === false ? false : true) : undefined;
+
+  const hasAnyContent = !!(linkText || url || offlineDate || onlineDateRaw);
+  if (!hasAnyContent) return { empty: true };
+
+  if (!linkText || !url || !offlineDate) {
+    return { error: opts.label + ': link text, URL, and offline date are required' };
+  }
+  if (opts.allowAutoStart && autoStart === false && !onlineDateRaw) {
+    return { error: opts.label + ': an online date is required when it does not start automatically' };
+  }
+
+  const onlineDate = !opts.allowAutoStart
+    ? onlineDateRaw
+    : (autoStart === false ? onlineDateRaw : null);
+
+  if (onlineDate && onlineDate >= offlineDate) {
+    return { error: opts.label + ': offline date must be after the online date' };
+  }
+  if (opts.minOnlineDate && onlineDate && onlineDate < opts.minOnlineDate) {
+    return { error: opts.label + ': online date can\'t be before "Now Showing" goes offline' };
+  }
+
+  const media = parseYouTubeMedia(url);
+  return {
+    empty: false,
+    linkText: linkText,
+    url: url,
+    onlineDate: onlineDate,
+    offlineDate: offlineDate,
+    autoStart: autoStart,
+    mediaType: media.mediaType,
+    mediaId: media.mediaId
+  };
 }
 
 async function handleSaveFeaturedVideo(request, env) {
@@ -701,42 +888,73 @@ async function handleSaveFeaturedVideo(request, env) {
     });
   }
 
-  const linkText = incoming && typeof incoming.linkText === 'string' ? incoming.linkText.trim() : '';
-  const targetUrl = incoming && typeof incoming.url === 'string' ? incoming.url.trim() : '';
-  const onlineDate = incoming && typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate : null;
-  const offlineDate = incoming && typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
-
-  if (!linkText || !targetUrl || !offlineDate) {
-    return new Response(JSON.stringify({ error: 'Link text, URL, and offline date are required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-  if (onlineDate && onlineDate >= offlineDate) {
-    return new Response(JSON.stringify({ error: 'Offline date must be after the online date' }), {
+  const currentSlot = normalizeFeaturedVideoSlot(incoming && incoming.current, {
+    label: 'Now Showing',
+    allowAutoStart: false
+  });
+  if (currentSlot.error) {
+    return new Response(JSON.stringify({ error: currentSlot.error }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  const existing = await loadFeaturedVideo(env);
-  // Version only moves when the actual content (link text or URL)
-  // changes - see the comment above FEATURED_VIDEO_KV_KEY.
-  const contentChanged = !existing || existing.linkText !== linkText || existing.url !== targetUrl;
-  const version = !existing ? 1 : (contentChanged ? existing.version + 1 : existing.version);
+  const upNextSlot = normalizeFeaturedVideoSlot(incoming && incoming.upNext, {
+    label: 'Up Next',
+    allowAutoStart: true,
+    minOnlineDate: !currentSlot.empty ? currentSlot.offlineDate : null
+  });
+  if (upNextSlot.error) {
+    return new Response(JSON.stringify({ error: upNextSlot.error }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  // Up Next can't chain off a "Now Showing" that doesn't exist - the
+  // admin either needs to fill in Now Showing first, or give Up Next its
+  // own explicit online date (turn off "start automatically").
+  if (!upNextSlot.empty && currentSlot.empty && upNextSlot.autoStart !== false) {
+    return new Response(JSON.stringify({ error: 'Up Next: turn off "start automatically" and set an online date, or fill in Now Showing first' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 
-  const record = {
-    linkText: linkText,
-    url: targetUrl,
-    onlineDate: onlineDate,
-    offlineDate: offlineDate,
-    version: version,
-    updatedAt: new Date().toISOString()
-  };
+  const store = await loadFeaturedVideoStore(env);
+  const today = todayDateString();
+  const priorState = resolveFeaturedVideoState(store.entries, today);
+  const counter = { next: store.nextVersion || 1 };
 
-  await saveFeaturedVideoRecord(env, record);
+  const entries = [];
+  if (!currentSlot.empty) {
+    entries.push({
+      linkText: currentSlot.linkText,
+      url: currentSlot.url,
+      mediaType: currentSlot.mediaType,
+      mediaId: currentSlot.mediaId,
+      onlineDate: currentSlot.onlineDate,
+      offlineDate: currentSlot.offlineDate,
+      version: resolveEntryVersion(priorState.current, currentSlot.linkText, currentSlot.url, counter),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  if (!upNextSlot.empty) {
+    entries.push({
+      linkText: upNextSlot.linkText,
+      url: upNextSlot.url,
+      mediaType: upNextSlot.mediaType,
+      mediaId: upNextSlot.mediaId,
+      onlineDate: upNextSlot.onlineDate,
+      offlineDate: upNextSlot.offlineDate,
+      autoStart: upNextSlot.autoStart !== false,
+      version: resolveEntryVersion(priorState.next, upNextSlot.linkText, upNextSlot.url, counter),
+      updatedAt: new Date().toISOString()
+    });
+  }
 
-  return new Response(JSON.stringify({ success: true, version: version }), {
+  await saveFeaturedVideoStore(env, { nextVersion: counter.next, entries: entries });
+
+  return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }

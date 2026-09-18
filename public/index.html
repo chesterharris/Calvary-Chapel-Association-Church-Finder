@@ -813,6 +813,31 @@
     margin: 0;
     cursor: pointer;
   }
+  /* "Now Showing" / "Up Next" section labels inside the Manage Featured
+     Video modal - a step up from .form-row label (which is for a single
+     field), used once per slot instead. The "Up Next" one also carries
+     a divider above it so the two slots read as clearly separate. */
+  .fv-slot-heading {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: var(--evergreen);
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 4px 0 10px;
+  }
+  .fv-slot-heading-upnext {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .fv-slot-optional {
+    text-transform: none;
+    font-weight: 400;
+    letter-spacing: normal;
+    font-size: 11px;
+    color: #888;
+  }
   .form-actions {
     display: flex;
     align-items: center;
@@ -2886,6 +2911,7 @@
   <div class="modal admin-modal">
     <h2>Manage Featured Video</h2>
     <form id="featuredVideoForm">
+      <div class="fv-slot-heading">Now Showing</div>
       <div class="form-row">
         <label for="fv_linktext">Link text *</label>
         <input id="fv_linktext" required maxlength="200" placeholder="e.g. Deep South Conference on demand videos">
@@ -2916,6 +2942,47 @@
           <span class="fv-link"><span id="featuredVideoPreviewText" class="fv-link-text"></span><span class="fv-external" aria-hidden="true">&#8599;</span></span>
         </div>
       </div>
+
+      <!-- Optional second slot - queued to take over automatically once
+           Now Showing goes offline (see fv2_autostart), unless the admin
+           unchecks that and gives it its own online date instead (a
+           deliberate gap, or a fixed start date). Left blank, nothing is
+           queued and Now Showing going offline just leaves the banner
+           empty, same as today. -->
+      <div class="fv-slot-heading fv-slot-heading-upnext">Up Next <span class="fv-slot-optional">(optional)</span></div>
+      <div class="form-row">
+        <label for="fv2_linktext">Link text</label>
+        <input id="fv2_linktext" maxlength="200" placeholder="e.g. Heartlands Conference Sessions">
+      </div>
+      <div class="form-row">
+        <label for="fv2_url">Target URL</label>
+        <input id="fv2_url" inputmode="url" placeholder="https://...">
+      </div>
+      <div class="form-row form-row-checkbox">
+        <label for="fv2_autostart">
+          <input id="fv2_autostart" type="checkbox" checked>
+          Start automatically when the video above goes offline
+        </label>
+      </div>
+      <div class="form-row-split">
+        <div class="form-row" id="fv2OnlineRow" style="display:none;">
+          <label for="fv2_online">Online date</label>
+          <input id="fv2_online" type="date">
+        </div>
+        <div class="form-row">
+          <label for="fv2_offline">Offline date</label>
+          <input id="fv2_offline" type="date">
+        </div>
+      </div>
+      <div id="featuredVideoUpNextDateError" class="form-error" style="display:none;">Check the Up Next dates above - offline must be after online, and (if not starting automatically) online can't be before Now Showing's offline date.</div>
+      <div class="form-row">
+        <label>Up Next preview</label>
+        <div id="featuredVideoUpNextPreview" class="featured-video-banner featured-video-preview" style="display:none;">
+          <span class="fv-badge">Featured video</span>
+          <span class="fv-link"><span id="featuredVideoUpNextPreviewText" class="fv-link-text"></span><span class="fv-external" aria-hidden="true">&#8599;</span></span>
+        </div>
+      </div>
+
       <div id="featuredVideoStatus" class="side-panel-sync-status"></div>
       <div class="form-actions">
         <button type="button" id="cancelFeaturedVideoBtn" class="btn btn-outline">Cancel</button>
@@ -4595,24 +4662,36 @@
   //
   // The IFrame API loads asynchronously (see the <script> tag above) and
   // calls onYouTubeIframeAPIReady() itself once ready - if a church card
-  // gets clicked before that fires, pendingLightboxVideoId holds the
-  // videoId so it plays as soon as the player exists instead of the
-  // click silently doing nothing.
+  // gets clicked before that fires, pendingLightboxVideoId/
+  // pendingLightboxPlaylistId hold whichever one was requested so it
+  // plays as soon as the player exists instead of the click silently
+  // doing nothing.
+  //
+  // playlistId is used by the Featured Video banner only (see its click
+  // handler above) - every other caller (Live Now cards, the map
+  // popup's live badge) only ever passes a videoId, so those call sites
+  // didn't need to change when this grew playlist support.
   let ytLightboxPlayer = null;
   let ytApiReady = false;
   let pendingLightboxVideoId = null;
+  let pendingLightboxPlaylistId = null;
   let currentLightboxVideoId = null;
+  let currentLightboxPlaylistId = null;
 
   // Safety net for a church we thought allowed embedding (embedAllowed
   // true, or not checked yet) but genuinely doesn't - error 101/150 is
   // YouTube's own "owner does not allow this to be played in embedded
   // players" code. Rather than a dead black box, fall back to exactly
-  // the same window.open the non-embeddable path already uses.
+  // the same window.open the non-embeddable path already uses (a
+  // playlist link if that's what was playing, otherwise a single video).
   function handleLightboxPlayerError(event) {
     if (event.data === 101 || event.data === 150 || event.data === 100) {
       const videoId = currentLightboxVideoId;
+      const playlistId = currentLightboxPlaylistId;
       closeVideoLightbox();
-      if (videoId) {
+      if (playlistId) {
+        window.open('https://www.youtube.com/playlist?list=' + encodeURIComponent(playlistId), '_blank', 'noopener');
+      } else if (videoId) {
         window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId), '_blank', 'noopener');
       }
     }
@@ -4635,29 +4714,45 @@
   // class of bug - the CSS on #videoLightboxPlayer's generated iframe
   // (position:absolute; inset:0; width/height:100%) is what actually
   // controls its visible size regardless of these.
-  function createLightboxPlayer(videoId) {
-    currentLightboxVideoId = videoId;
-    ytLightboxPlayer = new YT.Player('videoLightboxPlayer', {
+  //
+  // playlistId (when given, e.g. from the Featured Video banner) takes a
+  // different playerVars shape - listType/list instead of a bare
+  // videoId - and YouTube renders its own playlist rail alongside the
+  // video inside the same iframe; no other change to this lightbox's
+  // chrome is needed for that.
+  function createLightboxPlayer(videoId, playlistId) {
+    currentLightboxVideoId = videoId || null;
+    currentLightboxPlaylistId = playlistId || null;
+    const playerVars = { autoplay: 1, playsinline: 1, rel: 0 };
+    const opts = {
       host: 'https://www.youtube-nocookie.com',
       width: '640',
       height: '360',
-      videoId: videoId,
-      playerVars: { autoplay: 1, playsinline: 1, rel: 0 },
+      playerVars: playerVars,
       events: { onError: handleLightboxPlayerError }
-    });
+    };
+    if (playlistId) {
+      playerVars.listType = 'playlist';
+      playerVars.list = playlistId;
+    } else {
+      opts.videoId = videoId;
+    }
+    ytLightboxPlayer = new YT.Player('videoLightboxPlayer', opts);
   }
 
   function onYouTubeIframeAPIReady() {
     ytApiReady = true;
-    // Only reached if the user managed to click a Live Now card before
-    // the (usually near-instant) IFrame API script finished loading -
-    // openLiveVideoLightbox already made the overlay visible and stashed
-    // the videoId below in that case, so the container is safely visible
-    // by the time we get here too.
-    if (pendingLightboxVideoId) {
+    // Only reached if the user managed to click a Live Now card (or the
+    // Featured Video banner) before the (usually near-instant) IFrame
+    // API script finished loading - openLiveVideoLightbox already made
+    // the overlay visible and stashed the id below in that case, so the
+    // container is safely visible by the time we get here too.
+    if (pendingLightboxVideoId || pendingLightboxPlaylistId) {
       const videoId = pendingLightboxVideoId;
+      const playlistId = pendingLightboxPlaylistId;
       pendingLightboxVideoId = null;
-      createLightboxPlayer(videoId);
+      pendingLightboxPlaylistId = null;
+      createLightboxPlayer(videoId, playlistId);
     }
   }
   // Assigned onto window explicitly - the IFrame API looks up this exact
@@ -4666,32 +4761,39 @@
   // contexts. Harmless belt-and-suspenders here either way.
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-  function openLiveVideoLightbox(videoId) {
+  function openLiveVideoLightbox(videoId, playlistId) {
     // Made visible BEFORE any player work below - createLightboxPlayer's
     // first-ever call depends on the container already being visible at
     // that point (see the comment on createLightboxPlayer above).
     document.getElementById('videoLightboxOverlay').style.display = 'flex';
-    currentLightboxVideoId = videoId;
+    currentLightboxVideoId = videoId || null;
+    currentLightboxPlaylistId = playlistId || null;
     if (!ytApiReady) {
       // IFrame API script hasn't finished loading yet (unusual, but
       // possible on a slow connection) - onYouTubeIframeAPIReady picks
       // this up and builds the player once it fires.
-      pendingLightboxVideoId = videoId;
+      pendingLightboxVideoId = videoId || null;
+      pendingLightboxPlaylistId = playlistId || null;
       return;
     }
     if (!ytLightboxPlayer) {
-      createLightboxPlayer(videoId);
-    } else if (typeof ytLightboxPlayer.loadVideoById === 'function') {
+      createLightboxPlayer(videoId, playlistId);
+    } else if (playlistId && typeof ytLightboxPlayer.loadPlaylist === 'function') {
+      ytLightboxPlayer.loadPlaylist({ list: playlistId, listType: 'playlist' });
+    } else if (!playlistId && typeof ytLightboxPlayer.loadVideoById === 'function') {
       ytLightboxPlayer.loadVideoById(videoId);
     } else {
-      pendingLightboxVideoId = videoId;
+      pendingLightboxVideoId = videoId || null;
+      pendingLightboxPlaylistId = playlistId || null;
     }
   }
 
   function closeVideoLightbox() {
     document.getElementById('videoLightboxOverlay').style.display = 'none';
     pendingLightboxVideoId = null;
+    pendingLightboxPlaylistId = null;
     currentLightboxVideoId = null;
+    currentLightboxPlaylistId = null;
     // stopVideo(), not pauseVideo() - these are live broadcasts, not
     // on-demand video, and pausing a live stream can leave the player
     // holding an awkward buffered position rather than cleanly ending
@@ -5594,6 +5696,11 @@
         if (dismissedVersion !== null && Number(dismissedVersion) === data.version) return;
         textEl.textContent = data.linkText;
         linkEl.href = data.url;
+        // mediaType/mediaId (resolved server-side from the admin-entered
+        // URL - see parseYouTubeMedia in index.js) let the click handler
+        // below decide whether to open the lightbox, and in which mode.
+        linkEl.dataset.mediaType = data.mediaType || 'other';
+        linkEl.dataset.mediaId = data.mediaId || '';
         banner.dataset.version = String(data.version);
         banner.style.display = 'flex';
       })
@@ -5604,9 +5711,32 @@
       try { if (version) localStorage.setItem(DISMISS_KEY, version); } catch (err) { /* nothing to persist - it'll just show again next load */ }
       banner.style.display = 'none';
     });
+
+    // Same lightbox-or-plain-link fallback the map popup's live badge
+    // uses (see wirePopupButtons below) - a recognized YouTube video or
+    // playlist opens in the lightbox instead of leaving the page;
+    // anything else just follows the href in a new tab like it always
+    // has (e.g. a non-YouTube link, or before the fetch above resolves).
+    linkEl.addEventListener('click', function(e) {
+      var mediaType = linkEl.dataset.mediaType;
+      var mediaId = linkEl.dataset.mediaId;
+      if (mediaType === 'video' && mediaId) {
+        e.preventDefault();
+        openLiveVideoLightbox(mediaId);
+      } else if (mediaType === 'playlist' && mediaId) {
+        e.preventDefault();
+        openLiveVideoLightbox(null, mediaId);
+      }
+    });
   })();
 
   // ---- Manage Featured Video (admin) ----
+  // Two slots: "Now Showing" (fv_*, required - same fields the form has
+  // always had) and "Up Next" (fv2_*, entirely optional). Up Next either
+  // chains off Now Showing's offline date (fv2_autostart checked, the
+  // default) or carries its own explicit online date once unchecked -
+  // see the comment above FEATURED_VIDEO_KV_KEY in index.js for how the
+  // server resolves and re-anchors these on every save.
   (function() {
     var modal = document.getElementById('featuredVideoModal');
     var form = document.getElementById('featuredVideoForm');
@@ -5617,6 +5747,17 @@
     var dateError = document.getElementById('featuredVideoDateError');
     var preview = document.getElementById('featuredVideoPreview');
     var previewText = document.getElementById('featuredVideoPreviewText');
+
+    var linkTextInput2 = document.getElementById('fv2_linktext');
+    var urlInput2 = document.getElementById('fv2_url');
+    var autoStartInput = document.getElementById('fv2_autostart');
+    var onlineRow2 = document.getElementById('fv2OnlineRow');
+    var onlineInput2 = document.getElementById('fv2_online');
+    var offlineInput2 = document.getElementById('fv2_offline');
+    var dateError2 = document.getElementById('featuredVideoUpNextDateError');
+    var preview2 = document.getElementById('featuredVideoUpNextPreview');
+    var previewText2 = document.getElementById('featuredVideoUpNextPreviewText');
+
     var statusEl = document.getElementById('featuredVideoStatus');
     var saveBtn = document.getElementById('saveFeaturedVideoBtn');
 
@@ -5633,6 +5774,28 @@
       el.addEventListener('input', updatePreview);
     });
 
+    function updateUpNextPreview() {
+      var text = linkTextInput2.value.trim();
+      if (text) {
+        previewText2.textContent = text;
+        preview2.style.display = 'flex';
+      } else {
+        preview2.style.display = 'none';
+      }
+    }
+    [linkTextInput2, urlInput2].forEach(function(el) {
+      el.addEventListener('input', updateUpNextPreview);
+    });
+
+    function syncAutoStartUi() {
+      onlineRow2.style.display = autoStartInput.checked ? 'none' : '';
+      if (autoStartInput.checked) onlineInput2.value = '';
+    }
+    autoStartInput.addEventListener('change', function() {
+      syncAutoStartUi();
+      validateUpNextDates();
+    });
+
     function validateDates() {
       var online = onlineInput.value;
       var offline = offlineInput.value;
@@ -5643,22 +5806,51 @@
     onlineInput.addEventListener('change', validateDates);
     offlineInput.addEventListener('change', validateDates);
 
+    function validateUpNextDates() {
+      var online = autoStartInput.checked ? '' : onlineInput2.value;
+      var offline = offlineInput2.value;
+      var nowShowingOffline = offlineInput.value;
+      var invalid = !!(
+        (online && offline && online >= offline) ||
+        (online && nowShowingOffline && online < nowShowingOffline)
+      );
+      dateError2.style.display = invalid ? 'block' : 'none';
+      return !invalid;
+    }
+    onlineInput2.addEventListener('change', validateUpNextDates);
+    offlineInput2.addEventListener('change', validateUpNextDates);
+    offlineInput.addEventListener('change', validateUpNextDates);
+
     async function openFeaturedVideoModal() {
       statusEl.textContent = '';
       dateError.style.display = 'none';
+      dateError2.style.display = 'none';
       form.reset();
       preview.style.display = 'none';
+      preview2.style.display = 'none';
+      syncAutoStartUi();
       modal.style.display = 'flex';
       try {
         var res = await fetch('/api/featured-video/admin', { credentials: 'include', cache: 'no-store' });
         if (res.ok) {
-          var record = await res.json();
-          if (record) {
-            linkTextInput.value = record.linkText || '';
-            urlInput.value = record.url || '';
-            onlineInput.value = record.onlineDate || '';
-            offlineInput.value = record.offlineDate || '';
+          var data = await res.json();
+          var current = data && data.current;
+          var upNext = data && data.upNext;
+          if (current) {
+            linkTextInput.value = current.linkText || '';
+            urlInput.value = current.url || '';
+            onlineInput.value = current.onlineDate || '';
+            offlineInput.value = current.offlineDate || '';
             updatePreview();
+          }
+          if (upNext) {
+            linkTextInput2.value = upNext.linkText || '';
+            urlInput2.value = upNext.url || '';
+            autoStartInput.checked = upNext.autoStart !== false;
+            onlineInput2.value = upNext.onlineDate || '';
+            offlineInput2.value = upNext.offlineDate || '';
+            syncAutoStartUi();
+            updateUpNextPreview();
           }
         }
       } catch (err) {
@@ -5678,13 +5870,22 @@
 
     form.addEventListener('submit', async function(e) {
       e.preventDefault();
-      if (!validateDates()) return;
+      if (!validateDates() || !validateUpNextDates()) return;
 
-      var entry = {
-        linkText: linkTextInput.value.trim(),
-        url: urlInput.value.trim(),
-        onlineDate: onlineInput.value || null,
-        offlineDate: offlineInput.value
+      var payload = {
+        current: {
+          linkText: linkTextInput.value.trim(),
+          url: urlInput.value.trim(),
+          onlineDate: onlineInput.value || null,
+          offlineDate: offlineInput.value
+        },
+        upNext: {
+          linkText: linkTextInput2.value.trim(),
+          url: urlInput2.value.trim(),
+          autoStart: autoStartInput.checked,
+          onlineDate: autoStartInput.checked ? null : (onlineInput2.value || null),
+          offlineDate: offlineInput2.value
+        }
       };
 
       var originalBtnText = saveBtn.textContent;
@@ -5696,7 +5897,7 @@
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(entry)
+          body: JSON.stringify(payload)
         });
         var data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || 'Save failed');
