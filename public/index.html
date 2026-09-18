@@ -6082,13 +6082,20 @@
   const RADIO_TICKER_SEP = '<span class="radio-ticker-sep" aria-hidden="true">' + RADIO_TICKER_ICON_SVG + '</span>';
 
   // Favorites live entirely client-side (no visitor accounts exist) - a
-  // plain array of displayNames in localStorage. Wrapped in try/catch
-  // since some browsers/private-browsing modes can throw on storage
-  // access; failing gracefully to "no favorites persisted" beats breaking
-  // the ticker entirely over a nice-to-have preference.
+  // plain array of station IDs in localStorage. Keyed by station.id (a
+  // stable, never-displayed identifier - see the RADIO_STATIONS comment
+  // block in src/index.js), NOT displayName - changed 2026-09-17 so that
+  // renaming a station's display text (e.g. adding its call sign/city)
+  // never silently drops it out of someone's saved ticker. Any favorites
+  // saved before this change were keyed by the old display strings and
+  // won't match anymore - acceptable one-time reset, called out explicitly
+  // since traffic was still effectively zero at the time. Wrapped in
+  // try/catch since some browsers/private-browsing modes can throw on
+  // storage access; failing gracefully to "no favorites persisted" beats
+  // breaking the ticker entirely over a nice-to-have preference.
   const RADIO_FAVORITES_STORAGE_KEY = 'ccaFinderRadioFavorites';
 
-  function getFavoriteStationNames() {
+  function getFavoriteStationIds() {
     try {
       const raw = localStorage.getItem(RADIO_FAVORITES_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
@@ -6098,38 +6105,38 @@
     }
   }
 
-  function setFavoriteStationNames(names) {
+  function setFavoriteStationIds(ids) {
     try {
-      localStorage.setItem(RADIO_FAVORITES_STORAGE_KEY, JSON.stringify(names));
+      localStorage.setItem(RADIO_FAVORITES_STORAGE_KEY, JSON.stringify(ids));
     } catch (err) {
       // Ignore - favoriting just won't persist this session.
     }
   }
 
-  function isStationFavorited(displayName) {
-    return getFavoriteStationNames().indexOf(displayName) !== -1;
+  function isStationFavorited(id) {
+    return getFavoriteStationIds().indexOf(id) !== -1;
   }
 
   // Returns the updated favorites array so callers can react immediately
   // (e.g. re-render the ticker) without a second storage read.
-  function toggleStationFavorite(displayName) {
-    const current = getFavoriteStationNames();
-    const idx = current.indexOf(displayName);
+  function toggleStationFavorite(id) {
+    const current = getFavoriteStationIds();
+    const idx = current.indexOf(id);
     if (idx === -1) {
-      current.push(displayName);
+      current.push(id);
     } else {
       current.splice(idx, 1);
     }
-    setFavoriteStationNames(current);
+    setFavoriteStationIds(current);
     return current;
   }
 
   function filterToFavoriteStations(stations) {
-    const favorites = getFavoriteStationNames();
+    const favorites = getFavoriteStationIds();
     if (!favorites.length) return [];
     const favSet = {};
     favorites.forEach(function(n) { favSet[n] = true; });
-    return stations.filter(function(s) { return favSet[s.displayName]; });
+    return stations.filter(function(s) { return favSet[s.id]; });
   }
 
   // No artist (e.g. a teaching program rather than a song) -> title alone,
@@ -6162,13 +6169,14 @@
   // identical programming a lot of the time, but not always - when their
   // now-playing title+artist genuinely match, showing both in the ticker
   // is redundant. This is a deliberate one-off special case for exactly
-  // these two displayNames, not a general "auto-dedupe any stations"
-  // mechanism - if more stations end up in a similar simulcast
-  // relationship later, this would need generalizing rather than just
-  // adding more names here.
+  // these two station IDs (matched by id, not displayName, so a future
+  // display-name rename doesn't quietly break this), not a general
+  // "auto-dedupe any stations" mechanism - if more stations end up in a
+  // similar simulcast relationship later, this would need generalizing
+  // rather than just adding more ids here.
   function filterDuplicateSisterStations(stations) {
-    const tn = stations.find(function(s) { return s.displayName === 'The Truth (TN)'; });
-    const ga = stations.find(function(s) { return s.displayName === 'The Truth (GA)'; });
+    const tn = stations.find(function(s) { return s.id === 'truth-tn'; });
+    const ga = stations.find(function(s) { return s.id === 'truth-ga'; });
     if (!tn || !ga) return stations;
 
     const sameTitle = (tn.title || '').trim().toLowerCase() === (ga.title || '').trim().toLowerCase();
@@ -6248,9 +6256,9 @@
     // every poll - unlike the ticker's marquee, there's no scroll animation
     // here to protect from a jarring restart, so this doesn't wait for a
     // lap boundary the way the ticker's own visual update does below.
-    if (currentPlayingDisplayName && stations) {
+    if (currentPlayingId && stations) {
       const stillPlaying = stations.find(function(s) {
-        return s.displayName === currentPlayingDisplayName;
+        return s.id === currentPlayingId;
       });
       if (stillPlaying) updateMiniPlayerNowPlaying(stillPlaying);
     }
@@ -6280,7 +6288,7 @@
     }
 
     const signature = stations.map(function(s) {
-      return s.displayName + '|' + (s.title || '') + '|' + (s.artist || '');
+      return s.id + '|' + (s.title || '') + '|' + (s.artist || '');
     }).join('||');
     if (signature === lastRadioSignature) return;
     lastRadioSignature = signature;
@@ -6341,12 +6349,14 @@
   });
 
   // Tracks which station is currently loaded in the mini player (by
-  // displayName, which is unique per station), so renderRadioTicker below
-  // can find that station's fresh data on every poll and keep the mini
-  // player's displayed text in sync - otherwise it would keep showing
-  // whatever program was airing at the moment someone clicked Play,
-  // confusingly outliving the actual show change on the real stream.
-  let currentPlayingDisplayName = null;
+  // station.id - a stable identifier, unlike displayName which can now be
+  // renamed - see the RADIO_FAVORITES_STORAGE_KEY comment above), so
+  // renderRadioTicker below can find that station's fresh data on every
+  // poll and keep the mini player's displayed text in sync - otherwise it
+  // would keep showing whatever program was airing at the moment someone
+  // clicked Play, confusingly outliving the actual show change on the real
+  // stream.
+  let currentPlayingId = null;
 
   // Updates the mini player's visible text/cover for a given station's
   // current data. Shared by playStation() (initial load) and the periodic
@@ -6457,18 +6467,20 @@
     }
   }
 
-  // Alphabetical across every configured station (favorited or not) - a
-  // stable, predictable order for the CarPlay/lock-screen previous/next
-  // buttons, independent of the mobile picker's separate favorites-first
-  // grouping. station.displayName is unique, so this is safe to re-derive
-  // from radioStations on every press rather than caching an order that
-  // could go stale as the station list changes.
+  // Alphabetical (by displayName, since this is purely about a sensible
+  // browsing order, not identity) across every configured station
+  // (favorited or not) - a stable, predictable order for the CarPlay/
+  // lock-screen previous/next buttons, independent of the mobile picker's
+  // separate favorites-first grouping. station.id is unique, so matching
+  // "which one is current" against it (rather than displayName) is safe to
+  // re-derive from radioStations on every press rather than caching an
+  // order that could go stale as the station list changes.
   function getAdjacentStation(direction) {
     if (!radioStations.length) return null;
     const ordered = radioStations.slice().sort(function(a, b) {
       return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase());
     });
-    const idx = ordered.findIndex(function(s) { return s.displayName === currentPlayingDisplayName; });
+    const idx = ordered.findIndex(function(s) { return s.id === currentPlayingId; });
     if (idx === -1) return ordered[0];
     return ordered[(idx + direction + ordered.length) % ordered.length];
   }
@@ -6616,12 +6628,12 @@
   // manual close, or the countdown hitting zero) leave things in exactly
   // the same end state.
   function stopRadioPlayback() {
-    const wasPlayingName = currentPlayingDisplayName;
+    const wasPlayingId = currentPlayingId;
     radioAudio.pause();
     radioAudio.removeAttribute('src');
     radioAudio.load();
     hideMiniPlayer();
-    currentPlayingDisplayName = null;
+    currentPlayingId = null;
     cancelRadioTimer();
     // Otherwise CarPlay/Lock Screen/Control Center would keep showing the
     // last-playing station as still active with nothing actually playing.
@@ -6634,7 +6646,7 @@
     // vanished" treatment as picking a different station (see the
     // mobileRadioPicker click handler), just in reverse.
     if (document.body.classList.contains('mobile-picker-open')) {
-      renderMobileRadioPicker({ returningStationName: wasPlayingName });
+      renderMobileRadioPicker({ returningStationId: wasPlayingId });
     }
   }
 
@@ -6752,7 +6764,7 @@
       // Autoplay can be blocked by the browser - the play/pause button still
       // reflects real state via the audio element's own play/pause events below.
     });
-    currentPlayingDisplayName = station.displayName;
+    currentPlayingId = station.id;
     updateMiniPlayerNowPlaying(station);
     showMiniPlayer();
   }
@@ -6767,23 +6779,24 @@
   // so this needs zero backend involvement.
   let radioBrowseSearchQuery = '';
 
-  // TODO: fill in with the actual hand-picked displayNames once decided -
-  // must match RADIO_STATIONS entries in src/index.js exactly (case and
-  // punctuation matter, since favorites are matched by displayName).
-  const RADIO_STARTER_PACK_NAMES = [
-    'CCVB',
-    'The Truth (TN)',
-    'Radio by Grace',
-    'Renew FM',
-    'KSGR',
-    'WIAM',
-    'TrueFM',
-    'KLHT FM',
-    'Real Hope Radio',
-    'Truth FM',
-    'DOVE FM',
-    'EQUIP FM',
-    'CC UK Radio'
+  // Station IDs (see src/index.js's RADIO_STATIONS id field), NOT display
+  // names - changed 2026-09-17 alongside the favorites-storage switch to
+  // id-keying, so this list keeps working across a display-name rename
+  // without needing to be hand-updated in lockstep every time one happens.
+  const RADIO_STARTER_PACK_IDS = [
+    'ccvb',
+    'truth-tn',
+    'radiobygrace',
+    'renewfm',
+    'ksgr',
+    'wiam',
+    'truefm',
+    'klht-fm',
+    'realhoperadio',
+    'truthfm',
+    'dovefm',
+    'equipfm',
+    'ccukradio'
   ];
 
   // Computed once when the panel OPENS, then held fixed for the rest of
@@ -6796,15 +6809,19 @@
   let radioBrowseFrozenOrder = null;
 
   function computeRadioBrowseOrder() {
-    const favorites = getFavoriteStationNames();
+    const favorites = getFavoriteStationIds();
     const favSet = {};
     favorites.forEach(function(n) { favSet[n] = true; });
-    const byNameAlpha = function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); };
-    const favNames = radioStations.filter(function(s) { return favSet[s.displayName]; })
-      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
-    const otherNames = radioStations.filter(function(s) { return !favSet[s.displayName]; })
-      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
-    return favNames.concat(otherNames);
+    // Frozen order is a list of IDs (stable across a rename), but the sort
+    // itself is still by the human-readable displayName - sorting by id
+    // (an internal slug) would NOT match the alphabetical-by-visible-name
+    // order a visitor expects to see.
+    const byDisplayNameAlpha = function(a, b) { return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()); };
+    const favIds = radioStations.filter(function(s) { return favSet[s.id]; })
+      .sort(byDisplayNameAlpha).map(function(s) { return s.id; });
+    const otherIds = radioStations.filter(function(s) { return !favSet[s.id]; })
+      .sort(byDisplayNameAlpha).map(function(s) { return s.id; });
+    return favIds.concat(otherIds);
   }
 
   // Applies the frozen order to whatever the current radioStations list
@@ -6815,12 +6832,12 @@
   // dropping a station that wasn't part of the original snapshot.
   function getOrderedRadioStations() {
     if (!radioBrowseFrozenOrder) return radioStations.slice();
-    const byName = {};
-    radioStations.forEach(function(s) { byName[s.displayName] = s; });
-    const ordered = radioBrowseFrozenOrder.map(function(name) { return byName[name]; }).filter(Boolean);
+    const byId = {};
+    radioStations.forEach(function(s) { byId[s.id] = s; });
+    const ordered = radioBrowseFrozenOrder.map(function(id) { return byId[id]; }).filter(Boolean);
     const seen = {};
-    ordered.forEach(function(s) { seen[s.displayName] = true; });
-    const extras = radioStations.filter(function(s) { return !seen[s.displayName]; })
+    ordered.forEach(function(s) { seen[s.id] = true; });
+    const extras = radioStations.filter(function(s) { return !seen[s.id]; })
       .sort(function(a, b) { return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()); });
     return ordered.concat(extras);
   }
@@ -6861,15 +6878,15 @@
     document.getElementById('radioBrowseStarterConfirm').style.display = 'none';
     let updated;
     if (mode === 'merge') {
-      const current = getFavoriteStationNames();
+      const current = getFavoriteStationIds();
       const set = {};
       current.forEach(function(n) { set[n] = true; });
-      RADIO_STARTER_PACK_NAMES.forEach(function(n) { set[n] = true; });
+      RADIO_STARTER_PACK_IDS.forEach(function(n) { set[n] = true; });
       updated = Object.keys(set);
     } else {
-      updated = RADIO_STARTER_PACK_NAMES.slice();
+      updated = RADIO_STARTER_PACK_IDS.slice();
     }
-    setFavoriteStationNames(updated);
+    setFavoriteStationIds(updated);
     renderRadioBrowsePanel();
     refreshRadioTickerForFavoritesChange();
     showRadioBrowseStarterMsg(mode === 'merge' ? 'Added the starter stations to your list.' : 'Replaced your list with the starter selection.');
@@ -6890,7 +6907,7 @@
     // visible against this header's brass background.
     if (titleEl) titleEl.textContent = 'All ' + radioStations.length + ' Radio Stations';
 
-    const favorites = getFavoriteStationNames();
+    const favorites = getFavoriteStationIds();
     favCountEl.textContent = favorites.length
       ? ('\u2605 ' + favorites.length + (isMobilePickerBreakpoint() ? ' in ticker' : ' in your ticker'))
       : '';
@@ -6907,7 +6924,7 @@
     }
 
     listEl.innerHTML = filtered.map(function(s) {
-      const isFav = favorites.indexOf(s.displayName) !== -1;
+      const isFav = favorites.indexOf(s.id) !== -1;
       // cityState/homePage are optional, display-only fields (see
       // RADIO_STATIONS comment block) - only shown here in the browse
       // panel, never in the ticker. Gracefully omitted for any station
@@ -6919,13 +6936,13 @@
             (s.homePage ? '<a href="' + escapeHtml(s.homePage) + '" target="_blank" rel="noopener noreferrer" class="radio-browse-homepage-link">Station website</a>' : '') +
           '</div>'
         : '';
-      return '<div class="radio-browse-row" data-station-name="' + escapeHtml(s.displayName) + '">' +
+      return '<div class="radio-browse-row" data-station-id="' + escapeHtml(s.id) + '">' +
         '<div class="radio-browse-row-info">' +
           '<div class="radio-browse-row-name">' + escapeHtml(s.displayName) + '</div>' +
           '<div class="radio-browse-row-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
           metaLine +
         '</div>' +
-        '<button type="button" class="radio-browse-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
+        '<button type="button" class="radio-browse-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.id) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
           buildFavoriteStarSvg(isFav) +
         '</button>' +
       '</div>';
@@ -6945,7 +6962,7 @@
     // static HTML that would silently go stale if the starter pack's size
     // ever changes.
     document.getElementById('radioBrowseStarterLink').textContent =
-      'New here? Add a starter set of ' + RADIO_STARTER_PACK_NAMES.length + ' stations to your ticker - swap any of them out later.';
+      'New here? Add a starter set of ' + RADIO_STARTER_PACK_IDS.length + ' stations to your ticker - swap any of them out later.';
     // Freeze the display order for this viewing session - see
     // radioBrowseFrozenOrder's comment above for why this only happens
     // here, not on every re-render while the panel stays open.
@@ -7000,7 +7017,7 @@
     }
     const row = e.target.closest('.radio-browse-row');
     if (row) {
-      const station = radioStations.find(function(s) { return s.displayName === row.getAttribute('data-station-name'); });
+      const station = radioStations.find(function(s) { return s.id === row.getAttribute('data-station-id'); });
       if (station) playStation(station);
     }
   });
@@ -7010,7 +7027,7 @@
     // No ambiguity to resolve if they have nothing to lose - apply
     // immediately rather than asking a question with only one sensible
     // answer.
-    if (!getFavoriteStationNames().length) {
+    if (!getFavoriteStationIds().length) {
       applyStarterPack('replace');
     } else {
       document.getElementById('radioBrowseStarterConfirm').style.display = 'flex';
@@ -7062,13 +7079,16 @@
   // the dock/return entrance animation (see the click handler and
   // stopRadioPlayback below) if one happened to still be mid-flight.
   function updateMobilePickerPlayIcon() {
-    if (!document.body.classList.contains('mobile-picker-open') || !currentPlayingDisplayName) return;
-    const btn = document.querySelector('#mobileRadioPicker .mp-row[data-station-name="' + CSS.escape(currentPlayingDisplayName) + '"] .mp-playbtn');
+    if (!document.body.classList.contains('mobile-picker-open') || !currentPlayingId) return;
+    const btn = document.querySelector('#mobileRadioPicker .mp-row[data-station-id="' + CSS.escape(currentPlayingId) + '"] .mp-playbtn');
     if (!btn) return;
     const isAudibly = !radioAudio.paused;
     btn.classList.toggle('is-playing', isAudibly);
     btn.innerHTML = isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG;
-    btn.setAttribute('aria-label', (isAudibly ? 'Pause ' : 'Play ') + currentPlayingDisplayName);
+    // aria-label wants the human-readable name, not the id - look the
+    // station up rather than assuming currentPlayingId is display text.
+    const activeStation = radioStations.find(function(s) { return s.id === currentPlayingId; });
+    btn.setAttribute('aria-label', (isAudibly ? 'Pause ' : 'Play ') + (activeStation ? activeStation.displayName : ''));
   }
 
   radioAudio.addEventListener('play', function() {
@@ -7117,36 +7137,40 @@
   // getMobilePickerOrderedStations() below so it can jump to the top the
   // instant playback starts without waiting for a re-freeze.
   function computeMobilePickerBaseOrder() {
-    const favorites = getFavoriteStationNames();
+    const favorites = getFavoriteStationIds();
     const favSet = {};
     favorites.forEach(function(n) { favSet[n] = true; });
-    const byNameAlpha = function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); };
-    const favNames = radioStations.filter(function(s) { return favSet[s.displayName]; })
-      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
-    const otherNames = radioStations.filter(function(s) { return !favSet[s.displayName]; })
-      .map(function(s) { return s.displayName; }).sort(byNameAlpha);
-    return favNames.concat(otherNames);
+    // Sort by the human-readable displayName (what a visitor actually sees),
+    // but the frozen order array itself holds ids - the stable identity - so
+    // a station stays put in the list even if its displayName is edited
+    // later on the backend.
+    const byDisplayNameAlpha = function(a, b) { return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()); };
+    const favIds = radioStations.filter(function(s) { return favSet[s.id]; })
+      .sort(byDisplayNameAlpha).map(function(s) { return s.id; });
+    const otherIds = radioStations.filter(function(s) { return !favSet[s.id]; })
+      .sort(byDisplayNameAlpha).map(function(s) { return s.id; });
+    return favIds.concat(otherIds);
   }
 
   function getMobilePickerOrderedStations() {
     if (!mobilePickerFrozenOrder) mobilePickerFrozenOrder = computeMobilePickerBaseOrder();
-    const byName = {};
-    radioStations.forEach(function(s) { byName[s.displayName] = s; });
-    let names = mobilePickerFrozenOrder.filter(function(n) { return byName[n]; });
+    const byId = {};
+    radioStations.forEach(function(s) { byId[s.id] = s; });
+    let ids = mobilePickerFrozenOrder.filter(function(id) { return byId[id]; });
     const seen = {};
-    names.forEach(function(n) { seen[n] = true; });
+    ids.forEach(function(id) { seen[id] = true; });
     // Anything not in the frozen snapshot (added mid-session) - append
-    // alphabetically rather than dropping it silently.
-    const extras = radioStations.filter(function(s) { return !seen[s.displayName]; })
-      .map(function(s) { return s.displayName; })
-      .sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
-    names = names.concat(extras);
+    // alphabetically by displayName rather than dropping it silently.
+    const extras = radioStations.filter(function(s) { return !seen[s.id]; })
+      .sort(function(a, b) { return a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()); })
+      .map(function(s) { return s.id; });
+    ids = ids.concat(extras);
     // The playing (or paused-but-active) station always leads, regardless
     // of favorite status or its position in the frozen order.
-    if (currentPlayingDisplayName && byName[currentPlayingDisplayName]) {
-      names = [currentPlayingDisplayName].concat(names.filter(function(n) { return n !== currentPlayingDisplayName; }));
+    if (currentPlayingId && byId[currentPlayingId]) {
+      ids = [currentPlayingId].concat(ids.filter(function(id) { return id !== currentPlayingId; }));
     }
-    return names.map(function(n) { return byName[n]; });
+    return ids.map(function(id) { return byId[id]; });
   }
 
   // Builds one station row's markup - shared by the dock and the list
@@ -7154,13 +7178,13 @@
   // identically apart from which container holds them. extraRowClass is
   // for the transient animation classes only (see renderMobileRadioPicker).
   function buildMobilePickerRowHtml(s, favorites, extraRowClass) {
-    const isFav = favorites.indexOf(s.displayName) !== -1;
-    const isActive = s.displayName === currentPlayingDisplayName;
+    const isFav = favorites.indexOf(s.id) !== -1;
+    const isActive = s.id === currentPlayingId;
     const isAudibly = isActive && !radioAudio.paused;
     const metaHtml = s.cityState
       ? '<div class="mp-meta-divider"></div><div class="mp-meta">' + escapeHtml(s.cityState) + '</div>'
       : '';
-    return '<div class="mp-row' + (isActive ? ' mp-row-active' : '') + (extraRowClass ? ' ' + extraRowClass : '') + '" data-station-name="' + escapeHtml(s.displayName) + '">' +
+    return '<div class="mp-row' + (isActive ? ' mp-row-active' : '') + (extraRowClass ? ' ' + extraRowClass : '') + '" data-station-id="' + escapeHtml(s.id) + '">' +
       '<button type="button" class="mp-playbtn' + (isAudibly ? ' is-playing' : '') + '" tabindex="-1" aria-label="' + (isAudibly ? 'Pause' : 'Play') + ' ' + escapeHtml(s.displayName) + '">' +
         (isAudibly ? MP_PAUSE_SVG : MP_PLAY_SVG) +
       '</button>' +
@@ -7169,7 +7193,7 @@
         '<div class="mp-nowplaying">' + escapeHtml(formatNowPlaying(s)) + '</div>' +
         metaHtml +
       '</div>' +
-      '<button type="button" class="mp-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.displayName) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
+      '<button type="button" class="mp-star' + (isFav ? ' favorited' : '') + '" data-fav-name="' + escapeHtml(s.id) + '" title="' + (isFav ? 'Remove from your ticker' : 'Add to your ticker') + '">' +
         buildFavoriteStarSvg(isFav) +
       '</button>' +
     '</div>';
@@ -7184,7 +7208,7 @@
   //
   // opts is only for the brief entrance animation right after a station is
   // picked (see the mobileRadioPicker click handler below) or stops playing
-  // (see stopRadioPlayback): { dockEntering: bool, returningStationName }.
+  // (see stopRadioPlayback): { dockEntering: bool, returningStationId }.
   function renderMobileRadioPicker(opts) {
     opts = opts || {};
     const dockEl = document.getElementById('mpDock');
@@ -7194,20 +7218,20 @@
       listEl.innerHTML = '<div class="mp-empty">Loading stations…</div>';
       return;
     }
-    const favorites = getFavoriteStationNames();
+    const favorites = getFavoriteStationIds();
     const ordered = getMobilePickerOrderedStations();
-    const byName = {};
-    radioStations.forEach(function(s) { byName[s.displayName] = s; });
-    const dockedStation = currentPlayingDisplayName ? byName[currentPlayingDisplayName] : null;
+    const byId = {};
+    radioStations.forEach(function(s) { byId[s.id] = s; });
+    const dockedStation = currentPlayingId ? byId[currentPlayingId] : null;
 
     dockEl.innerHTML = dockedStation
       ? '<div class="mp-dock-label">Now Playing</div>' +
         buildMobilePickerRowHtml(dockedStation, favorites, opts.dockEntering ? 'mp-dock-entering' : '')
       : '';
 
-    const rest = dockedStation ? ordered.filter(function(s) { return s.displayName !== dockedStation.displayName; }) : ordered;
+    const rest = dockedStation ? ordered.filter(function(s) { return s.id !== dockedStation.id; }) : ordered;
     listEl.innerHTML = rest.map(function(s) {
-      const extra = (opts.returningStationName && s.displayName === opts.returningStationName) ? 'mp-row-entering' : '';
+      const extra = (opts.returningStationId && s.id === opts.returningStationId) ? 'mp-row-entering' : '';
       return buildMobilePickerRowHtml(s, favorites, extra);
     }).join('');
   }
@@ -7496,10 +7520,10 @@
     }
     const row = e.target.closest('.mp-row');
     if (!row) return;
-    const name = row.getAttribute('data-station-name');
-    const station = radioStations.find(function(s) { return s.displayName === name; });
+    const id = row.getAttribute('data-station-id');
+    const station = radioStations.find(function(s) { return s.id === id; });
     if (!station) return;
-    if (name === currentPlayingDisplayName) {
+    if (id === currentPlayingId) {
       // Already the active station (docked) - the whole row is the
       // play/pause toggle, not just the icon.
       if (radioAudio.paused) { radioAudio.play(); } else { radioAudio.pause(); }
@@ -7509,14 +7533,14 @@
     // the driver's thumb already is, THEN move it into the dock a beat
     // later - reads as "that one moved up there", not "that one vanished
     // and a different list appeared" (the actual bug report this whole
-    // dock exists to fix). previousName may be null (nothing was playing
+    // dock exists to fix). previousId may be null (nothing was playing
     // yet) - renderMobileRadioPicker below just no-ops the return
     // animation in that case, nothing to animate back into the list.
-    const previousName = currentPlayingDisplayName;
+    const previousId = currentPlayingId;
     row.classList.add('mp-row-pulse');
     setTimeout(function() {
       playStation(station);
-      renderMobileRadioPicker({ dockEntering: true, returningStationName: previousName });
+      renderMobileRadioPicker({ dockEntering: true, returningStationId: previousId });
     }, MOBILE_PICKER_DOCK_DELAY_MS);
   });
 

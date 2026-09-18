@@ -2396,6 +2396,7 @@ const RADIO_STATIONS = [
     // page only embeds a third-party (LibreTime) player iframe with no
     // visible audio src to confirm against directly - verify playback
     // next time before assuming this is exactly right.
+    id: 'ccvb',
     displayName: 'CCVB',
     cityState: 'Vero Beach, FL',
     homePage: 'https://ccvb.fm/',
@@ -2405,6 +2406,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://wwsh.ccvb.fm/stream/main'
   },
   {
+    id: 'truefm',
     displayName: 'TrueFM',
     cityState: 'Wichita, KS',
     homePage: 'http://www.truefm.net',
@@ -2421,6 +2423,7 @@ const RADIO_STATIONS = [
     // radio-station-published-schedule-notes.md for the transcription
     // itself, the two judgment calls made in it (a real overnight gap, and
     // a genuine Sunday/Monday schedule conflict), and src/radioSchedules/wjwd.js.
+    id: 'wjwd',
     displayName: 'WJWD',
     cityState: 'Marshall, WI',
     homePage: 'https://jesuspeoplefm.com',
@@ -2435,6 +2438,7 @@ const RADIO_STATIONS = [
     staticCoverThumbUrl: '/wjwd-icon-128.png'
   },
   {
+    id: 'equipfm',
     displayName: 'EQUIP FM',
     cityState: 'Lynchburg, VA',
     homePage: 'https://equipfm.org/sponsors/calvary-chapel-lynchburg/',
@@ -2444,6 +2448,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice66.securenetsystems.net/EQUIPFM'
   },
   {
+    id: 'wiam',
     displayName: 'WIAM',
     cityState: 'Knoxville, TN',
     homePage: 'https://thewaymedia.net/calvary-knoxville',
@@ -2453,6 +2458,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice42.securenetsystems.net/WIAM'
   },
   {
+    id: 'dovefm',
     displayName: 'DOVE FM',
     cityState: 'Russell, PA',
     homePage: 'https://www.dovefm.org/',
@@ -2468,6 +2474,7 @@ const RADIO_STATIONS = [
     // already starred it (favorites are matched by exact displayName), and
     // this one wasn't part of the earlier explicit EQUIP FM/WIAM/DOVE FM
     // rename request. Flag if a rename is actually wanted.
+    id: 'revivefm',
     displayName: 'REVIVE FM',
     cityState: 'Houston, TX',
     homePage: 'https://revive953.com/',
@@ -2477,6 +2484,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice42.securenetsystems.net/KEPHLP'
   },
   {
+    id: 'truth-tn',
     displayName: 'The Truth (TN)',
     cityState: 'Greeneville, TN',
     homePage: 'https://www.truthfm.net/',
@@ -2486,6 +2494,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice7.securenetsystems.net/WZTH'
   },
   {
+    id: 'truth-ga',
     displayName: 'The Truth (GA)',
     cityState: 'Clayton, GA',
     homePage: 'https://www.truthfm.net/',
@@ -2495,6 +2504,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice26.securenetsystems.net/WZTG'
   },
   {
+    id: 'klht-fm',
     displayName: 'KLHT FM',
     cityState: 'Honolulu, HI',
     homePage: 'https://fm.klight.org',
@@ -2504,6 +2514,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://klht.rhemastreams.net:8443/klhtfm'
   },
   {
+    id: 'klht-am',
     displayName: 'KLHT AM',
     cityState: 'Honolulu, HI',
     homePage: 'https://am.klight.org',
@@ -2513,6 +2524,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://klht.rhemastreams.net:8443/klhtam'
   },
   {
+    id: 'wtsw-lp',
     displayName: 'WTSW-LP',
     cityState: 'Manitowoc, WI',
     homePage: 'https://wtswlp.org/',
@@ -2521,6 +2533,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
   },
   {
+    id: 'realhoperadio',
     displayName: 'Real Hope Radio',
     cityState: 'Grangeville, ID',
     homePage: 'https://realhoperadio.com/',
@@ -2529,6 +2542,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
   },
   {
+    id: 'radiobygrace',
     displayName: 'Radio by Grace',
     cityState: 'Amarillo, TX',
     homePage: 'http://www.radiobygrace.com',
@@ -2538,6 +2552,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
   },
   {
+    id: 'renewfm',
     displayName: 'Renew FM',
     cityState: 'Fitchburg, MA',
     homePage: 'https://renewfm.org',
@@ -2546,6 +2561,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://streams.radio.co/s34b0aa3a7/listen'
   },
   {
+    id: 'truthfm',
     displayName: 'Truth FM',
     cityState: 'Hagerstown, MD',
     homePage: 'https://www.calvarycumberland.com/Listen-on-line',
@@ -2555,6 +2571,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice26.securenetsystems.net/WZTM'
   },
   {
+    id: 'ksgr',
     displayName: 'KSGR',
     cityState: 'Corpus Christi, TX',
     homePage: 'https://ksgr.org',
@@ -2564,6 +2581,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ksgr.ddns.net:1841/stream.mp3'
   },
   {
+    id: 'wgss',
     displayName: 'WGSS',
     cityState: 'Copiague, NY',
     homePage: 'https://www.godstillspeaks.com/',
@@ -2571,6 +2589,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://streams.radiomast.io/bbe3faf2-3aa6-440a-9e1f-06b766d9bd70'
   },
   {
+    id: 'theword',
     displayName: 'The Word',
     cityState: 'Farmington, NY',
     homePage: 'https://wzxv.org/',
@@ -2580,6 +2599,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://streaming.live365.com/a10665'
   },
   {
+    id: 'wleb',
     displayName: 'WLEB',
     cityState: 'Lebanon, PA',
     homePage: 'https://truthmedianetwork.org/',
@@ -2588,6 +2608,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://broadcast.shoutcheap.com/proxy/wleblpt1/stream'
   },
   {
+    id: 'crossover',
     displayName: 'Crossover',
     cityState: 'Cedar City, UT',
     homePage: 'https://crossoverfm.org/',
@@ -2597,6 +2618,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice8.securenetsystems.net/KCHG'
   },
   {
+    id: 'kcpv',
     displayName: 'KCPV',
     cityState: 'Pahrump, NV',
     homePage: 'https://justforjesus.us/',
@@ -2606,6 +2628,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice25.securenetsystems.net/KCPVLP'
   },
   {
+    id: 'kouj',
     displayName: 'KOUJ',
     cityState: 'Norman, OK',
     homePage: 'http://www.kouj.org/',
@@ -2615,6 +2638,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice41.securenetsystems.net/KOUJ'
   },
   {
+    id: 'kept',
     displayName: 'KEPT',
     cityState: 'Hayward, CA',
     homePage: 'https://www.keptfm.com/',
@@ -2624,6 +2648,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice9.securenetsystems.net/KEPT'
   },
   {
+    id: 'wrdj',
     displayName: 'WRDJ',
     cityState: 'Merritt Island, FL',
     homePage: 'http://www.wrdj.com',
@@ -2632,6 +2657,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://streaming.live365.com/a96507'
   },
   {
+    id: 'thebridge',
     displayName: 'The Bridge',
     cityState: 'Old Bridge, NJ',
     homePage: 'https://www.bridgeradio.org',
@@ -2641,6 +2667,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://stream.aiir.com/tmpilbymbrwtv'
   },
   {
+    id: 'thevoice',
     displayName: 'The Voice',
     cityState: 'Lima, OH',
     homePage: 'https://wttpfm.com/',
@@ -2649,6 +2676,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://www.ophanim.net:8444/s/8730'
   },
   {
+    id: 'wlxm',
     displayName: 'WLXM',
     cityState: 'Lexington, SC',
     homePage: 'https://cclexington.org/radio-and-tv/',
@@ -2657,6 +2685,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://broadcast.shoutcheap.com/proxy/jossco00/;stream.mp3'
   },
   {
+    id: 'thelamp',
     displayName: 'The Lamp',
     cityState: 'Fredericksburg, VA',
     homePage: 'https://ccfred.org/the-lamp-radio',
@@ -2665,6 +2694,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ais-sa1.streamon.fm/7087_24k.aac'
   },
   {
+    id: 'kvng',
     displayName: 'KVNG',
     cityState: 'Casa Grande, AZ',
     homePage: 'https://grace911.com/',
@@ -2680,6 +2710,7 @@ const RADIO_STATIONS = [
     // was later found stale. Per the notes' policy for teaching-heavy
     // SecureNetSystems stations, worth a deliberate second look in about
     // a week to confirm the title/programStartTS are actually moving.
+    id: 'csninternational',
     displayName: 'CSN International',
     cityState: 'Twin Falls, ID',
     homePage: 'https://csnradio.com/',
@@ -2689,6 +2720,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://ice7.securenetsystems.net/CSNAAC'
   },
   {
+    id: 'klyt',
     displayName: 'KLYT',
     cityState: 'Albuquerque, NM',
     homePage: 'https://klyt.fm/',
@@ -2697,6 +2729,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://s5.radio.co/s914ba6b9a/listen'
   },
   {
+    id: 'kptg',
     displayName: 'KPTG',
     cityState: 'Adelanto, CA',
     homePage: 'https://www.ccadelanto.com/radio',
@@ -2705,6 +2738,7 @@ const RADIO_STATIONS = [
     streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
   },
   {
+    id: 'kqip',
     displayName: 'KQIP',
     cityState: 'Chico, CA',
     homePage: 'https://ccchico.com/1071',
@@ -2719,6 +2753,7 @@ const RADIO_STATIONS = [
     noArtistSplit: true
   },
   {
+    id: 'wglj',
     displayName: 'WGLJ',
     cityState: 'Gainesville, FL',
     homePage: 'https://www.ccgainesville.com/radio/',
@@ -2733,6 +2768,7 @@ const RADIO_STATIONS = [
     splitCombinedTitle: true
   },
   {
+    id: 'ccukradio',
     displayName: 'CC UK Radio',
     cityState: 'United Kingdom',
     homePage: 'https://www.calvarychapel.uk/radio',
@@ -2748,6 +2784,7 @@ const RADIO_STATIONS = [
     // published schedule) + that day's airdate - this station's
     // automation just names blocks {ShowInitials}{YYYYMMDD} instead of
     // spelling the show out. Terse, but legitimate metadata.
+    id: 'kchpradio',
     displayName: 'KCHP Radio',
     cityState: 'Humboldt Co, CA',
     homePage: 'https://telioschurch.com/kchpradio/',
@@ -2778,6 +2815,7 @@ const RADIO_STATIONS = [
     // since we already get now-playing data from Triton's separate API
     // above, so the plain redirect stream is both simpler and a better fit.
     // Worth a quick real playback check after this deploys.
+    id: 'refugefm',
     displayName: 'Refuge FM',
     cityState: 'St. Cloud, MN',
     homePage: 'https://refuge.mn/refuge-fm',
@@ -2802,6 +2840,7 @@ const RADIO_STATIONS = [
     // mount URL - the page's own stream_url/mounts[].url both carry a long
     // Google Analytics query string (_gl/_ga clickthrough params) that's
     // just front-end tracking, not needed to fetch the stream itself.
+    id: 'kacm',
     displayName: 'KACM',
     cityState: 'Montrose, CO',
     homePage: 'https://calvarymontrose.com/kacm/',
@@ -2821,6 +2860,7 @@ const RADIO_STATIONS = [
     // exact same track as the captured HLS snippet ("Pastor Joe Focht -
     // Straight from the Heart- Psalm 119"), so no need for the HLS chain
     // or its per-request session-ID churn.
+    id: 'alohakihl',
     displayName: 'Aloha KIHL',
     cityState: 'Hilo, HI',
     homePage: 'https://calvarychapelhilo.org/kihl-radio',
@@ -2842,6 +2882,7 @@ const RADIO_STATIONS = [
     // for the full rationale and the transcription itself in
     // src/radioSchedules/gracefm.js. A 60-day manual re-check against the
     // live page is scheduled for 2026-11-09.
+    id: 'gracefm',
     displayName: 'GraceFM',
     cityState: 'Aurora, CO',
     homePage: 'https://www.gracefm.com/',
@@ -2869,6 +2910,7 @@ const RADIO_STATIONS = [
     // resolved and the added Sunday-evening filler entry) and the
     // transcription itself in src/radioSchedules/kewr.js. A 60-day manual
     // re-check against the live page is scheduled for 2026-11-16.
+    id: 'kewr',
     displayName: 'KEWR - Enduring Word Radio',
     cityState: 'Cedar Rapids, IA',
     homePage: 'https://enduringwordradio.com/',
@@ -2883,6 +2925,7 @@ const RADIO_STATIONS = [
     staticCoverThumbUrl: '/kewr-icon-128.png'
   },
   {
+    id: 'hopefm',
     displayName: 'Hope FM',
     cityState: 'Medford Lakes, NJ',
     homePage: 'https://hopefm.net/',
@@ -3916,6 +3959,13 @@ async function fetchStationNowPlaying(station) {
   }
 
   return {
+    // Stable per-station identity, independent of displayName - added
+    // 2026-09-17 so favoriting/click-to-play/CarPlay-prev-next survive a
+    // future display-name change (the ticker/browse-panel/mini-player copy
+    // is free to change without silently unfavoriting anyone). See id in
+    // the RADIO_STATIONS comment block and public/index.html's favorites
+    // code.
+    id: station.id,
     displayName: station.displayName,
     title: parsed.title,
     artist: parsed.artist,
@@ -3973,6 +4023,7 @@ async function handleRadio(request, ctx) {
       return await fetchStationNowPlaying(station);
     } catch (err) {
       return {
+        id: station.id,
         displayName: station.displayName,
         title: null,
         artist: null,
