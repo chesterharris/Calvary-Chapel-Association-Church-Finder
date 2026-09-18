@@ -6099,7 +6099,32 @@
     try {
       const raw = localStorage.getItem(RADIO_FAVORITES_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
+      let ids = Array.isArray(parsed) ? parsed : [];
+      // Self-healing cleanup: a browser that favorited stations before the
+      // 2026-09-17 id switch still has those old entries sitting in
+      // storage, keyed by the old displayName strings instead of an id.
+      // They never match a real station.id, so they've always silently
+      // dropped out of the ticker itself - but nothing ever removed them
+      // from storage, so favorites.length (and anything that trusted it as
+      // "how many favorites does this visitor have" - the browse panel's
+      // "N in your ticker" count, the starter-pack "you already have
+      // favorites, replace or merge?" prompt, etc.) kept counting them
+      // anyway. Prune anything that doesn't match a currently-known
+      // station.id and persist the cleaned list, so it only has to happen
+      // once per browser. Only do this once real station data has loaded -
+      // radioStations is briefly [] on first page load, and treating that
+      // as "everything is stale" would wipe real favorites before the
+      // fetch even finishes.
+      if (radioStations.length) {
+        const validIds = {};
+        radioStations.forEach(function(s) { validIds[s.id] = true; });
+        const cleaned = ids.filter(function(id) { return validIds[id]; });
+        if (cleaned.length !== ids.length) {
+          setFavoriteStationIds(cleaned);
+        }
+        ids = cleaned;
+      }
+      return ids;
     } catch (err) {
       return [];
     }
