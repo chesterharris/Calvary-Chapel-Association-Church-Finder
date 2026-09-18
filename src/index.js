@@ -14,6 +14,7 @@ import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
 import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
 import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
 import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
+import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2954,6 +2955,36 @@ const RADIO_STATIONS = [
     // rounded-square treatment as the other publishedschedule icons.
     staticCoverUrl: '/kgps-icon.png',
     staticCoverThumbUrl: '/kgps-icon-128.png'
+  },
+  {
+    // New station, not previously investigated. Larry supplied the
+    // /v5/WAYGLP SecureNetSystems page source directly along with proof the
+    // now-playing XML feed (player_status_update/WAYGLP.xml) is dead - same
+    // soft-404 "system cannot find the file specified" body as
+    // GraceFM/WJWD/KEWR/KGPS above - plus the station's published weekly
+    // schedule (three separate pages: Weekdays, Saturday, Sunday). Wired up
+    // here the same way as the other publishedschedule stations - see
+    // radio-station-published-schedule-notes.md for the full rationale, the
+    // handful of spelling/casing corrections made across the three source
+    // pages, and the transcription itself in
+    // src/radioSchedules/godswayradio.js. streamUrl below is the
+    // SecureNetSystems stream URL confirmed live in the page source. A
+    // 60-day manual re-check against the live pages is scheduled for
+    // 2026-11-17.
+    id: 'godswayradio',
+    displayName: "God's Way Radio",
+    cityState: 'Miami, FL',
+    homePage: 'https://www.godswayradio.com/',
+    provider: 'publishedschedule',
+    schedule: GODSWAYRADIO_SCHEDULE,
+    streamUrl: 'https://ice25.securenetsystems.net/WAYGLP',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // triangle/play-button graphic for the station, given the same
+    // shadow-free, rounded-square treatment as the other publishedschedule
+    // icons.
+    staticCoverUrl: '/godswayradio-icon.png',
+    staticCoverThumbUrl: '/godswayradio-icon-128.png'
   },
   {
     id: 'hopefm',

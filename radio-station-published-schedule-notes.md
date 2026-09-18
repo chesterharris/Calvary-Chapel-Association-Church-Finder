@@ -423,3 +423,59 @@ Fourth station wired up on this provider, 2026-09-18. Data lives in
   rounded-square black treatment as GraceFM/WJWD/KEWR's icons, mark scaled
   to the same ~80% of frame.
 - 60-day re-check reminder: **2026-11-17**.
+
+### God's Way Radio (Miami, FL)
+
+Fifth station wired up on this provider, 2026-09-18. Data lives in
+`src/radioSchedules/godswayradio.js`.
+
+- Source: `https://www.godswayradio.com/`'s published schedule, split across
+  three separate Wix rich-text pages (Weekdays, Saturday, Sunday), each
+  transcribed 2026-09-18 from raw page source Larry supplied directly. Not a
+  previously-investigated station - this is the first time it came up.
+- Dead now-playing feed confirmed the same way as GraceFM/WJWD/KEWR/KGPS:
+  `player_status_update/WAYGLP.xml` returns HTTP 200 with the same soft-404
+  body ("The system cannot find the file specified"). `streamUrl`
+  (`https://ice25.securenetsystems.net/WAYGLP`) comes straight from the
+  `/v5/WAYGLP` page source Larry supplied and is independent of the dead
+  metadata pipeline, same as every other station on this provider.
+- All three source pages are much more verbose Wix rich-text markup than
+  GraceFM/WJWD/KEWR/KGPS (the Weekdays page alone is ~173KB of HTML for 45
+  entries), and each page structures its host name differently: Weekdays
+  puts it in a `<p>` tag under the program's `<h2>`; Saturday has no `<p>`
+  tags at all and instead carries the host in a `title="..."` attribute on
+  the program's image div; Sunday redundantly has both (identical text in
+  both places). Each page needed its own extraction pass rather than one
+  shared pattern.
+- No scheduling conflicts, seasonal splits, or `weekdayOverridesByDay` needed
+  here (unlike KGPS/WJWD) - each day's grid was already internally
+  consistent once transcribed, just with a handful of small spelling/casing
+  slips between the three pages, normalized to the majority or
+  most-likely-correct spelling (documented in the schedule file's own header
+  comment rather than repeated here): "Damian Kyle" over Saturday's lone
+  "Damien Kyle", "Samy Tanagho" over Saturday's "Sammy Tanagho", "Voice Of
+  The Martyrs Ministries" over Saturday's transposed "Ministires", "Friends
+  And Family Interviews" capitalized to match between the two pages that
+  have it, and "GodSword" standardized across all three pages' inconsistent
+  capitalization. Two Weekday slots ("LIVE For Jesus", "Refresh | LIVE") list
+  no host at all on the source page (a bare zero-width-space character
+  stands in for one) and are transcribed with an empty host string rather
+  than a guessed name.
+- Timezone: `America/New_York` (Miami, FL).
+- Logo: `staticCoverUrl: '/godswayradio-icon.png'` / `staticCoverThumbUrl:
+  '/godswayradio-icon-128.png'`, supplied 2026-09-18 - the station's own
+  triangle/play-button mark (a green-to-teal gradient triangle with the
+  station's name in white cursive script). Background removal needed a
+  different technique than the border-connected flood fill used for
+  GraceFM/WJWD/KEWR/KGPS: the white script text touches the triangle's own
+  outer edge in a couple of places, so a naive white-background flood fill
+  bled into and ate parts of the lettering. Fixed by fitting the triangle's
+  three vertices directly from the source image's pixel geometry (least-
+  squares line fit through the top and bottom edges, left edge x-position
+  averaged across rows) and using that exact polygon as the alpha mask
+  instead of any color-based thresholding - sidesteps the text-touching-edge
+  problem entirely since the mask no longer depends on which pixels happen
+  to be near-white. Given the same shadow-free, rounded-square black
+  treatment as the other publishedschedule icons, mark scaled to the same
+  ~80% of frame.
+- 60-day re-check reminder: **2026-11-17**.
