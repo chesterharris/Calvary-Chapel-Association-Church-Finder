@@ -1376,15 +1376,6 @@
     opacity: 0.6;
     cursor: default;
   }
-  /* .btn-outline (Refresh) is styled paper-on-transparent for the
-     evergreen header it was originally built for - same fix already
-     applied to .modal .btn-outline and .side-panel-footer .btn, needed
-     here too since this toolbar sits on the side-panel's paper
-     background, where that combination is invisible. */
-  .live-debug-toolbar-actions .btn-outline {
-    color: var(--evergreen);
-    border-color: var(--line);
-  }
   .live-debug-spinner {
     display: inline-block;
     width: 11px;
@@ -3241,7 +3232,6 @@
       <span id="liveDebugStatusText">Loading...</span>
     </div>
     <div class="live-debug-toolbar-actions">
-      <button id="liveDebugRefreshBtn" class="btn btn-outline">Refresh</button>
       <button id="liveDebugRunNowBtn" class="btn btn-ember">Run Check Now</button>
     </div>
   </div>
@@ -3833,7 +3823,6 @@
   const liveDebugPanel = document.getElementById('liveDebugPanel');
   const liveDebugContent = document.getElementById('liveDebugContent');
   const liveDebugRunNowBtn = document.getElementById('liveDebugRunNowBtn');
-  const liveDebugRefreshBtn = document.getElementById('liveDebugRefreshBtn');
   const liveDebugStatusDot = document.getElementById('liveDebugStatusDot');
   const liveDebugStatusText = document.getElementById('liveDebugStatusText');
   const liveDebugProgressWrap = document.getElementById('liveDebugProgressWrap');
@@ -3947,7 +3936,6 @@
 
   function setDebugButtonsRunning(isRunning) {
     liveDebugRunNowBtn.disabled = isRunning;
-    liveDebugRefreshBtn.disabled = isRunning;
     liveDebugRunNowBtn.innerHTML = isRunning ? '<span class="live-debug-spinner"></span>Running...' : 'Run Check Now';
   }
 
@@ -4522,7 +4510,6 @@
   // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
   // close behavior as the "x" above, just a bigger/clearer tap target.
   document.getElementById('liveDebugMobileBackBtn').addEventListener('click', closeLiveDebugPanel);
-  liveDebugRefreshBtn.addEventListener('click', loadLiveDebugStatus);
   liveDebugRunNowBtn.addEventListener('click', function() {
     setDebugButtonsRunning(true);
     // This request stays open for the ENTIRE cycle duration (seen up to
