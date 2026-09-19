@@ -115,7 +115,8 @@ applies.
 
 **Stations currently configured:** EQUIP FM, WIAM, DOVE FM, REVIVE FM,
 The Truth (TN) / WZTH, The Truth (GA) / WZTG, Truth FM / WZTM,
-Crossover / KCHG, KVNG, CSN International / CSNAAC, Hope FM / WVBV.
+Crossover / KCHG, KVNG, CSN International / CSNAAC, Hope FM / WVBV,
+WLWG / WJLW.
 
 **CSN International (Twin Falls, ID) / CSNAAC** — added 2026-09-03.
 subdomain `streamdb4web.securenetsystems.net`, `streamUrl` confirmed from
@@ -241,6 +242,32 @@ as every other station in this section - confirmed against the response,
 not guessed from the XML endpoint. Same `streamdb4web` subdomain as WZTG/
 WZTM/CSNAAC above, different `ice` edge host (`ice26`, shared with WZTG/
 WZTM specifically).
+
+**WLWG / WJLW (Mount Pleasant, PA)** — added 2026-09-19, "Grace FM - Living
+Waters of Grace" at Calvary Chapel of Westmoreland
+(`calvarychapelonline.com/gracefm/`). Larry gave the working `streamUrl`
+directly (`https://ice64.securenetsystems.net/WJLW`) and the page source
+for the station's page rather than the XML feed URL itself, so subdomain/
+callSign were found by reading that page's embed snippet instead:
+`document.write('<script src="//streamdb9web.securenetsystems.net/
+cirrusencore/embed/embed.js?stationCallSign=WJLW&...">`) - Cirrus Encore
+template, same family as Hope FM above. Public branding is "WLWG" (the new
+full-power 91.7 FM signal the page says went live October 2024) but the
+technical `callSign` is `WJLW` (the original low-power sister station this
+simulcasts) - same DOVEMAIN-style public-name-vs-technical-callSign split
+as Dove FM. `subdomain`: `streamdb9web.securenetsystems.net` - notably the
+*same* subdomain as the already-rejected dead GraceFM/KXGRFM entry above;
+that's just this SecureNetSystems reseller's shared infrastructure, not a
+sign this feed is also dead (different callSign, different backend
+station config). Larry confirmed the now-playing widget displays and
+updates correctly on the live page; couldn't independently re-poll
+`.../player_status_update/WJLW.xml` ourselves to double check (blocked by
+robots.txt for automated fetching, same limitation as CSN International
+above), so freshness rests on Larry's direct observation rather than our
+own captured snapshot - worth a second look if the ticker ever seems stuck
+on this one. This is now the third distinctly different "Grace
+FM"/"GraceFM"-branded station in this file (see KXGRFM and KVNG above) -
+go by id/subdomain/callSign, not the branding, when in doubt.
 
 ---
 
