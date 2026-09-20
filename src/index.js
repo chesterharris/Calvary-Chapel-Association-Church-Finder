@@ -889,7 +889,17 @@ function findLiveCheckDiagnosticLandmarks(html) {
     // Confirms whether YouTube's larger per-video data blocks are even
     // present in the response at all, regardless of their contents.
     { key: 'ytInitialPlayerResponsePresent', pattern: /ytInitialPlayerResponse\s*=/ },
-    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ }
+    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ },
+    // Added alongside the "live but missing metadata" capture case (see
+    // checkChurchLive below) - once videoId started resolving via a
+    // buried/unusual location instead of going missing outright, the open
+    // question became whether title/description/startDate are ALSO
+    // sitting somewhere unusual, or genuinely gone from this page shape.
+    { key: 'ogTitleMetaPresent', pattern: /<meta property="og:title" content="[^"]*">/ },
+    { key: 'ogDescriptionMetaPresent', pattern: /<meta property="og:description" content="[^"]*">/ },
+    { key: 'shortDescriptionKeyPresentLoose', pattern: /"shortDescription":/ },
+    { key: 'startTimestampKeyPresentLoose', pattern: /"startTimestamp":/ },
+    { key: 'startedStreamingPhrasePresent', pattern: /Started streaming/ }
   ];
   const landmarks = {};
   checks.forEach(function(c) {
@@ -1081,15 +1091,46 @@ async function recordStalledCycleNote(env, progress, elapsedMs) {
 }
 
 // Diagnostic-only capture (see LIVE_CHECK_DEBUG_SAMPLES_KV_KEY above) for
-// the "isLive:true but no videoId, even after the retry" case. Stores a
-// truncated snippet of BOTH the original and retry attempts' raw HTML, so
-// the debug panel can show whether YouTube served a normal-but-incomplete
-// page (some other metadata still present, just not the fields we check)
-// or something else entirely (e.g. a consent/interstitial page with
-// almost nothing on it). Best-effort: read-modify-write against a single
-// KV key with no locking, so a lost write under rare concurrent access is
-// acceptable here - this never affects what the public site shows.
-async function recordLiveCheckDebugSample(env, sample) {
+// two distinct failure shapes checkChurchLive can hit: "isLive:true but no
+// videoId, even after the retry" (reason: 'no-videoid') and "isLive:true,
+// videoId DID resolve, but title/description/startDate are still missing"
+// (reason: 'live-but-missing-metadata'). Stores a truncated snippet of the
+// raw HTML plus landmark/videoId-occurrence scans, so the debug panel can
+// show whether YouTube served a normal-but-incomplete page (some other
+// metadata still present, just not the fields we check) or something else
+// entirely (e.g. a consent/interstitial page with almost nothing on it).
+//
+// IMPORTANT: this used to do its own KV read-modify-write on every single
+// call. With 'live-but-missing-metadata' capturing on nearly every live
+// church (a much higher-volume trigger than the no-videoid case this was
+// originally built for), that meant one KV write per affected church per
+// cycle - confirmed to risk Cloudflare KV's per-key write-rate limit under
+// real Sunday-morning load with many churches live at once. This now just
+// pushes into an in-memory array for the current cycle; the actual KV
+// write happens exactly once per cycle, in flushLiveCheckDebugSamples
+// below, called after checkAllChurchesLive's loop finishes. No I/O here
+// means nothing to await and nothing that can throw from KV itself, but
+// this still stays wrapped in try/catch - diagnostic capture failing is
+// never allowed to break the actual live check.
+function recordLiveCheckDebugSample(pendingDebugSamples, sample) {
+  try {
+    if (Array.isArray(pendingDebugSamples)) {
+      pendingDebugSamples.push(Object.assign({ capturedAt: new Date().toISOString() }, sample));
+    }
+  } catch (err) {
+    // Diagnostic capture failing is never allowed to break the actual
+    // live check - swallow it.
+  }
+}
+
+// The single, once-per-cycle KV read-modify-write that actually persists
+// whatever recordLiveCheckDebugSample collected into pendingDebugSamples
+// during this cycle's checkChurchLive calls (see the batching note above).
+// Best-effort, same as the old per-call version: a lost write under rare
+// concurrent access is acceptable here - this never affects what the
+// public site shows, only the admin debug panel's sample history.
+async function flushLiveCheckDebugSamples(env, pendingDebugSamples) {
+  if (!pendingDebugSamples || !pendingDebugSamples.length) return;
   try {
     const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY);
     let samples = [];
@@ -1101,7 +1142,7 @@ async function recordLiveCheckDebugSample(env, sample) {
         // Corrupt/unexpected value - start fresh rather than throwing.
       }
     }
-    samples.push(Object.assign({ capturedAt: new Date().toISOString() }, sample));
+    samples = samples.concat(pendingDebugSamples);
     while (samples.length > LIVE_CHECK_DEBUG_SAMPLES_MAX) samples.shift();
     await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY, JSON.stringify(samples));
   } catch (err) {
@@ -1275,7 +1316,7 @@ async function fetchLivePageWithRetry(liveUrl) {
   }
 }
 
-async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
+async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDebugSamples) {
   const liveUrl = buildLiveCheckUrl(youtubeUrl);
   const html = await fetchLivePageWithRetry(liveUrl);
 
@@ -1498,11 +1539,13 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
 
     // Still no videoId after both attempts - capture what we actually got
     // back so the admin debug panel can show it (see
-    // recordLiveCheckDebugSample above). `env` is only passed in from the
-    // real cron/manual-check path (see checkAllChurchesLive) - guarded so
-    // this never throws if checkChurchLive is ever called without it.
-    if (!videoId && env) {
-      await recordLiveCheckDebugSample(env, {
+    // recordLiveCheckDebugSample above). `pendingDebugSamples` is only
+    // passed in from the real cron/manual-check path (see
+    // checkAllChurchesLive) - guarded so this never throws if
+    // checkChurchLive is ever called without it.
+    if (!videoId && pendingDebugSamples) {
+      recordLiveCheckDebugSample(pendingDebugSamples, {
+        reason: 'no-videoid',
         churchId: churchId != null ? churchId : null,
         churchName: churchName || null,
         youtubeUrl: youtubeUrl,
@@ -1606,6 +1649,36 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName) {
         viewCount !== null && viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
       return { isLive: false, status: 'not_live' };
     }
+  }
+
+  // Diagnostic-only capture (see recordLiveCheckDebugSample above) for the
+  // "confirmed live, videoId resolved, but title/description/startDate
+  // still missing" case - a DIFFERENT failure shape than the no-videoid
+  // capture above: by this point every false-positive guard above has
+  // already passed, so this really is a genuine, currently-airing
+  // broadcast - it's just missing some of the metadata the Live Now cards
+  // want to show. Fires on ANY of the three fields being missing, not
+  // only when all three are, so a partial miss (e.g. startDate resolves
+  // but title doesn't) still gets captured. `pendingDebugSamples` is only
+  // passed in from the real cron/manual-check path (see
+  // checkAllChurchesLive) - guarded so this never throws if
+  // checkChurchLive is ever called without it.
+  if (pendingDebugSamples && (!title || !description || !startDate)) {
+    recordLiveCheckDebugSample(pendingDebugSamples, {
+      reason: 'live-but-missing-metadata',
+      churchId: churchId != null ? churchId : null,
+      churchName: churchName || null,
+      youtubeUrl: youtubeUrl,
+      liveUrl: liveUrl,
+      resolvedVideoId: videoId,
+      missingTitle: !title,
+      missingDescription: !description,
+      missingStartDate: !startDate,
+      firstAttemptHtmlLength: html.length,
+      firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
+      firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
+      firstAttemptVideoIdOccurrences: findAllVideoIdOccurrences(html)
+    });
   }
 
   return {
@@ -1767,6 +1840,12 @@ async function checkAllChurchesLive(env) {
   let lastCompletedCount = 0;
   let completedNormally = false;
 
+  // Accumulates every diagnostic sample checkChurchLive captures during
+  // this cycle (see recordLiveCheckDebugSample/flushLiveCheckDebugSamples
+  // above) - written to KV exactly once, in the finally block below,
+  // rather than once per matching church.
+  const pendingDebugSamples = [];
+
   try {
     for (let i = 0; i < batchCandidates.length; i++) {
       const c = batchCandidates[i];
@@ -1791,7 +1870,7 @@ async function checkAllChurchesLive(env) {
 
       try {
         const churchCheckStartedAt = Date.now();
-        const status = await checkChurchLive(c.youtubeUrl, env, c.id, c.name);
+        const status = await checkChurchLive(c.youtubeUrl, env, c.id, c.name, pendingDebugSamples);
         const churchCheckMs = Date.now() - churchCheckStartedAt;
         // channelUrl is the fallback the frontend links to when videoId is
         // null (confirmed in production: YouTube can serve a stripped page
@@ -2069,6 +2148,11 @@ async function checkAllChurchesLive(env) {
     if (!completedNormally) {
       await writeProgress(lastCompletedCount, null, false);
     }
+    // Flush whatever diagnostic samples this cycle collected, exactly
+    // once, regardless of whether the cycle completed normally or threw -
+    // a cycle that dies partway through shouldn't lose the samples
+    // already gathered from the churches it did get to.
+    await flushLiveCheckDebugSamples(env, pendingDebugSamples);
   }
 }
 
