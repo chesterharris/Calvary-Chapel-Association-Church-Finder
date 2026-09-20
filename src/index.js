@@ -636,22 +636,59 @@ async function handleDeleteChurch(request, env) {
 
 // ---- Featured video (Workers KV) ----
 //
-// A single admin-managed, non-scrolling banner for one occasional
-// non-live video link (e.g. a conference on-demand recording) - distinct
+// A site-wide, admin-managed banner for one occasional non-live video
+// link (e.g. a conference on-demand recording) or playlist - distinct
 // from the scrolling Conference/Radio tickers. Managed via "Manage
 // Featured Video" in the admin hamburger menu.
 //
-// Stored in KV under FEATURED_VIDEO_KV_KEY as one JSON object:
-//   { linkText, url, onlineDate, offlineDate, version, updatedAt }
+// RESTORED 2026-09-20: this whole queue feature (everything below) had
+// silently reverted to an older, single-record version at some point
+// after it was originally built and confirmed working - discovered when
+// the admin's "Manage Featured Video" dialog came up blank even though
+// the frontend (public/index.html) still had its full "Now Showing" /
+// "Up Next" UI intact. Same underlying pattern as the live-check
+// diagnostic-capture code going missing earlier the same night - most
+// likely an uncommitted-changes revert (this project is a git repo; a
+// "Discard Changes" in VS Code's Source Control, or a checkout, would
+// wipe out anything not yet committed). Rebuilt from the original design
+// discussed with the admin and re-verified against a standalone test
+// harness (48 assertions: media-type parsing, promotion/chaining, the
+// gap-mode toggle, versioning stability, and validation) before being
+// deployed again - see /tmp/fv_rebuild in that session for the harness
+// if this ever needs re-deriving. Committing this file to git after
+// changes are confirmed working would prevent a third recurrence.
 //
-// version only increments when linkText or url actually changes (see
-// handleSaveFeaturedVideo below) - editing just the online/offline dates
-// on an otherwise-unchanged entry keeps the same version, so a visitor
-// who already dismissed this entry (see the frontend's
-// cca-featured-video-dismissed-version localStorage key) does not see it
-// again purely because the admin extended its offline date. Entering
-// different linkText/url is treated as a new entry: version increments,
-// and every visitor sees it again regardless of any prior dismissal.
+// Two slots: "Now Showing" (always required) and "Up Next" (entirely
+// optional). Up Next either chains off Now Showing's offline date
+// automatically (autoStart, the default) or waits for its own explicit
+// online date - a deliberate gap where nothing is featured.
+//
+// Stored in KV under FEATURED_VIDEO_KV_KEY as:
+//   { nextVersion, entries: [nowShowingEntry, upNextEntry?] }
+// entries has 1 or 2 items. Each entry:
+//   { linkText, url, mediaType, mediaId, onlineDate, offlineDate,
+//     autoStart, version, updatedAt }
+// mediaType/mediaId are resolved server-side from url (see
+// parseYouTubeMedia) so the frontend can decide whether to open the
+// lightbox (single video or playlist) or just follow a plain link.
+//
+// version is per-ENTRY and only increments when that entry's linkText or
+// url actually changes (see handleSaveFeaturedVideo below) - editing
+// just its dates keeps the same version, so a visitor who already
+// dismissed it (see the frontend's cca-featured-video-dismissed-version
+// localStorage key) doesn't see it again purely because the admin
+// extended its offline date. A new linkText/url is treated as a new
+// entry: version increments, and every visitor sees it again regardless
+// of any prior dismissal.
+//
+// Re-anchored on every read AND every save: resolveFeaturedVideoState
+// below walks the array to determine which entry is ACTUALLY showing
+// right now (today's date may have already moved past Now Showing's
+// expiry, promoting Up Next) - both the admin endpoint and the save
+// handler use this, so the "Manage Featured Video" form always reflects
+// what's really showing, letting the admin configure a brand new Up Next
+// entry once the old one has taken over, without ever needing more than
+// two entries stored at once (no history accumulation).
 //
 // onlineDate/offlineDate are plain YYYY-MM-DD date-picker values (no
 // time component) - compared lexically against "today" in the same
@@ -659,35 +696,146 @@ async function handleDeleteChurch(request, env) {
 
 const FEATURED_VIDEO_KV_KEY = 'featured-video';
 
-async function loadFeaturedVideo(env) {
-  const raw = await env.CHURCHES_KV.get(FEATURED_VIDEO_KV_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-async function saveFeaturedVideoRecord(env, record) {
-  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(record));
-}
-
 function todayDateString() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Visible = fully configured, at or past its online date (or none set),
-// and not yet past its offline date. Only the PUBLIC endpoint applies
-// this - the admin endpoint always returns the raw record so the Manage
-// Featured Video form can prefill even a scheduled or expired entry.
-function isFeaturedVideoVisible(record, today) {
-  if (!record || !record.linkText || !record.url || !record.offlineDate) return false;
-  if (record.onlineDate && record.onlineDate > today) return false;
-  if (record.offlineDate <= today) return false;
-  return true;
+// Detects whether a YouTube URL points at a single video or a playlist,
+// and extracts the id the frontend needs to embed it in the lightbox
+// (see createLightboxPlayer/openLiveVideoLightbox in the frontend).
+// Anything that isn't a recognizable YouTube video/playlist URL falls
+// back to 'other', which the frontend just treats as a plain link.
+function parseYouTubeMedia(rawUrl) {
+  if (!rawUrl) return { mediaType: 'other', mediaId: null };
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch (err) {
+    return { mediaType: 'other', mediaId: null };
+  }
+  const host = url.hostname.replace(/^www\./, '').toLowerCase();
+  let videoId = null;
+  if (host === 'youtu.be') {
+    videoId = url.pathname.split('/').filter(Boolean)[0] || null;
+  } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+    if (url.pathname === '/watch') {
+      videoId = url.searchParams.get('v');
+    } else {
+      const embedMatch = url.pathname.match(/^\/embed\/([a-zA-Z0-9_-]{11})/);
+      const shortsMatch = url.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})/);
+      if (embedMatch) videoId = embedMatch[1];
+      else if (shortsMatch) videoId = shortsMatch[1];
+    }
+  }
+  // A single-video URL wins over a list= param when both are present
+  // (e.g. a video played from within a playlist) - the admin almost
+  // always means to link to the video itself in that case.
+  if (videoId) return { mediaType: 'video', mediaId: videoId };
+  const listId = (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com')
+    ? url.searchParams.get('list')
+    : null;
+  if (listId) return { mediaType: 'playlist', mediaId: listId };
+  return { mediaType: 'other', mediaId: null };
+}
+
+async function loadFeaturedVideoStore(env) {
+  const raw = await env.CHURCHES_KV.get(FEATURED_VIDEO_KV_KEY);
+  if (!raw) return { nextVersion: 1, entries: [] };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { nextVersion: 1, entries: [] };
+  }
+  if (parsed && Array.isArray(parsed.entries)) {
+    return {
+      nextVersion: typeof parsed.nextVersion === 'number' ? parsed.nextVersion : 1,
+      entries: parsed.entries
+    };
+  }
+  // Backward-compat: migrates the OLD single-object shape (one flat
+  // record, no queue - the shape this file had briefly reverted to) into
+  // a one-entry queue the first time it's read, preserving its version so
+  // an already-dismissed entry stays dismissed.
+  if (parsed && parsed.linkText && parsed.url) {
+    const media = parseYouTubeMedia(parsed.url);
+    const oldVersion = typeof parsed.version === 'number' ? parsed.version : 1;
+    return {
+      nextVersion: oldVersion + 1,
+      entries: [{
+        linkText: parsed.linkText,
+        url: parsed.url,
+        mediaType: media.mediaType,
+        mediaId: media.mediaId,
+        onlineDate: parsed.onlineDate || null,
+        offlineDate: parsed.offlineDate,
+        autoStart: true,
+        version: oldVersion,
+        updatedAt: parsed.updatedAt || new Date().toISOString()
+      }]
+    };
+  }
+  return { nextVersion: 1, entries: [] };
+}
+
+async function saveFeaturedVideoStore(env, store) {
+  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(store));
+}
+
+// Walks the (at most 2-entry) queue and figures out which entry is
+// ACTUALLY showing as of `today`, and which one - if any - is still
+// queued up behind it. entries[1]'s effective online date chains off
+// entries[0]'s offline date (autoStart, the default) unless autoStart is
+// explicitly false, in which case entries[1] waits for its own onlineDate
+// instead - a deliberate gap where nothing is featured.
+function resolveFeaturedVideoState(entries, today) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  const e0 = list[0] || null;
+  const e1 = list[1] || null;
+
+  const online0 = e0 ? (e0.onlineDate || null) : null;
+  const online1 = e1
+    ? (e1.autoStart === false ? (e1.onlineDate || null) : (e0 ? e0.offlineDate : null))
+    : null;
+
+  function isVisible(entry, effectiveOnline) {
+    if (!entry || !entry.linkText || !entry.url || !entry.offlineDate) return false;
+    if (effectiveOnline && effectiveOnline > today) return false;
+    if (entry.offlineDate <= today) return false;
+    return true;
+  }
+
+  const visible0 = isVisible(e0, online0);
+  const visible1 = isVisible(e1, online1);
+
+  if (visible0) {
+    // Now Showing is still within its window - Up Next (if any) stays
+    // queued behind it exactly as configured.
+    return { current: Object.assign({}, e0, { onlineDate: online0 }), currentVisible: true, next: e1 || null };
+  }
+  if (visible1) {
+    // Now Showing has expired (or there wasn't one) and Up Next has taken
+    // over - bake in its resolved effective online date (the chained
+    // value, if that's what applied) as its new, explicit online date,
+    // and drop autoStart since it's no longer "up next" - it's the one
+    // actually showing now. The next save starts from this baseline,
+    // freeing the Up Next slot for a brand new entry.
+    const promoted = Object.assign({}, e1, { onlineDate: online1 });
+    delete promoted.autoStart;
+    return { current: promoted, currentVisible: true, next: null };
+  }
+  // Neither is visible right now (e.g. Now Showing is scheduled for the
+  // future, or nothing is configured at all) - surface whatever's
+  // configured as-is so the admin form still has something to show/edit.
+  return { current: e0 || null, currentVisible: false, next: e1 || null };
 }
 
 async function handleGetFeaturedVideo(request, env) {
-  const record = await loadFeaturedVideo(env);
-  const today = todayDateString();
-  const visible = isFeaturedVideoVisible(record, today)
-    ? { linkText: record.linkText, url: record.url, version: record.version }
+  const store = await loadFeaturedVideoStore(env);
+  const resolved = resolveFeaturedVideoState(store.entries, todayDateString());
+  const current = resolved.currentVisible ? resolved.current : null;
+  const visible = current
+    ? { linkText: current.linkText, url: current.url, mediaType: current.mediaType || 'other', mediaId: current.mediaId || null, version: current.version }
     : null;
   return new Response(JSON.stringify(visible), {
     headers: {
@@ -706,8 +854,9 @@ async function handleGetFeaturedVideoAdmin(request, env) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-  const record = await loadFeaturedVideo(env);
-  return new Response(JSON.stringify(record), {
+  const store = await loadFeaturedVideoStore(env);
+  const resolved = resolveFeaturedVideoState(store.entries, todayDateString());
+  return new Response(JSON.stringify({ current: resolved.current, upNext: resolved.next }), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
@@ -730,12 +879,16 @@ async function handleSaveFeaturedVideo(request, env) {
     });
   }
 
-  const linkText = incoming && typeof incoming.linkText === 'string' ? incoming.linkText.trim() : '';
-  const targetUrl = incoming && typeof incoming.url === 'string' ? incoming.url.trim() : '';
-  const onlineDate = incoming && typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate : null;
-  const offlineDate = incoming && typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
+  const incomingCurrent = incoming && incoming.current ? incoming.current : {};
+  const incomingUpNext = incoming && incoming.upNext ? incoming.upNext : {};
 
-  if (!linkText || !targetUrl || !offlineDate) {
+  // ---- Now Showing (always required) ----
+  const linkText = typeof incomingCurrent.linkText === 'string' ? incomingCurrent.linkText.trim() : '';
+  const url = typeof incomingCurrent.url === 'string' ? incomingCurrent.url.trim() : '';
+  const onlineDate = typeof incomingCurrent.onlineDate === 'string' && incomingCurrent.onlineDate ? incomingCurrent.onlineDate : null;
+  const offlineDate = typeof incomingCurrent.offlineDate === 'string' ? incomingCurrent.offlineDate.trim() : '';
+
+  if (!linkText || !url || !offlineDate) {
     return new Response(JSON.stringify({ error: 'Link text, URL, and offline date are required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
@@ -748,24 +901,92 @@ async function handleSaveFeaturedVideo(request, env) {
     });
   }
 
-  const existing = await loadFeaturedVideo(env);
-  // Version only moves when the actual content (link text or URL)
-  // changes - see the comment above FEATURED_VIDEO_KV_KEY.
-  const contentChanged = !existing || existing.linkText !== linkText || existing.url !== targetUrl;
-  const version = !existing ? 1 : (contentChanged ? existing.version + 1 : existing.version);
+  // ---- Up Next (entirely optional - blank means "not configured") ----
+  const linkText2 = typeof incomingUpNext.linkText === 'string' ? incomingUpNext.linkText.trim() : '';
+  const url2 = typeof incomingUpNext.url === 'string' ? incomingUpNext.url.trim() : '';
+  const offlineDate2 = typeof incomingUpNext.offlineDate === 'string' ? incomingUpNext.offlineDate.trim() : '';
+  const autoStart2 = incomingUpNext.autoStart !== false;
+  const onlineDate2 = (!autoStart2 && typeof incomingUpNext.onlineDate === 'string' && incomingUpNext.onlineDate) ? incomingUpNext.onlineDate : null;
+  const upNextConfigured = !!(linkText2 || url2 || offlineDate2 || (!autoStart2 && onlineDate2));
 
-  const record = {
+  if (upNextConfigured) {
+    if (!linkText2 || !url2 || !offlineDate2) {
+      return new Response(JSON.stringify({ error: 'Up Next needs link text, a URL, and an offline date (or leave it entirely blank)' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (!autoStart2 && !onlineDate2) {
+      return new Response(JSON.stringify({ error: "Up Next needs an online date when it doesn't start automatically" }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (onlineDate2 && onlineDate2 >= offlineDate2) {
+      return new Response(JSON.stringify({ error: 'Up Next: offline date must be after the online date' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (onlineDate2 && onlineDate2 < offlineDate) {
+      return new Response(JSON.stringify({ error: "Up Next's online date can't be before Now Showing's offline date" }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // Re-anchor against what's ACTUALLY showing today, then apply the
+  // admin's edits on top of that baseline (see resolveFeaturedVideoState) -
+  // this is what lets the admin open the form after an automatic
+  // promotion and configure a fresh Up Next entry without ever seeing a
+  // stale "Now Showing" that's already expired.
+  const store = await loadFeaturedVideoStore(env);
+  const today = todayDateString();
+  const baseline = resolveFeaturedVideoState(store.entries, today);
+  const baselineCurrent = baseline.current;
+  const baselineNext = baseline.next;
+
+  let nextVersion = typeof store.nextVersion === 'number' ? store.nextVersion : 1;
+
+  // Version only moves when the actual content (link text or URL)
+  // changes - see the comment above FEATURED_VIDEO_KV_KEY - compared
+  // against each slot's respective baseline entry above.
+  const currentContentChanged = !baselineCurrent || baselineCurrent.linkText !== linkText || baselineCurrent.url !== url;
+  const currentVersion = currentContentChanged ? nextVersion++ : baselineCurrent.version;
+  const currentMedia = parseYouTubeMedia(url);
+
+  const entries = [{
     linkText: linkText,
-    url: targetUrl,
+    url: url,
+    mediaType: currentMedia.mediaType,
+    mediaId: currentMedia.mediaId,
     onlineDate: onlineDate,
     offlineDate: offlineDate,
-    version: version,
+    version: currentVersion,
     updatedAt: new Date().toISOString()
-  };
+  }];
 
-  await saveFeaturedVideoRecord(env, record);
+  if (upNextConfigured) {
+    const upNextContentChanged = !baselineNext || baselineNext.linkText !== linkText2 || baselineNext.url !== url2;
+    const upNextVersion = upNextContentChanged ? nextVersion++ : baselineNext.version;
+    const upNextMedia = parseYouTubeMedia(url2);
+    entries.push({
+      linkText: linkText2,
+      url: url2,
+      mediaType: upNextMedia.mediaType,
+      mediaId: upNextMedia.mediaId,
+      onlineDate: onlineDate2,
+      offlineDate: offlineDate2,
+      autoStart: autoStart2,
+      version: upNextVersion,
+      updatedAt: new Date().toISOString()
+    });
+  }
 
-  return new Response(JSON.stringify({ success: true, version: version }), {
+  await saveFeaturedVideoStore(env, { nextVersion: nextVersion, entries: entries });
+
+  return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
   });
 }
