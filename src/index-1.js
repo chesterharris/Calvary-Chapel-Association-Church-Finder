@@ -1,0 +1,4455 @@
+// Cloudflare Worker (with static assets)
+//
+// Handles two things:
+//   1. Any request to /conferences -> scrapes calvarycca.org server-side and
+//      returns clean JSON for the ticker (not subject to browser CORS rules,
+//      since this runs on Cloudflare's servers, not in the visitor's browser).
+//   2. Everything else -> served from the /public folder (your map's index.html
+//      and any other static files) via the ASSETS binding.
+//
+// Edge-cached for 6 hours so we're not re-scraping calvarycca.org on every load.
+
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
+import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
+import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
+import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
+import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
+
+const SOURCE_URL = 'https://calvarycca.org/conferences/';
+const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
+
+// ---- Admin login (Google Sign-In) ----
+//
+// Flow: the browser gets a signed ID token from Google, POSTs it to
+// /api/verify-admin. We verify the token's signature against Google's public
+// keys (so it can't be forged), then check the email inside it against
+// env.ADMIN_EMAIL (a Worker secret - never hardcoded, never logged). If it
+// matches, we hand back our own short-lived signed session cookie so the
+// browser doesn't have to re-run the Google flow on every request.
+//
+// This is deliberately NOT tied to hiding any features yet - right now it
+// only lets the frontend know "yes, this visitor is the admin" so it can
+// show a badge. Real feature-gating (hiding Add/Manage/Delete from non-admins)
+// is a separate future step, and when that happens it should also check
+// this same session server-side rather than trusting the browser.
+
+const SESSION_COOKIE = 'cca_admin_session';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+
+function base64UrlEncode(bytes) {
+  let str = '';
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecodeToBytes(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function hmacKey(secret) {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+// Builds "<payload>.<signature>", both base64url. Payload is just
+// { email, exp } - no secrets live in the cookie itself, only the signature
+// proves we issued it.
+async function signSession(payload, secret) {
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
+  const payloadB64 = base64UrlEncode(payloadBytes);
+  const key = await hmacKey(secret);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadB64));
+  const sigB64 = base64UrlEncode(new Uint8Array(sig));
+  return payloadB64 + '.' + sigB64;
+}
+
+// Returns the parsed payload if the signature is valid and it hasn't
+// expired, otherwise null. Never throws.
+async function verifySession(token, secret) {
+  if (!token || !token.includes('.')) return null;
+  const [payloadB64, sigB64] = token.split('.');
+  try {
+    const key = await hmacKey(secret);
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      base64UrlDecodeToBytes(sigB64),
+      new TextEncoder().encode(payloadB64)
+    );
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(payloadB64)));
+    if (!payload.exp || Date.now() / 1000 > payload.exp) return null;
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get('Cookie') || '';
+  const match = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function isAdminRequest(request, env) {
+  const token = getCookie(request, SESSION_COOKIE);
+  const payload = await verifySession(token, env.SESSION_SECRET);
+  return !!(payload && payload.email && env.ADMIN_EMAIL && payload.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase());
+}
+
+async function handleVerifyAdmin(request, env) {
+  const cors = { 'Content-Type': 'application/json' };
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Bad request body' }), { status: 400, headers: cors });
+  }
+
+  const idToken = body && body.token;
+  if (!idToken) {
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Missing token' }), { status: 400, headers: cors });
+  }
+
+  if (!env.GOOGLE_CLIENT_ID || !env.ADMIN_EMAIL || !env.SESSION_SECRET) {
+    // Misconfigured Worker - fail closed, never treat this as "admin".
+    return new Response(JSON.stringify({ isAdmin: false, error: 'Server not configured' }), { status: 500, headers: cors });
+  }
+
+  let payload;
+  try {
+    const result = await jwtVerify(idToken, GOOGLE_JWKS, {
+      issuer: ['https://accounts.google.com', 'accounts.google.com'],
+      audience: env.GOOGLE_CLIENT_ID
+    });
+    payload = result.payload;
+  } catch (err) {
+    // Token didn't verify (forged, expired, wrong audience, etc.) - not admin.
+    return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
+  }
+
+  const email = (payload.email || '').toLowerCase();
+  const isAdmin = !!(payload.email_verified && email === env.ADMIN_EMAIL.toLowerCase());
+
+  if (!isAdmin) {
+    return new Response(JSON.stringify({ isAdmin: false }), { status: 200, headers: cors });
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  const session = await signSession({ email, exp }, env.SESSION_SECRET);
+
+  const setCookie = `${SESSION_COOKIE}=${encodeURIComponent(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
+  return new Response(JSON.stringify({ isAdmin: true }), {
+    status: 200,
+    headers: { ...cors, 'Set-Cookie': setCookie }
+  });
+}
+
+async function handleWhoAmI(request, env) {
+  const admin = await isAdminRequest(request, env);
+  return new Response(JSON.stringify({ isAdmin: admin }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+function handleLogout() {
+  const clearCookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie }
+  });
+}
+
+// Bump this any time parseConferences() (or anything it depends on) changes.
+// The cache key includes this version, so a fix is never masked by an old
+// cached response sitting around from before the fix - it's a brand new
+// cache key, not a hit against the stale one.
+const CACHE_VERSION = 3;
+
+const ENTITY_MAP = {
+  '&amp;': '&', '&nbsp;': ' ', '&quot;': '"', '&#039;': "'", '&apos;': "'",
+  '&#8211;': '\u2013', '&#8212;': '\u2014', '&#8216;': '\u2018', '&#8217;': '\u2019',
+  '&#8220;': '\u201c', '&#8221;': '\u201d', '&#8230;': '\u2026',
+  '&ndash;': '\u2013', '&mdash;': '\u2014', '&lsquo;': '\u2018', '&rsquo;': '\u2019',
+  '&ldquo;': '\u201c', '&rdquo;': '\u201d', '&hellip;': '\u2026'
+};
+
+function decodeEntities(str) {
+  return str.replace(/&#?\w+;/g, function(match) {
+    if (ENTITY_MAP[match]) return ENTITY_MAP[match];
+    const numeric = match.match(/^&#(\d+);$/);
+    if (numeric) return String.fromCharCode(parseInt(numeric[1], 10));
+    return match;
+  });
+}
+
+function stripTags(html) {
+  return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+}
+
+// Safely decodes a raw JSON string's escape sequences (\", \\, \n, \uXXXX,
+// etc.) when we've pulled that string's contents out via regex rather than
+// a full JSON.parse of the surrounding (often huge, not-fully-valid-as-one-
+// object) page script. Wrapping in quotes and handing it back to JSON.parse
+// is a simple, correct way to reuse the platform's own escape handling
+// instead of reimplementing it.
+function decodeJsonString(raw) {
+  try {
+    return JSON.parse('"' + raw + '"');
+  } catch (err) {
+    return raw;
+  }
+}
+
+// Fallback for checkChurchLive's startDate extraction, used only when both
+// of its primary sources (itemprop="startDate" meta, liveBroadcastDetails
+// JSON) come up empty. Confirmed in production (2026-09, live-but-missing-
+// metadata diagnostic samples, Calvary Chapel Romoland and Calvary Chapel
+// Edmonds) that on this stripped page shape, the one remaining place a
+// start time survives at all is YouTube's own human-readable relative-time
+// text - e.g. "Started streaming 88 minutes ago" - sitting in a
+// videoSecondaryInfoRenderer's dateText field. This can only ever produce
+// an APPROXIMATE ISO timestamp (rounded to whatever unit YouTube's text
+// used, and accurate only as of the moment this particular fetch ran) -
+// good enough for the "how long has this been live" display the Live Now
+// cards want, not a substitute for a real, precise timestamp. Returns null
+// for any phrase it doesn't recognize rather than guessing.
+const RELATIVE_STARTED_STREAMING_UNIT_MS = {
+  second: 1000,
+  minute: 60 * 1000,
+  hour: 60 * 60 * 1000,
+  day: 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000
+};
+function startDateFromRelativeStartedStreamingPhrase(html) {
+  const match = html.match(/"dateText":\{"simpleText":"Started streaming (\d+) (second|minute|hour|day|week)s? ago"\}/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unitMs = RELATIVE_STARTED_STREAMING_UNIT_MS[match[2]];
+  if (isNaN(amount) || !unitMs) return null;
+  return new Date(Date.now() - amount * unitMs).toISOString();
+}
+
+// Removes entire <script>...</script> and <style>...</style> blocks - code and
+// all - not just the tags. Without this, embedded JS text (e.g. from analytics
+// or emoji-support snippets WordPress injects inline) can leak into the parsed
+// text as if it were page content.
+function stripScriptsAndStyles(html) {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+}
+
+// Finds the exact <div> that holds the conference listings (identified by two
+// stable class tokens seen in its opening tag) and returns only what's inside
+// it - by scanning matching <div>/</div> pairs rather than just searching for
+// nearby text. This means content sitting after the last conference but still
+// inside the page (leftover scripts, footer nav, etc.) can never be included,
+// because it's structurally outside this div, not just "far from a landmark."
+function extractConferenceListDiv(html) {
+  const openTagRe = /<div\b[^>]*class="([^"]*)"[^>]*>/gi;
+  let m;
+  let startIdx = -1;
+  let afterOpenTag = -1;
+  while ((m = openTagRe.exec(html)) !== null) {
+    const classAttr = m[1];
+    if (classAttr.includes('flex_column_div') && classAttr.includes('avia-builder-el-2')) {
+      startIdx = m.index;
+      afterOpenTag = openTagRe.lastIndex;
+      break;
+    }
+  }
+  if (startIdx === -1) return null; // marker div not found - caller will fall back
+
+  const tagRe = /<div\b[^>]*>|<\/div>/gi;
+  tagRe.lastIndex = afterOpenTag;
+  let depth = 1;
+  let match;
+  while ((match = tagRe.exec(html)) !== null) {
+    if (match[0].toLowerCase() === '</div>') {
+      depth--;
+      if (depth === 0) {
+        return html.slice(startIdx, tagRe.lastIndex);
+      }
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(startIdx); // unbalanced markup - take everything from the start point onward
+}
+
+// Fallback used only if the specific div above can't be found (e.g. the site's
+// markup changes). Bounds the search using nearby heading/footer text instead -
+// looser than the div-scan above, but still much safer than searching the
+// whole page.
+function extractByLandmarks(html) {
+  const startPatterns = [/Regional Conferences/i, /Upcoming Conferences/i, /<h1[^>]*>\s*Conferences/i];
+  const endPatterns = [/Scroll to top/i, /©\s*\d{4}/i, /<footer\b/i];
+
+  let startIdx = -1;
+  for (const p of startPatterns) {
+    const m = html.match(p);
+    if (m && m.index !== undefined) { startIdx = m.index; break; }
+  }
+  let endIdx = -1;
+  for (const p of endPatterns) {
+    const m = html.match(p);
+    if (m && m.index !== undefined && (endIdx === -1 || m.index < endIdx)) endIdx = m.index;
+  }
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    return html.slice(startIdx, endIdx);
+  }
+  return html; // couldn't find landmarks either - fall back to searching the whole page
+}
+
+function extractContentRegion(html) {
+  return extractConferenceListDiv(html) || extractByLandmarks(html);
+}
+
+// Detail text should read like a date/location line, never like code. If it
+// contains obvious programming tokens, something went wrong upstream (a
+// mismatched tag boundary, an unstripped script fragment, etc.) - better to
+// drop that one entry than show junk in the ticker.
+const CODE_SMELL = /function\s*\(|=>|\bwindow\.|\bdocument\.|\bvar\s+\w+\s*=|\bconst\s+\w+\s*=|sessionStorage|querySelector|getElementById/i;
+
+const MAX_DETAIL_LENGTH = 220; // safety net in case a match runs long
+
+// ---- Conference date parsing (best-effort) ----
+//
+// Confirmed by direct inspection of the source site: there is NO
+// machine-readable date anywhere in a conference listing - no ISO strings,
+// no <time datetime>, no data-* attributes, no microdata. Every date is
+// embedded as freeform text in the detail line (e.g. "CC Chino Valley, CA
+// - Aug 6-8", or a bare "Sep 7-9"), and the year appears only in the
+// title ("2026 West Coast Worship Conference"), never next to the date
+// itself. This is a best-effort parser for the "Mon D", "Mon D-D", and
+// "Mon D-Mon D" shapes seen in every real entry so far - NOT a guarantee.
+// An entry whose detail doesn't match is left with startDate/endDate both
+// null, and the frontend falls back to showing the plain detail text
+// unchanged (exactly like before this feature existed) rather than ever
+// displaying a guessed/wrong countdown. See CONFERENCE_DATE_OVERRIDES
+// below for hand-correcting one specific entry instead of loosening this
+// regex to try to cover it.
+const CONFERENCE_MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function conferenceMonthIndex(name) {
+  return CONFERENCE_MONTH_NAMES.indexOf(name.slice(0, 3).toLowerCase());
+}
+
+// Captures: month1, day1, (month2 optional - only present for a range that
+// crosses a month boundary), day2 (optional - absent for a single-day
+// entry). En dash, em dash, and a plain hyphen are all accepted as the
+// range separator since real entries use different ones. Each day number
+// also accepts an optional ordinal suffix (1st/2nd/3rd/4th...) sitting
+// directly against the digits with no space - the live site's actual
+// current text is exactly this shape ("September 7th \u2013 9th"), and without
+// this the separator match below would never fire (it looks for the dash
+// immediately after the day digits), silently truncating every real
+// conference to a single-day event. Confirmed against every entry
+// currently on calvarycca.org/conferences/ - see CONFERENCE_DATE_OVERRIDES
+// for the one entry ("...& 19th") that isn't a dash-separated range at all.
+const CONFERENCE_DATE_RE = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*[\u2013\u2014-]\s*(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2})(?:st|nd|rd|th)?)?/i;
+
+function parseConferenceDetailDates(detail, year) {
+  if (!year || !detail) return null;
+  const m = CONFERENCE_DATE_RE.exec(detail);
+  if (!m) return null;
+  const startMonth = conferenceMonthIndex(m[1]);
+  if (startMonth === -1) return null;
+  const startDay = Number(m[2]);
+  const endMonth = m[3] ? conferenceMonthIndex(m[3]) : startMonth;
+  const endDay = m[4] ? Number(m[4]) : startDay;
+  if (endMonth === -1 || !startDay || !endDay) return null;
+
+  const startDate = new Date(Date.UTC(year, startMonth, startDay));
+  const endDate = new Date(Date.UTC(year, endMonth, endDay));
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null;
+  // A range that appears to run backwards is more likely a misread month
+  // than a real conference - safer to discard (fall back to plain text)
+  // than to show a bogus multi-month countdown or Day-X-of-Y.
+  if (endDate.getTime() < startDate.getTime()) return null;
+
+  // Whatever text sits before the matched date range, with a trailing
+  // separator (" - ", ": ", a comma before "September...", etc.) trimmed
+  // off, is the location/venue part (e.g. "CC Chino Valley, CA" or "at
+  // Mount Hermon") - kept separately so the ticker can still show the
+  // location alongside a computed countdown/Day-X-of-Y instead of losing
+  // it once the plain date text is replaced. The trailing comma case
+  // ("at Mount Hermon, September 21st-23rd") only started mattering once
+  // the ordinal-suffix fix above let this entry parse at all.
+  const locationPrefix = detail.slice(0, m.index).replace(/[\s:,—–-]+$/, '').trim() || null;
+
+  return {
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+    locationPrefix: locationPrefix
+  };
+}
+
+// Hand-corrections/additions for entries the parser above can't handle (an
+// unusual date format, a typo on the source site, etc.) or gets wrong -
+// empty by default, add entries here as needed. `titleMatch` is a
+// case-insensitive SUBSTRING tested against the conference's title (not an
+// exact match), so one entry stays matched year over year even though the
+// title's leading year changes ("2026 West Coast Conference" -> "2027
+// West Coast Conference") - only the dates below need updating each year,
+// same upkeep the existing FALLBACK_CONFERENCES list in index.html already
+// requires.
+const CONFERENCE_DATE_OVERRIDES = [
+  // { titleMatch: 'West Coast Conference', startDate: '2026-10-26', endDate: '2026-10-28' },
+
+  // "Northwest Washington Puget Sound Conference: September 17th & 19th" -
+  // two specific days with a gap on the 18th, not a continuous 3-day
+  // event, per explicit confirmation - the general parser would otherwise
+  // read the "&" as if it weren't there and guess a single-day Sep 17
+  // event (it doesn't recognize "&" as a range separator at all). Rather
+  // than teach the parser a shape that would misrepresent this as a
+  // Day-X-of-3 countdown spanning a day nothing happens, suppress: true
+  // forces this entry to always show its plain detail text instead of any
+  // computed date - matches this file's "safer to discard than guess"
+  // rule everywhere else. Update the titleMatch text if that name changes.
+  { titleMatch: 'Puget Sound', suppress: true },
+];
+
+function applyConferenceDateOverride(title, parsed) {
+  const hit = CONFERENCE_DATE_OVERRIDES.find(function(o) {
+    return title.toLowerCase().indexOf(o.titleMatch.toLowerCase()) !== -1;
+  });
+  if (!hit) return parsed;
+  if (hit.suppress) return null;
+  return {
+    startDate: hit.startDate,
+    endDate: hit.endDate,
+    locationPrefix: parsed ? parsed.locationPrefix : null
+  };
+}
+
+// Pulls out each "<strong>2026 Some Conference:</strong> details... <a href=...>link text</a>"
+// style entry from the raw page HTML. Matching is intentionally loose (based on
+// text patterns, not specific CSS classes) so small markup changes on the source
+// site don't silently break the whole feed. Any link found inside an entry is
+// kept separately (href + its own visible text) so the front end can make just
+// that link text clickable, rather than the whole entry.
+function parseConferences(rawHtml) {
+  const html = extractContentRegion(stripScriptsAndStyles(rawHtml));
+  const results = [];
+  // Stop the detail capture at the next <strong>, a closing </p> or </div>, or
+  // the start of another script/style tag (belt-and-suspenders alongside the
+  // stripping and div-scoping above).
+  const re = /<strong>\s*([^<]+?)\s*<\/strong>\s*:?\s*([\s\S]*?)(?=<strong>|<\/p>|<\/div>|<script|<style|$)/gi;
+  let match;
+  while ((match = re.exec(html)) !== null) {
+    const rawTitle = decodeEntities(match[1]).trim();
+    if (!/^\d{4}\b/.test(rawTitle)) continue; // keep only entries that start with a year
+    if (rawTitle.length > 120) continue; // real titles are short; long ones are mismatches
+    if (CODE_SMELL.test(rawTitle)) continue;
+
+    const rawDetail = (match[2] || '').slice(0, 4000); // cap input size before processing
+    const linkMatch = rawDetail.match(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    const link = linkMatch ? linkMatch[1] : null;
+    const linkText = linkMatch ? stripTags(linkMatch[2]) : null;
+
+    // Remove the anchor itself from the detail text so it isn't duplicated,
+    // then strip remaining tags for the plain-text portion.
+    const detailWithoutLink = linkMatch ? rawDetail.replace(linkMatch[0], '') : rawDetail;
+    let detail = stripTags(detailWithoutLink)
+      .replace(/\s*\|\s*$/, '')
+      .replace(/^:\s*/, '') // some entries have the colon in a nested <span> rather than right after </strong>
+      .trim();
+
+    if (CODE_SMELL.test(detail)) continue; // discard the whole entry rather than show junk
+
+    if (detail.length > MAX_DETAIL_LENGTH) detail = detail.slice(0, MAX_DETAIL_LENGTH).trim() + '\u2026';
+
+    const cleanTitle = rawTitle.replace(/:$/, '').slice(0, 120);
+    const yearMatch = cleanTitle.match(/^(\d{4})\b/);
+    const year = yearMatch ? Number(yearMatch[1]) : null;
+    const dateInfo = applyConferenceDateOverride(cleanTitle, parseConferenceDetailDates(detail, year));
+
+    results.push({
+      title: cleanTitle,
+      detail: detail,
+      link: link,
+      linkText: linkText,
+      // null/null when the date couldn't be confidently parsed (or
+      // there's no override) - see parseConferenceDetailDates above. The
+      // frontend treats null here as "show detail unchanged," never as
+      // "assume no date and hide it."
+      startDate: dateInfo ? dateInfo.startDate : null,
+      endDate: dateInfo ? dateInfo.endDate : null,
+      locationPrefix: dateInfo ? dateInfo.locationPrefix : null
+    });
+  }
+  return results;
+}
+
+// ---- Church data (Workers KV) -----
+//
+// All church records live in KV under a single key, "churches", as one JSON
+// array. The public map reads this via GET /api/churches. The admin panel
+// writes to it via POST (add/edit) and DELETE, both gated behind the same
+// isAdminRequest() check used elsewhere in this file.
+//
+// IDs are permanent and never reused, even after a delete - see
+// getNextChurchId() below. This matters because Edit/Delete/Save all target
+// a record by its id, and a reused id could silently operate on the wrong
+// church later.
+
+const CHURCHES_KV_KEY = 'churches';
+
+async function loadChurches(env) {
+  const raw = await env.CHURCHES_KV.get(CHURCHES_KV_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+async function saveChurches(env, churches) {
+  await env.CHURCHES_KV.put(CHURCHES_KV_KEY, JSON.stringify(churches));
+}
+
+// Next id is always one past the highest id currently in use - ids only ever
+// go forward, so a deleted church's old id is retired permanently rather
+// than being handed out again.
+function getNextChurchId(churches) {
+  let maxId = 0;
+  for (const c of churches) {
+    if (typeof c.id === 'number' && c.id > maxId) maxId = c.id;
+  }
+  return maxId + 1;
+}
+
+async function handleGetChurches(request, env) {
+  const churches = await loadChurches(env);
+  return new Response(JSON.stringify(churches), {
+    headers: {
+      'Content-Type': 'application/json',
+      // Data changes any time the admin saves, so don't let browsers or CDNs
+      // cache this - always ask KV fresh.
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function handleSaveChurch(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!incoming || typeof incoming !== 'object' || !incoming.name) {
+    return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const churches = await loadChurches(env);
+
+  if (incoming.id != null) {
+    // Editing an existing record - id must already exist.
+    const index = churches.findIndex(c => c.id === incoming.id);
+    if (index === -1) {
+      return new Response(JSON.stringify({ error: 'Church id not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    churches[index] = { ...churches[index], ...incoming };
+  } else {
+    // Adding a new record - assign the next permanent id ourselves; never
+    // trust an id the client might have sent for a "new" record.
+    const newChurch = { ...incoming, id: getNextChurchId(churches) };
+    churches.push(newChurch);
+  }
+
+  await saveChurches(env, churches);
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+async function handleDeleteChurch(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!body || typeof body.id !== 'number') {
+    return new Response(JSON.stringify({ error: 'Missing id' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const churches = await loadChurches(env);
+  const filtered = churches.filter(c => c.id !== body.id);
+
+  if (filtered.length === churches.length) {
+    return new Response(JSON.stringify({ error: 'Church id not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  await saveChurches(env, filtered);
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// ---- Featured video (Workers KV) ----
+//
+// A single admin-managed, non-scrolling banner for one occasional
+// non-live video link (e.g. a conference on-demand recording) - distinct
+// from the scrolling Conference/Radio tickers. Managed via "Manage
+// Featured Video" in the admin hamburger menu.
+//
+// Stored in KV under FEATURED_VIDEO_KV_KEY as one JSON object:
+//   { linkText, url, onlineDate, offlineDate, version, updatedAt }
+//
+// version only increments when linkText or url actually changes (see
+// handleSaveFeaturedVideo below) - editing just the online/offline dates
+// on an otherwise-unchanged entry keeps the same version, so a visitor
+// who already dismissed this entry (see the frontend's
+// cca-featured-video-dismissed-version localStorage key) does not see it
+// again purely because the admin extended its offline date. Entering
+// different linkText/url is treated as a new entry: version increments,
+// and every visitor sees it again regardless of any prior dismissal.
+//
+// onlineDate/offlineDate are plain YYYY-MM-DD date-picker values (no
+// time component) - compared lexically against "today" in the same
+// format, which sorts correctly for ISO date strings.
+
+const FEATURED_VIDEO_KV_KEY = 'featured-video';
+
+async function loadFeaturedVideo(env) {
+  const raw = await env.CHURCHES_KV.get(FEATURED_VIDEO_KV_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function saveFeaturedVideoRecord(env, record) {
+  await env.CHURCHES_KV.put(FEATURED_VIDEO_KV_KEY, JSON.stringify(record));
+}
+
+function todayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Visible = fully configured, at or past its online date (or none set),
+// and not yet past its offline date. Only the PUBLIC endpoint applies
+// this - the admin endpoint always returns the raw record so the Manage
+// Featured Video form can prefill even a scheduled or expired entry.
+function isFeaturedVideoVisible(record, today) {
+  if (!record || !record.linkText || !record.url || !record.offlineDate) return false;
+  if (record.onlineDate && record.onlineDate > today) return false;
+  if (record.offlineDate <= today) return false;
+  return true;
+}
+
+async function handleGetFeaturedVideo(request, env) {
+  const record = await loadFeaturedVideo(env);
+  const today = todayDateString();
+  const visible = isFeaturedVideoVisible(record, today)
+    ? { linkText: record.linkText, url: record.url, version: record.version }
+    : null;
+  return new Response(JSON.stringify(visible), {
+    headers: {
+      'Content-Type': 'application/json',
+      // Visibility depends on today's date and can change any time the
+      // admin saves - same reasoning as /api/churches, never cache.
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function handleGetFeaturedVideoAdmin(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const record = await loadFeaturedVideo(env);
+  return new Response(JSON.stringify(record), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handleSaveFeaturedVideo(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const linkText = incoming && typeof incoming.linkText === 'string' ? incoming.linkText.trim() : '';
+  const targetUrl = incoming && typeof incoming.url === 'string' ? incoming.url.trim() : '';
+  const onlineDate = incoming && typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate : null;
+  const offlineDate = incoming && typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
+
+  if (!linkText || !targetUrl || !offlineDate) {
+    return new Response(JSON.stringify({ error: 'Link text, URL, and offline date are required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  if (onlineDate && onlineDate >= offlineDate) {
+    return new Response(JSON.stringify({ error: 'Offline date must be after the online date' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const existing = await loadFeaturedVideo(env);
+  // Version only moves when the actual content (link text or URL)
+  // changes - see the comment above FEATURED_VIDEO_KV_KEY.
+  const contentChanged = !existing || existing.linkText !== linkText || existing.url !== targetUrl;
+  const version = !existing ? 1 : (contentChanged ? existing.version + 1 : existing.version);
+
+  const record = {
+    linkText: linkText,
+    url: targetUrl,
+    onlineDate: onlineDate,
+    offlineDate: offlineDate,
+    version: version,
+    updatedAt: new Date().toISOString()
+  };
+
+  await saveFeaturedVideoRecord(env, record);
+
+  return new Response(JSON.stringify({ success: true, version: version }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// ---- YouTube live-stream detection ----
+//
+// A Cron Trigger (see wrangler config) calls checkAllChurchesLive() on a
+// fixed schedule (proposed: every 10 minutes), independent of site
+// traffic. Results are cached in KV under LIVE_STATUS_KV_KEY. Visitors'
+// page loads only ever read that cache via handleGetLiveStatus() - no
+// visitor page load ever triggers a real YouTube request.
+//
+// Detection method (confirmed empirically - see
+// live-stream-detection-notes.md): fetch a channel's "/live" shorthand
+// URL. If currently live, the raw HTML contains schema.org structured
+// data: `<meta itemprop="isLiveBroadcast" content="True">`. If not live,
+// that block is entirely absent. The canonical link and startDate are
+// pulled from the same response for the video id and "live since" time.
+
+const LIVE_STATUS_KV_KEY = 'live-status';
+const LIVE_CHECK_STAGGER_STATE_KV_KEY = 'live-check-stagger-state';
+// Separate from LIVE_STATUS_KV_KEY (which only ever holds the live-only
+// list visitors' pins are built from) - this holds EVERY candidate's result
+// from the most recent cycle, including ones that errored or simply weren't
+// live, plus a rolling history of recent cycles' stats. Admin-only
+// visibility, never read by the public-facing map.
+const LIVE_CHECK_DEBUG_KV_KEY = 'live-check-debug';
+const LIVE_CHECK_HISTORY_MAX_CYCLES = 50;
+// Live, in-progress status written DURING a cycle (both cron-triggered and
+// manually-triggered via "Run Check Now"), separate from
+// LIVE_CHECK_DEBUG_KV_KEY (which only gets its final write once a cycle
+// finishes). Lets the admin debug panel show a real, accurate progress bar
+// and ETA instead of a simulated one - the panel polls this key while
+// `running` is true.
+const LIVE_CHECK_PROGRESS_KV_KEY = 'live-check-progress';
+// Cloudflare's own Cron Events log only shows a status ("Internal Error")
+// and CPU time per invocation - no way to see the actual thrown error or
+// stack trace, and no click-through to one either. This key exists so an
+// uncaught exception from the SCHEDULED path specifically (see the
+// scheduled() handler at the bottom of this file) gets written somewhere
+// an admin can actually read it, instead of only ever being visible as an
+// opaque red dot in a dashboard table.
+const LIVE_CHECK_LAST_ERROR_KV_KEY = 'live-check-last-error';
+// Which batch's turn it is next - see LIVE_CHECK_BATCH_SIZE for the full
+// reasoning behind batching itself. Just {batchIndex, updatedAt}.
+const LIVE_CHECK_BATCH_STATE_KV_KEY = 'live-check-batch-state';
+// The persisted source of truth for every church's most recent ACTUAL
+// check result, keyed by churchId. Under batching, only one batch's worth
+// of churches gets freshly checked per cycle - this is what lets every
+// OTHER church still show its last known result (live/not-live/waiting)
+// instead of going blank or reverting to "unknown" between its own
+// batch's turns. Superseded the old approach of reading the previous
+// live-status write's `live` array as the only fallback source (which
+// only ever covered previously-LIVE churches) - this covers every
+// church's full last-known state, live or not.
+const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
+
+// Starting point for the delay between each church's fetch in a cron run.
+// YouTube's anti-bot rate limiting kicks in fast on bursts of requests
+// (confirmed in testing: a 429 after just a couple of fetches in quick
+// succession), so checks are sent one at a time with a gap instead of all
+// at once via Promise.all.
+//
+// IMPORTANT: there is no published, trustworthy number for "how much delay
+// is enough" - this isn't a documented rate limit, it's anti-bot heuristics
+// on YouTube's end, and Cloudflare Workers share a small pool of egress IPs
+// across ALL Workers customers (confirmed via Cloudflare's own community
+// forum), so the threshold that matters isn't just our own request rate -
+// it includes however much other, unrelated traffic happens to be sharing
+// our egress IP at a given moment. No fixed constant can be "correct" for
+// that. So instead of guessing a single number, the delay is adaptive: it
+// grows automatically when a cycle sees rate-limit errors, and eases back
+// down slowly during clean runs. Bounds below are the starting guess and
+// the safety ceiling, not a claim about the true threshold.
+// Floor was 1000ms originally; confirmed clean across three separate
+// production tests (500ms/750ms/1000ms, all with a 150-church batch) that
+// pace itself doesn't matter within this range - what actually causes
+// failures is checking too MANY churches in one cycle (see
+// LIVE_CHECK_BATCH_SIZE below), not how fast each request goes. Lowered
+// the floor to the fastest value actually tested clean, rather than
+// leaving the old, now-disproven 1000ms guess in place.
+const LIVE_CHECK_STAGGER_MIN_MS = 500;
+const LIVE_CHECK_STAGGER_MAX_MS = 8000;
+const LIVE_CHECK_STAGGER_DEFAULT_MS = 500;
+const LIVE_CHECK_STAGGER_GROWTH_FACTOR = 2;   // applied on a bad cycle
+const LIVE_CHECK_STAGGER_DECAY_FACTOR = 0.9;  // applied on a fully clean cycle
+const LIVE_CHECK_ERROR_RATE_THRESHOLD = 0.15; // >15% errored triggers growth
+
+// If a single fetch gets rate-limited (429) or otherwise fails, retry once
+// after a short pause before giving up on that church for this cycle.
+const LIVE_CHECK_RETRY_DELAY_MS = 1500;
+
+// Diagnostic-only: when a church comes back isLive:true but BOTH the
+// original fetch and the videoId-retry (below) fail to find a videoId, we
+// don't actually know what YouTube served us instead - only that our
+// regexes didn't match anything. Purely diagnostic - never read by
+// anything that affects live-status results, so a failure to write it is
+// always safe to ignore.
+//
+// IMPORTANT (confirmed in production, 2026-09, across two attempts at
+// this): capturing a raw PREFIX of the page - first the first 4000
+// characters, then (when that proved to just be YouTube's own
+// boilerplate script/error-handler code, identical on every page whether
+// live or not) raised to 500,000 characters - still wasn't enough. A real
+// capture at the 500,000-character cap turned out to have landed entirely
+// inside YouTube's own feature-flag/experiments blob (a huge, effectively
+// unbounded list of internal flag NAMES like "web_enable_canonical_url_
+// manager":true - confirmed by inspecting the actual capture: every
+// "canonical" match in it was one of THESE, not a real <link
+// rel="canonical"> tag). No fixed prefix size can be trusted to get past
+// this, since the blob's size isn't something we control or can predict.
+//
+// So instead of capturing a prefix at all, findLiveCheckDiagnosticLandmarks
+// (below) searches the FULL html string - however large - for the exact
+// handful of fields checkChurchLive's own regexes depend on, and only the
+// small snippet of context around whichever ones are actually FOUND gets
+// stored. This can never be defeated by page size, and stays small
+// regardless, so the sample cap can be generous again.
+const LIVE_CHECK_DEBUG_SAMPLES_KV_KEY = 'live-check-debug-samples';
+const LIVE_CHECK_DEBUG_SAMPLES_MAX = 15; // oldest dropped once exceeded
+// Small - just enough to eyeball whether the page even looks like a
+// normal YouTube page at all (e.g. spotting a consent/interstitial page,
+// which would look completely different from the very first characters).
+const LIVE_CHECK_DEBUG_PREFIX_CHARS = 2000;
+// How much surrounding context to keep around each landmark match found
+// by findLiveCheckDiagnosticLandmarks - enough to read the real tag/JSON
+// shape, not so much it drags in unrelated neighboring content.
+const LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS = 150;
+const LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS = 350;
+
+// Diagnostic-only. Searches the given (full-size, unmodified) HTML string
+// for the specific fields checkChurchLive's own detection logic checks
+// for, plus a couple of looser/broader variants of the same fields, so we
+// can tell "the field is genuinely absent from this response" apart from
+// "the field is there, just not in the exact shape our regex expects."
+// Returns an object keyed by field name, each either {found:false} or
+// {found:true, snippet} with a small window of surrounding text.
+function findLiveCheckDiagnosticLandmarks(html) {
+  const checks = [
+    // Exact patterns checkChurchLive itself uses:
+    { key: 'canonicalLink', pattern: /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/ },
+    { key: 'videoDetailsWithVideoId', pattern: /"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/ },
+    { key: 'isLiveBroadcastMeta', pattern: /<meta itemprop="isLiveBroadcast" content="True">/i },
+    // Looser variants - present without the exact shape we require would
+    // mean the FIELD is there but our specific regex is what's failing,
+    // a meaningfully different finding from the field being absent.
+    { key: 'videoDetailsKeyPresentLoose', pattern: /"videoDetails":\{/ },
+    { key: 'liveBroadcastDetailsPresent', pattern: /"liveBroadcastDetails":\{/ },
+    { key: 'itemPropIdentifierMeta', pattern: /<meta itemprop="identifier" content="([^"]*)">/ },
+    // Confirms whether YouTube's larger per-video data blocks are even
+    // present in the response at all, regardless of their contents.
+    { key: 'ytInitialPlayerResponsePresent', pattern: /ytInitialPlayerResponse\s*=/ },
+    { key: 'ytInitialDataPresent', pattern: /ytInitialData\s*=/ },
+    // Added alongside the "live but missing metadata" capture case (see
+    // checkChurchLive below) - once videoId started resolving via a
+    // buried/unusual location instead of going missing outright, the open
+    // question became whether title/description/startDate are ALSO
+    // sitting somewhere unusual, or genuinely gone from this page shape.
+    { key: 'ogTitleMetaPresent', pattern: /<meta property="og:title" content="[^"]*">/ },
+    { key: 'ogDescriptionMetaPresent', pattern: /<meta property="og:description" content="[^"]*">/ },
+    { key: 'shortDescriptionKeyPresentLoose', pattern: /"shortDescription":/ },
+    { key: 'startTimestampKeyPresentLoose', pattern: /"startTimestamp":/ },
+    { key: 'startedStreamingPhrasePresent', pattern: /Started streaming/ }
+  ];
+  const landmarks = {};
+  checks.forEach(function(c) {
+    const match = html.match(c.pattern);
+    if (match) {
+      const start = Math.max(0, match.index - LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS);
+      landmarks[c.key] = { found: true, snippet: html.slice(start, match.index + LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS) };
+    } else {
+      landmarks[c.key] = { found: false };
+    }
+  });
+  return landmarks;
+}
+
+// Diagnostic-only, and deliberately NOT anchored to "videoDetails" (unlike
+// videoDetailsWithVideoId above) - a live broadcast's real videoDetails
+// object may simply have different keys before videoId, or be shaped
+// differently altogether, which would silently defeat an anchored regex
+// even though a real videoId is sitting right there. This instead finds
+// EVERY bare "videoId":"..." occurrence anywhere in the page - recommended
+// videos, chat replies, and the actual broadcast's own entry all use this
+// same shape - so we can see every candidate and its surrounding context,
+// rather than betting everything on one specific nesting. Capped so a
+// page with many unrelated videoId references (e.g. a sidebar of
+// recommended videos) can't blow up the stored sample.
+const LIVE_CHECK_DEBUG_MAX_VIDEOID_OCCURRENCES = 15;
+function findAllVideoIdOccurrences(html) {
+  const pattern = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
+  const occurrences = [];
+  let match;
+  while ((match = pattern.exec(html)) !== null && occurrences.length < LIVE_CHECK_DEBUG_MAX_VIDEOID_OCCURRENCES) {
+    const start = Math.max(0, match.index - LIVE_CHECK_DEBUG_LANDMARK_BEFORE_CHARS);
+    occurrences.push({
+      videoId: match[1],
+      snippet: html.slice(start, match.index + LIVE_CHECK_DEBUG_LANDMARK_AFTER_CHARS)
+    });
+  }
+  return occurrences;
+}
+
+// Shared by checkChurchLive's own staleness guards AND checkAllChurchesLive's
+// unresolved-live tracking below (see there for why a second, cross-cycle
+// mechanism is needed for churches whose pages come back with no startDate
+// at all). Hoisted to module scope rather than left local to
+// checkChurchLive so both places agree on the exact same thresholds.
+const LIVE_CHECK_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours - hard ceiling
+const LIVE_CHECK_SOFT_DURATION_CAP_MS = 4 * 60 * 60 * 1000; // 4 hours - soft cap, only cuts off a low-audience stream
+const LIVE_CHECK_MIN_REAL_AUDIENCE = 2; // "1 watching" is just our own check hitting the page
+
+// Checks run strictly one at a time in a loop (see checkAllChurchesLive),
+// so a single slow-to-respond page stalls every church behind it, not just
+// itself - confirmed in production with an international channel (Calvary
+// Chapel West Tokyo) that hung far longer than the ~0.3-1.3s every other
+// church's fetch was taking, holding up the whole cycle. Nothing was
+// bounding how long a single fetch() was allowed to hang, so this caps it -
+// well above any real successful response seen so far, but short enough
+// that one slow church can't meaningfully delay everyone else's freshness.
+// A timeout here is treated exactly like any other fetch failure (retried
+// once, then falls back to last-known-good data) - see fetchLivePage below.
+const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
+
+// Confirmed in production, across a full night of testing: cycles
+// checking around 155-162+ churches in one invocation fail 100% of the
+// time (one church hangs for many minutes, well past its own per-church
+// timeout budget), regardless of how the stagger delay between churches
+// is tuned - 500ms, 750ms, 1000ms, and 1800ms were all tested. But 150
+// churches in one invocation, at any of those same stagger values, passed
+// 100% of the time across many consecutive cycles. That points at a
+// request-COUNT ceiling (most likely YouTube's own anti-bot detection),
+// not a pace/rate one - so the real fix is keeping any single cycle's
+// request count safely under that line, not adjusting speed.
+//
+// IMPORTANT UPDATE: that night-time testing was done with few or no
+// churches actually live. Confirmed in production on a heavy Sunday
+// morning (many churches simultaneously live) that 150 was NOT safe
+// under real load: cycles ran the full length of a generously-raised
+// overlap guard (20 minutes - see LIVE_CHECK_OVERLAP_GUARD_MS) and still
+// only reached 100-128 of 150 churches, never completing, 100% of the
+// time for over an hour straight. So the original 150 ceiling was really
+// "150 not-live/fast churches," not "150 churches regardless of how many
+// are actually live" - an actually-live church's page apparently takes
+// meaningfully longer to fetch/parse than a not-live one, and enough of
+// those clustered in one batch compounds far past what any reasonable
+// guard window can absorb. Cut substantially (150 -> 50) to restore a
+// safe margin under real Sunday-morning load, not just the quiet-night
+// case this was originally tuned for. Trade-off: each church's own
+// freshness cadence stretches from ~2 batches (roughly 20 min full
+// rotation) to ~6 batches (roughly 60 min) at 293 total churches - a
+// real cost, but a live indicator that's an hour stale beats one that
+// hasn't updated all morning because the whole system is stuck retrying
+// batch 1 forever.
+//
+// This is what actually replaces the old single-pass-over-everyone
+// design: instead of one cycle trying to check every eligible church,
+// the eligible list is split into batches of this size, and each cron
+// tick checks ONE batch, rotating to the next on the following tick (see
+// loadBatchState/LIVE_CHECK_BATCH_STATE_KV_KEY below). A church not in
+// this cycle's batch keeps showing its last known result (see
+// LIVE_CHECK_MERGED_RESULTS_KV_KEY below) rather than going blank, so the
+// public site always reflects every church's most recent real check -
+// just on a rotating cadence (roughly batchCount x 10 minutes per church)
+// instead of every single cycle. This also scales automatically as more
+// churches are added: batch COUNT grows on its own (ceil(total / this
+// value)), so this number shouldn't need to change just because the
+// church list grows - only if the actual safe-count ceiling turns out to
+// be different from ~50 under real live-heavy load.
+const LIVE_CHECK_BATCH_SIZE = 50;
+
+// If a previous cycle's progress record still says running:true and was
+// started more recently than this, a new cron tick skips its run rather
+// than starting a second, overlapping invocation on top of it. There is
+// no actual overlap-prevention lock in this codebase (confirmed and
+// intentionally ruled out early in this debugging effort, when the
+// working theory was a STUCK lock silently blocking every future tick -
+// see Live-Check-Debug.md step #5). The problem turned out to be the
+// opposite: with no lock of any kind, nothing stops Cloudflare's cron
+// (which starts each scheduled() invocation independently, without
+// waiting for the previous one to finish - confirmed via Cloudflare's
+// own docs) from piling a second full cycle on top of a first one that's
+// still legitimately in progress, especially if a cycle runs anywhere
+// close to the full 10-minute gap between ticks.
+//
+// Originally set to 8 minutes, comfortably above the ~5 minute duration a
+// normal clean cycle took in testing - but that testing happened with
+// few or no churches actually live at once. Confirmed in production on a
+// Sunday morning with many churches simultaneously live: real cycles ran
+// long enough to cross 8 minutes (91-96% through the batch, never
+// finishing), so every next cron tick saw "still running" and killed it
+// as presumed-dead, restarting the SAME batch from zero - which then hit
+// the same slowdown and got killed again, forever, all morning, without
+// ever once actually completing. Raised well above the 10-minute cron
+// interval so a cycle that's merely slow (not actually wedged) gets the
+// runway to finish for real. Trade-off: a truly wedged cycle (crashed,
+// hung forever) now takes up to ~2 missed cron ticks to recover instead
+// of ~1 - an acceptable cost against the alternative of never finishing
+// under real Sunday-morning load.
+//
+// This is a best-effort heuristic, not a hard distributed lock - KV
+// doesn't offer atomic compare-and-swap, so two invocations checking this
+// within the same instant could theoretically still both proceed. That's
+// an acceptable, rare edge case; it doesn't need to be airtight to fix
+// the actual pattern being seen (every-10-minutes pileup), just to stop
+// the common case.
+const LIVE_CHECK_OVERLAP_GUARD_MS = 20 * 60 * 1000; // 20 minutes
+
+function sleep(ms) {
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
+}
+
+// Records a visible marker in the debug history when the overlap guard
+// (see LIVE_CHECK_OVERLAP_GUARD_MS below) decides a previous cycle has
+// been running too long to plausibly still be legitimate, and is about
+// to let a fresh cycle start anyway. Without this, an overridden stall
+// just leaves a silent, unexplained gap in the "Recent Cycles" trend -
+// exactly the kind of gap that made earlier stalls hard to diagnose from
+// the debug panel alone. This makes the event itself show up as its own
+// row instead of something that has to be inferred from timestamps.
+// Best-effort: a failed write here should never block the new cycle from
+// starting - see the try/catch at the call site.
+async function recordStalledCycleNote(env, progress, elapsedMs) {
+  const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  let debugPrevious = { history: [] };
+  if (debugRaw) {
+    try {
+      const parsed = JSON.parse(debugRaw);
+      if (parsed) debugPrevious = parsed;
+    } catch (err) {
+      // Fall through to the empty default above.
+    }
+  }
+  const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
+  history.push({
+    checkedAt: new Date().toISOString(),
+    stalledPreviousCycle: true,
+    previousStartedAt: progress.startedAt,
+    previousCompletedCount: typeof progress.completedCount === 'number' ? progress.completedCount : null,
+    previousTotalCandidates: typeof progress.totalCandidates === 'number' ? progress.totalCandidates : null,
+    previousChurchName: progress.currentChurchName || null,
+    previousBatchIndex: typeof progress.batchIndex === 'number' ? progress.batchIndex : null,
+    previousBatchCount: typeof progress.batchCount === 'number' ? progress.batchCount : null,
+    stuckForMs: elapsedMs
+  });
+  while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+  // Object.assign preserves latestCycle (the last real completed cycle's
+  // full summary) untouched - this note only ever appends to history,
+  // never overwrites the "what actually happened last" section the rest
+  // of the debug panel reads from.
+  await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify(Object.assign({}, debugPrevious, { history: history })));
+}
+
+// Diagnostic-only capture (see LIVE_CHECK_DEBUG_SAMPLES_KV_KEY above) for
+// two distinct failure shapes checkChurchLive can hit: "isLive:true but no
+// videoId, even after the retry" (reason: 'no-videoid') and "isLive:true,
+// videoId DID resolve, but title/description/startDate are still missing"
+// (reason: 'live-but-missing-metadata'). Stores a truncated snippet of the
+// raw HTML plus landmark/videoId-occurrence scans, so the debug panel can
+// show whether YouTube served a normal-but-incomplete page (some other
+// metadata still present, just not the fields we check) or something else
+// entirely (e.g. a consent/interstitial page with almost nothing on it).
+//
+// IMPORTANT: this used to do its own KV read-modify-write on every single
+// call. With 'live-but-missing-metadata' capturing on nearly every live
+// church (a much higher-volume trigger than the no-videoid case this was
+// originally built for), that meant one KV write per affected church per
+// cycle - confirmed to risk Cloudflare KV's per-key write-rate limit under
+// real Sunday-morning load with many churches live at once. This now just
+// pushes into an in-memory array for the current cycle; the actual KV
+// write happens exactly once per cycle, in flushLiveCheckDebugSamples
+// below, called after checkAllChurchesLive's loop finishes. No I/O here
+// means nothing to await and nothing that can throw from KV itself, but
+// this still stays wrapped in try/catch - diagnostic capture failing is
+// never allowed to break the actual live check.
+function recordLiveCheckDebugSample(pendingDebugSamples, sample) {
+  try {
+    if (Array.isArray(pendingDebugSamples)) {
+      pendingDebugSamples.push(Object.assign({ capturedAt: new Date().toISOString() }, sample));
+    }
+  } catch (err) {
+    // Diagnostic capture failing is never allowed to break the actual
+    // live check - swallow it.
+  }
+}
+
+// The single, once-per-cycle KV read-modify-write that actually persists
+// whatever recordLiveCheckDebugSample collected into pendingDebugSamples
+// during this cycle's checkChurchLive calls (see the batching note above).
+// Best-effort, same as the old per-call version: a lost write under rare
+// concurrent access is acceptable here - this never affects what the
+// public site shows, only the admin debug panel's sample history.
+async function flushLiveCheckDebugSamples(env, pendingDebugSamples) {
+  if (!pendingDebugSamples || !pendingDebugSamples.length) return;
+  try {
+    const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY);
+    let samples = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) samples = parsed;
+      } catch (err) {
+        // Corrupt/unexpected value - start fresh rather than throwing.
+      }
+    }
+    samples = samples.concat(pendingDebugSamples);
+    while (samples.length > LIVE_CHECK_DEBUG_SAMPLES_MAX) samples.shift();
+    await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY, JSON.stringify(samples));
+  } catch (err) {
+    // Diagnostic capture failing is never allowed to break the actual
+    // live check - swallow it.
+  }
+}
+
+async function loadStaggerState(env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
+  if (!raw) return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.staggerMs === 'number' && !isNaN(parsed.staggerMs)) {
+      return parsed;
+    }
+  } catch (err) {
+    // Fall through to default on any parse issue - safer to under-guess
+    // than to carry forward corrupted state.
+  }
+  return { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+}
+
+// Which batch (see LIVE_CHECK_BATCH_SIZE) gets checked THIS cycle. Starts
+// at 0 and rotates forward by one each cycle, wrapping back to 0 once
+// every batch has had a turn - see checkAllChurchesLive for exactly how
+// the effective index is computed (it's taken modulo the CURRENT batch
+// count, not just incremented blindly, so this stays valid even if the
+// church list grows/shrinks enough to change how many batches there are
+// between one cycle and the next).
+async function loadBatchState(env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_BATCH_STATE_KV_KEY);
+  if (!raw) return { batchIndex: 0 };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.batchIndex === 'number' && !isNaN(parsed.batchIndex)) {
+      return parsed;
+    }
+  } catch (err) {
+    // Fall through to default on any parse issue.
+  }
+  return { batchIndex: 0 };
+}
+
+// The full map of every church's last actually-checked result, keyed by
+// churchId (see LIVE_CHECK_MERGED_RESULTS_KV_KEY above for why this
+// exists). Defaults to an empty map - meaning every church starts out as
+// "never checked yet" until its batch's first turn comes around, which
+// resolves itself naturally within one full rotation after a fresh
+// deploy or the first time a new church is added.
+async function loadMergedResults(env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_MERGED_RESULTS_KV_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (err) {
+    // Fall through to an empty map on any parse issue - worst case, every
+    // church looks "never checked" until its next batch turn, rather than
+    // crashing the cycle over old corrupted state.
+  }
+  return {};
+}
+
+// Adjusts the stagger delay based on how the just-finished cycle went, and
+// persists it for the next cron run to read. Errs on the side of caution:
+// growth is faster (2x) than decay (0.9x), so a single bad cycle raises
+// the delay noticeably, while trust is rebuilt gradually only after
+// several fully clean cycles in a row.
+function nextStaggerMs(currentMs, checked, errored) {
+  if (checked === 0) return currentMs;
+  const errorRate = errored / checked;
+  let next = currentMs;
+  if (errorRate > LIVE_CHECK_ERROR_RATE_THRESHOLD) {
+    next = currentMs * LIVE_CHECK_STAGGER_GROWTH_FACTOR;
+  } else if (errorRate === 0) {
+    next = currentMs * LIVE_CHECK_STAGGER_DECAY_FACTOR;
+  }
+  // Otherwise (some errors, but under the threshold): hold steady rather
+  // than adjusting on a small, possibly-noisy sample.
+  return Math.max(LIVE_CHECK_STAGGER_MIN_MS, Math.min(LIVE_CHECK_STAGGER_MAX_MS, Math.round(next)));
+}
+
+// Accepts whatever format an admin pasted into youtubeUrl - a bare
+// @handle URL, a /streams URL, a /videos URL, a /live URL, or a
+// /channel/UC... URL - and returns the correct "/live" URL to check.
+//
+// Confirmed in production: an admin-entered URL that already ended in
+// /live (e.g. https://m.youtube.com/@somechannel/live) wasn't recognized
+// by the strip list below, which only handled /streams, /videos,
+// /featured, /community, /about - so it fell through untouched and then
+// got a SECOND /live appended, producing a malformed
+// .../live/live path. That one church consistently behaved differently
+// from every other candidate in the list (the same church stalling out
+// repeatedly, rather than a rotating cast) - a strong sign this was about
+// its specific stored URL, not scale or list position. Adding "live" to
+// the strip list makes this function idempotent - safe to call on a URL
+// that's already correctly formatted, not just ones that need a /live
+// suffix added.
+function buildLiveCheckUrl(youtubeUrl) {
+  let url = youtubeUrl.trim();
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  url = url.replace(/\/(streams|videos|featured|community|about|live)\/?$/i, '');
+  url = url.replace(/\/+$/, '');
+  return url + '/live';
+}
+
+async function fetchLivePage(liveUrl) {
+  // Deliberately NOT identifying as a bot here (the old User-Agent literally
+  // said "CCAFinderBot") - confirmed in production that YouTube can serve a
+  // stripped-down page (missing meta tags AND the videoDetails JSON we fall
+  // back to) to requests that don't look like a real browser, even for a
+  // channel whose real page has everything. Using a realistic browser UA
+  // plus the Accept headers a real browser sends isn't an attempt to
+  // deceive anyone about what this is - it's a publicly viewable page - it
+  // just avoids opting INTO a reduced-content path that only exists for
+  // actual bot traffic.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(function() { controller.abort(); }, LIVE_CHECK_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(liveUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error('Live page fetch failed with status ' + response.status);
+    }
+    // IMPORTANT: response.text() reads and buffers the ENTIRE response
+    // body - this is a separate operation from fetch() itself resolving,
+    // which only means headers arrived. Confirmed in production: churches
+    // hanging for 5+ minutes at a time, well past the 10s timeout, with
+    // fetch() apparently having already resolved - the previous version
+    // of this function cleared the timeout in a finally block wrapping
+    // ONLY the fetch() call above, which meant the timeout was already
+    // disarmed by the time response.text() ran, leaving the body-read
+    // phase completely unbounded (e.g. a connection that opens fine but
+    // then trickles data in very slowly, or stalls partway through).
+    // Awaiting response.text() inside this same try, with the timeout not
+    // cleared until the finally block below, keeps the ENTIRE
+    // connect-plus-read under one shared budget instead of just the
+    // connect phase.
+    return await response.text();
+  } catch (err) {
+    // AbortController rejects with a generic "AbortError", not anything
+    // that mentions a timeout - rethrow with a clearer message since this
+    // error can end up in the debug panel where "aborted" alone wouldn't
+    // tell an admin what actually happened.
+    if (err.name === 'AbortError') {
+      throw new Error('Live page fetch timed out after ' + LIVE_CHECK_FETCH_TIMEOUT_MS + 'ms');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Wraps fetchLivePage with a single retry after a short backoff. Most
+// failures here are transient YouTube rate-limiting (429s), not permanent
+// errors, so one retry recovers the majority of cases without materially
+// slowing down the cron run.
+async function fetchLivePageWithRetry(liveUrl) {
+  try {
+    return await fetchLivePage(liveUrl);
+  } catch (err) {
+    await sleep(LIVE_CHECK_RETRY_DELAY_MS);
+    return fetchLivePage(liveUrl);
+  }
+}
+
+async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDebugSamples) {
+  const liveUrl = buildLiveCheckUrl(youtubeUrl);
+  const html = await fetchLivePageWithRetry(liveUrl);
+
+  // IMPORTANT: itemprop="isLiveBroadcast" (schema.org) turned out to mark
+  // "this video is a livestream-type broadcast" as a category - true for
+  // scheduled/upcoming streams and old past broadcasts too, NOT just
+  // ones airing right now. Confirmed via real production false positives
+  // (churches with startDate days in the future, and years-old test
+  // videos, both showing isLiveBroadcast=True). The stricter, real-time
+  // signal is the internal videoDetails JSON field below, which was
+  // verified via actual diffed LIVE vs NOT-LIVE test files to be
+  // completely ABSENT (not just false) on a genuinely not-live page.
+  // IMPORTANT: "isLive":true (checked below) is present on BOTH a
+  // genuinely-airing page AND a "waiting for the stream to start" page -
+  // confirmed via real diffed test files (see YOUTUBE_LIVE_PAGE_WAITING
+  // vs YOUTUBE_LIVE_PAGE_NOT_WAITING) that it appears inside the SAME
+  // videoViewCountRenderer block either way. The one reliable difference
+  // is what that block's viewer-count text actually SAYS:
+  //   genuinely live:  "runs":[{"text":"36"},{"text":" watching now"}]
+  //   waiting/scheduled: "runs":[{"text":"1 waiting"}]
+  // So this check runs FIRST, ahead of the generic isLive gate below,
+  // and short-circuits to 'waiting' on its own terms rather than relying
+  // on isLive to have already ruled it out (it can't - both say true).
+  // Confirmed in production this was leaking scheduled-but-not-yet-started
+  // churches into the public Live Now list as if they were genuinely
+  // airing (e.g. Calvary Chapel OKC, matched against a real listener
+  // waiting-room count of 1, not actual concurrent viewers).
+  const waitingViewCountMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[\{"text":"\d+\s*waiting"\}\]/);
+  if (waitingViewCountMatch) {
+    // scheduledStartTime is Unix epoch SECONDS as a string (confirmed in
+    // production, inside a playerOverlayVideoDetailsRenderer/
+    // StreamOfflineSlateRenderer block) - NOT the same format as the
+    // itemprop="startDate"/liveBroadcastDetails ISO-string sources used
+    // as a fallback below, so it needs converting to line up with how
+    // startDate is used elsewhere (new Date(startDate)).
+    const scheduledStartTimeMatch = html.match(/"scheduledStartTime":"(\d+)"/);
+    let waitingStartDate = null;
+    if (scheduledStartTimeMatch) {
+      const asDate = new Date(Number(scheduledStartTimeMatch[1]) * 1000);
+      if (!isNaN(asDate.getTime())) waitingStartDate = asDate.toISOString();
+    }
+    if (!waitingStartDate) {
+      // Fall back to the same sources the below-the-fold "isLive:true in
+      // the future" branch uses, in case a waiting page ever lacks its
+      // own slateRenderer for some reason.
+      const fallbackStartDateMetaMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+      const fallbackStartDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
+      waitingStartDate = fallbackStartDateMetaMatch ? fallbackStartDateMetaMatch[1] : (fallbackStartDateJsonMatch ? fallbackStartDateJsonMatch[1] : null);
+    }
+
+    // IMPORTANT (confirmed via a real production side-by-side comparison,
+    // Calvary Boise vs. Calvary Chapel Salmon): scheduledStartTime above
+    // is NOT reliably "the next time this church goes live" - it turned
+    // out to just be whatever value was last present in that slate
+    // renderer, which for most churches most of the time is a stale
+    // leftover from months or years ago (Salmon's was 2,211 hours in the
+    // PAST at the time this was checked). YouTube's own human-readable
+    // countdown text is no better - it confidently said "a few moments"
+    // for that same 3-months-overdue value, so display text can't be
+    // used as a sanity check either.
+    //
+    // What actually distinguishes the two cases: this SEPARATE field,
+    // `liveBroadcastDetails`, which sits in the page's standard video-
+    // metadata block rather than a UI-rendering component. For Boise (a
+    // genuinely upcoming stream), it was
+    // `{"isLiveNow":false,"startTimestamp":"<ISO date>"}` - the ISO value
+    // agreed exactly with scheduledStartTime's own epoch value once
+    // converted, cross-validating each other. For Salmon (stale), it was
+    // JUST `{"isLiveNow":false}` - no startTimestamp key at all. So its
+    // presence/absence, not a "does this date look sane" guess, is the
+    // signal: only trust a next-live-service time when this field is
+    // actually there.
+    const confirmedUpcomingMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":false,"startTimestamp":"([^"]+)"\}/);
+    const confirmedUpcomingStart = confirmedUpcomingMatch ? confirmedUpcomingMatch[1] : null;
+
+    const waitingCanonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
+    const waitingVideoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+    const waitingTitleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
+    const waitingDescriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
+    const waitingAuthorMatch = html.match(/"author":"([^"]*)"/);
+
+    return {
+      isLive: false,
+      status: 'waiting',
+      videoId: waitingCanonicalMatch ? waitingCanonicalMatch[1] : (waitingVideoIdJsonMatch ? waitingVideoIdJsonMatch[1] : null),
+      startDate: waitingStartDate,
+      confirmedUpcomingStart: confirmedUpcomingStart,
+      title: waitingTitleMetaMatch ? decodeEntities(waitingTitleMetaMatch[1]) : null,
+      description: waitingDescriptionMetaMatch ? decodeEntities(waitingDescriptionMetaMatch[1]) : null,
+      author: waitingAuthorMatch ? waitingAuthorMatch[1] : null
+    };
+  }
+
+  const isLive = html.includes('"isLive":true');
+  if (!isLive) return { isLive: false, status: 'not_live' };
+
+  // Loosely matched on purpose: only require the href value itself, not an
+  // exact immediate ">" after it. YouTube's markup for this tag isn't
+  // perfectly consistent across channels/pages (self-closing "/>", other
+  // attributes after href, etc.) - a stricter match here was silently
+  // failing for at least one real church's page, leaving videoId null and
+  // producing a broken thumbnail on the frontend even though the church
+  // really was live.
+  // Loosely matched on purpose: only require the href value itself, not an
+  // exact immediate ">" after it. YouTube's markup for this tag isn't
+  // perfectly consistent across channels/pages (self-closing "/>", other
+  // attributes after href, etc.).
+  const canonicalMatch = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
+  const startDateMetaMatch = html.match(/itemprop="startDate" content="([^"]+)"/);
+  const titleMetaMatch = html.match(/<meta property="og:title" content="([^"]*)">/);
+  const descriptionMetaMatch = html.match(/<meta property="og:description" content="([^"]*)">/);
+  const authorMatch = html.match(/"author":"([^"]*)"/);
+  const uploadDateMetaMatch = html.match(/itemprop="(?:datePublished|uploadDate)" content="([^"]+)"/);
+
+  // IMPORTANT: this is NOT the same field as a bare "viewCount":"N" match
+  // would find - that pattern hits videoDetails.viewCount, which is the
+  // video's lifetime/cumulative view count (confirmed in production: it
+  // climbs indefinitely across a broadcast - one church showed 549 there
+  // while the real concurrent audience was 23). The actual live
+  // concurrent-viewer count lives in a completely different, deeper part
+  // of the page - videoPrimaryInfoRenderer's own viewCount block.
+  //
+  // The "runs" array's internal shape varies between videos/sessions -
+  // confirmed in production BOTH of these are real:
+  //   "runs":[{"text":"1 watching now"}]              (one combined run)
+  //   "runs":[{"text":"36"},{"text":" watching now"}]  (split into two)
+  // An earlier version of this regex assumed exactly one run and silently
+  // failed to match the split-run shape at all, leaving viewCount null
+  // for a genuinely live, real church. Matching one-or-more
+  // {"text":"..."} entries (rather than assuming a fixed count) handles
+  // both. Anchored on the "isLive":true co-occurring in the SAME nested
+  // object (not just "originalViewCount" alone) specifically to avoid
+  // matching a similar-looking renderer for an unrelated recommended/
+  // sidebar video elsewhere on the page - same anchoring discipline
+  // already used for the videoId match above, for the same reason.
+  const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[(?:\{"text":"[^"]*"\},?)+\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
+
+  // Fallback source: the page's embedded videoDetails/microformat JSON.
+  // Confirmed via a real production case (Calvary Chapel Gresham) where the
+  // <meta>/<link>/itemprop tags above were ALL absent, yet the church was
+  // genuinely live - author (matched above via its own JSON field) still
+  // came through fine, meaning this JSON blob was present and reliable even
+  // though the page's <head> tags weren't. "videoId" is consistently the
+  // first key inside the videoDetails object, so anchoring on that object
+  // (rather than a bare "videoId" match, which could hit an unrelated
+  // recommended-video ID elsewhere on the page) keeps this specific to the
+  // actual broadcast.
+  const videoIdJsonMatch = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+  const titleJsonMatch = html.match(/"videoDetails":\{"videoId":"[a-zA-Z0-9_-]{11}","title":"((?:[^"\\]|\\.)*)"/);
+  const descriptionJsonMatch = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+  const startDateJsonMatch = html.match(/"liveBroadcastDetails":\{"isLiveNow":true,"startTimestamp":"([^"]+)"/);
+  const uploadDateJsonMatch = html.match(/"publishDate":"([^"]+)"/);
+
+  // Second fallback source, for a page shape where even the videoDetails
+  // JSON above is entirely absent (confirmed in production, 2026-09,
+  // Golgota Delpest: canonical link, videoDetails-with-videoId, and every
+  // other field this function normally relies on were ALL missing, yet
+  // the page plainly had a live broadcast on it). Diagnosed via the admin
+  // debug panel's "every videoId in the page" search: the page had
+  // several different videoId values, but only one - tagged
+  // updatedMetadataEndpoint - stayed IDENTICAL across two fetches a
+  // second and a half apart, and was independently confirmed against the
+  // real /live page's own videoId. Every OTHER occurrence was a
+  // recommended/autoplay-next suggestion (tracking param decodes to
+  // "related-auto") that changed between the two fetches - exactly the
+  // kind of unrelated match a bare "videoId" search would risk grabbing.
+  // updatedMetadataEndpoint is YouTube's live viewer-count refresh
+  // mechanism, which only exists for the video actually being watched -
+  // a suggested/related video has no reason to need one - so anchoring on
+  // it keeps this specific to the real broadcast the same way the
+  // videoDetails anchor above does for the shape it covers.
+  const updatedMetadataVideoIdMatch = html.match(/"updatedMetadataEndpoint":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+
+  // Third fallback source for TITLE only, for the page shape confirmed in
+  // production (2026-09, live-but-missing-metadata diagnostic samples,
+  // Calvary Chapel Romoland and Calvary Chapel Edmonds) where videoDetails
+  // no longer has a bare "videoId"/"title" pair at all - it's nested one
+  // level deeper, inside playerOverlayVideoDetailsRenderer, which is a
+  // completely different shape than titleJsonMatch above anchors on. Only
+  // consulted when the primary og:title/videoDetails.title sources below
+  // both come up empty - see the `title` assignment below.
+  const titleOverlayJsonMatch = html.match(/"playerOverlayVideoDetailsRenderer":\{"title":\{"simpleText":"((?:[^"\\]|\\.)*)"/);
+
+  let videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : (updatedMetadataVideoIdMatch ? updatedMetadataVideoIdMatch[1] : null));
+
+  // "isLive:true but no videoId" is its own failure condition, distinct
+  // from the outright fetch failures fetchLivePageWithRetry already
+  // guards against above - this is a "successful" 200 response that
+  // happens to be the stripped shape YouTube sometimes serves our
+  // datacenter IP (see the videoIdJsonMatch comment above: confirmed in
+  // production to omit videoId/title/everything else while still saying
+  // isLive:true). Confirmed 2026-09 in production: this can persist
+  // across multiple 2-minute cron cycles for a given church rather than
+  // clearing on its own, silently defeating the Live Now embed (no
+  // videoId means the frontend can't embed OR thumbnail the stream, and
+  // falls back to a bare channel link) for however long it lasts. One
+  // extra fetch, specifically gated on this exact combination, gives it
+  // a second chance within the SAME check rather than only across cron
+  // cycles. If this retry also comes up empty, videoId simply stays
+  // null exactly as it did before this change - no new failure mode,
+  // just one more chance to avoid the existing one.
+  //
+  // Waits LIVE_CHECK_RETRY_DELAY_MS first, same as fetchLivePageWithRetry's
+  // own retry above - confirmed in production (2026-09) that firing the
+  // retry back-to-back with no gap wasn't saving every case. Also matches
+  // the "Fourth real-world false-positive pattern" a few lines up
+  // (isLive:true with nothing else, seen across SEVERAL churches at
+  // once - Casa Grande/Antelope Valley/South OC then, four different
+  // churches in one Live Now snapshot now): this looks like a
+  // time-windowed condition on our Worker's own IP/session rather than
+  // something particular to any one church's page, so a short pause
+  // before trying again is at least aimed at the right thing - though
+  // if the degraded window runs longer than this delay, it won't help
+  // every time, and that's worth watching rather than assuming solved.
+  if (!videoId) {
+    let retryHtml = null;
+    let retryFetchError = null;
+    try {
+      await sleep(LIVE_CHECK_RETRY_DELAY_MS);
+      retryHtml = await fetchLivePage(liveUrl);
+      const retryCanonicalMatch = retryHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"&]+)"/);
+      const retryVideoIdJsonMatch = retryHtml.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+      const retryUpdatedMetadataVideoIdMatch = retryHtml.match(/"updatedMetadataEndpoint":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
+      videoId = retryCanonicalMatch ? retryCanonicalMatch[1] : (retryVideoIdJsonMatch ? retryVideoIdJsonMatch[1] : (retryUpdatedMetadataVideoIdMatch ? retryUpdatedMetadataVideoIdMatch[1] : null));
+    } catch (err) {
+      // Retry fetch itself failed (timeout, network error) - leave
+      // videoId null, same as if this retry didn't exist.
+      retryFetchError = err && err.message ? err.message : String(err);
+    }
+
+    // Still no videoId after both attempts - capture what we actually got
+    // back so the admin debug panel can show it (see
+    // recordLiveCheckDebugSample above). `pendingDebugSamples` is only
+    // passed in from the real cron/manual-check path (see
+    // checkAllChurchesLive) - guarded so this never throws if
+    // checkChurchLive is ever called without it.
+    if (!videoId && pendingDebugSamples) {
+      recordLiveCheckDebugSample(pendingDebugSamples, {
+        reason: 'no-videoid',
+        churchId: churchId != null ? churchId : null,
+        churchName: churchName || null,
+        youtubeUrl: youtubeUrl,
+        liveUrl: liveUrl,
+        firstAttemptHtmlLength: html.length,
+        firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
+        firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
+        firstAttemptVideoIdOccurrences: findAllVideoIdOccurrences(html),
+        retryFetchError: retryFetchError,
+        retryAttemptHtmlLength: retryHtml ? retryHtml.length : null,
+        retryAttemptPrefix: retryHtml ? retryHtml.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS) : null,
+        retryAttemptLandmarks: retryHtml ? findLiveCheckDiagnosticLandmarks(retryHtml) : null,
+        retryAttemptVideoIdOccurrences: retryHtml ? findAllVideoIdOccurrences(retryHtml) : null
+      });
+    }
+  }
+  // The og: meta tags are raw HTML attribute content, so they can contain
+  // entities like &amp; or &#39; that need decoding before display -
+  // confirmed in production (a church's description showed literal
+  // "&amp;" and "&#39;" instead of "&" and "'"). The JSON fallback path
+  // already handled this correctly via decodeJsonString; this meta-tag
+  // path just hadn't been given the same treatment.
+  const title = titleMetaMatch ? decodeEntities(titleMetaMatch[1]) : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : (titleOverlayJsonMatch ? decodeJsonString(titleOverlayJsonMatch[1]) : null));
+  const description = descriptionMetaMatch ? decodeEntities(descriptionMetaMatch[1]) : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
+  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : startDateFromRelativeStartedStreamingPhrase(html));
+  const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
+
+  // Belt-and-suspenders: if a startDate is present and is still in the
+  // future, this is a scheduled/upcoming stream, not a live one, whatever
+  // the isLive field said. This used to just return { isLive: false },
+  // discarding all the title/description/startDate we'd just parsed and
+  // making a genuinely-scheduled stream indistinguishable from a channel
+  // with nothing going on at all - now surfaced as its own "waiting"
+  // status so the admin debug view (and, if useful later, the public
+  // side) can actually tell the two apart.
+  if (startDate) {
+    const startTime = new Date(startDate).getTime();
+    if (!isNaN(startTime) && startTime > Date.now()) {
+      return {
+        isLive: false,
+        status: 'waiting',
+        videoId: videoId,
+        startDate: startDate,
+        title: title,
+        description: description,
+        author: authorMatch ? authorMatch[1] : null
+      };
+    }
+  }
+
+  // Second real-world false-positive pattern found in production: a
+  // broadcast that was never properly "ended" on YouTube's side can stay
+  // flagged isLive:true indefinitely, even years later, with nobody
+  // actually streaming (confirmed via real results: a 2021 video, several
+  // "test" videos, all with viewCount 0). A genuinely-live-right-now
+  // video was just published, so require the video's publish date to be
+  // recent - this is the strongest signal we've found so far for telling
+  // "actually live" apart from "stuck live" without needing to inspect
+  // the actual video stream data itself.
+  // Prefer the CURRENT broadcast's start time (liveBroadcastDetails.
+  // startTimestamp, captured above as startDate) over the video's original
+  // publishDate/uploadDate. A channel that reuses one persistent stream/
+  // video ID across multiple services (rather than creating a fresh video
+  // per service) will always show a stale uploadDate even while genuinely
+  // airing right now - confirmed in production: Calvary Chapel Stone
+  // Mountain reuses the same videoId across multiple Sundays, so its
+  // publishDate stays fixed at whenever that video was first created while
+  // liveBroadcastDetails.startTimestamp tracks the actual current airtime.
+  // Falling back to uploadDate when no current-broadcast timestamp exists
+  // preserves the original stuck-live protection: a genuinely stuck
+  // broadcast has no fresh startTimestamp either, so it still falls through
+  // to the uploadDate check below and gets caught.
+  const recencyAnchor = startDate || uploadDate;
+  if (recencyAnchor) {
+    const anchorTime = new Date(recencyAnchor).getTime();
+    if (!isNaN(anchorTime) && (Date.now() - anchorTime) > LIVE_CHECK_RECENT_WINDOW_MS) {
+      return { isLive: false, status: 'not_live' };
+    }
+  }
+
+  // Third real-world false-positive pattern found in production: a church
+  // can end a genuine service without ever stopping the YouTube broadcast,
+  // leaving isLive:true (and a fresh-looking startDate) for many hours
+  // afterward with no one actually watching - confirmed in production:
+  // CalvaryCG's Sunday service left running ~21 hours later, "1 watching
+  // now" the whole time (that "1" is just the automated check itself, not
+  // a real viewer).
+  //
+  // A flat duration cutoff can't tell that apart from a legitimately long
+  // stream (e.g. a multi-hour Pastor's conference) - and a viewer-count
+  // cutoff on its own can't tell it apart from a small church that
+  // legitimately only ever draws a couple of live viewers. Combining both
+  // signals avoids either false positive: past SOFT_DURATION_CAP_MS, we
+  // only cut the stream if the audience also looks essentially empty. A
+  // real, still-populated stream is left alone until the much longer
+  // RECENT_WINDOW_MS hard ceiling above, so it still can't linger forever.
+  if (startDate) {
+    const startTime = new Date(startDate).getTime();
+    const viewCount = concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null;
+    if (!isNaN(startTime) && (Date.now() - startTime) > LIVE_CHECK_SOFT_DURATION_CAP_MS &&
+        viewCount !== null && viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
+      return { isLive: false, status: 'not_live' };
+    }
+  }
+
+  // Diagnostic-only capture (see recordLiveCheckDebugSample above) for the
+  // "confirmed live, videoId resolved, but title/description/startDate
+  // still missing" case - a DIFFERENT failure shape than the no-videoid
+  // capture above: by this point every false-positive guard above has
+  // already passed, so this really is a genuine, currently-airing
+  // broadcast - it's just missing some of the metadata the Live Now cards
+  // want to show. Fires on ANY of the three fields being missing, not
+  // only when all three are, so a partial miss (e.g. startDate resolves
+  // but title doesn't) still gets captured. `pendingDebugSamples` is only
+  // passed in from the real cron/manual-check path (see
+  // checkAllChurchesLive) - guarded so this never throws if
+  // checkChurchLive is ever called without it.
+  if (pendingDebugSamples && (!title || !description || !startDate)) {
+    recordLiveCheckDebugSample(pendingDebugSamples, {
+      reason: 'live-but-missing-metadata',
+      churchId: churchId != null ? churchId : null,
+      churchName: churchName || null,
+      youtubeUrl: youtubeUrl,
+      liveUrl: liveUrl,
+      resolvedVideoId: videoId,
+      missingTitle: !title,
+      missingDescription: !description,
+      missingStartDate: !startDate,
+      firstAttemptHtmlLength: html.length,
+      firstAttemptPrefix: html.slice(0, LIVE_CHECK_DEBUG_PREFIX_CHARS),
+      firstAttemptLandmarks: findLiveCheckDiagnosticLandmarks(html),
+      firstAttemptVideoIdOccurrences: findAllVideoIdOccurrences(html)
+    });
+  }
+
+  return {
+    isLive: true,
+    status: 'live',
+    videoId: videoId,
+    startDate: startDate,
+    title: title,
+    description: description,
+    author: authorMatch ? authorMatch[1] : null,
+    viewCount: concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null
+  };
+}
+
+// Runs on the Cron Trigger schedule. Each invocation checks ONE BATCH of
+// eligible churches (see LIVE_CHECK_BATCH_SIZE above for why), rotating
+// to the next batch on the following tick, and merges the freshly-
+// checked batch with every other church's last known result before
+// writing the combined public live-status snapshot.
+//
+// Three things this builds on, all aimed at the same root cause (YouTube
+// rate-limiting/anti-bot detection tripping on our own traffic pattern):
+//
+// 1. Churches within a batch are checked one at a time with a stagger
+//    delay between each, instead of all at once.
+// 2. If a church's fetch still fails after the retry in
+//    fetchLivePageWithRetry, we fall back to whatever that church's
+//    status was the last time it was ACTUALLY checked (from the
+//    persisted merged-results map), rather than forcing isLive: false.
+// 3. Batching (the newest piece): confirmed in production that neither
+//    of the above alone was enough once the eligible church count
+//    crossed roughly 155-162 - cycles failed 100% of the time at that
+//    count regardless of stagger delay (500ms/750ms/1000ms/1800ms all
+//    tested), but passed 100% of the time when capped at 150, at every
+//    stagger value tried. So instead of one cycle trying to check every
+//    eligible church, the list is split into batches, and only one batch
+//    is actually checked per cycle - every other church just keeps
+//    showing its last known result until its own batch's turn comes back
+//    around.
+async function checkAllChurchesLive(env) {
+  // Overlap guard - see LIVE_CHECK_OVERLAP_GUARD_MS above for the full
+  // reasoning. Skip this entire invocation if the progress record left
+  // by a previous cycle still says running:true and was started recently
+  // enough to plausibly still be legitimately in progress.
+  try {
+    const progressRaw = await env.CHURCHES_KV.get(LIVE_CHECK_PROGRESS_KV_KEY);
+    if (progressRaw) {
+      const progress = JSON.parse(progressRaw);
+      if (progress && progress.running && progress.startedAt) {
+        const startedAtMs = new Date(progress.startedAt).getTime();
+        if (!isNaN(startedAtMs)) {
+          const elapsedMs = Date.now() - startedAtMs;
+          if (elapsedMs < LIVE_CHECK_OVERLAP_GUARD_MS) {
+            console.log('Skipping live-check cycle - previous cycle still in progress (started ' + progress.startedAt + ')');
+            return;
+          }
+          // Past the guard window - this looks stuck rather than just
+          // slow. Record a visible note before proceeding, so the "Recent
+          // Cycles" trend shows what actually happened here instead of an
+          // unexplained gap.
+          console.log('Previous live-check cycle appears stalled (started ' + progress.startedAt + ', ' + Math.round(elapsedMs / 1000) + 's ago) - starting a new cycle and recording a note.');
+          try {
+            await recordStalledCycleNote(env, progress, elapsedMs);
+          } catch (noteErr) {
+            // Swallow - this is a visibility nice-to-have, not worth
+            // blocking the new cycle over.
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // If we can't tell whether a previous cycle is still running (bad
+    // JSON, missing key, etc.), err on the side of proceeding rather than
+    // silently skipping every future cycle over an unreadable guard.
+  }
+
+  const churches = await loadChurches(env);
+  const candidates = churches.filter(function(c) { return c.livestreamsEnabled && c.youtubeUrl; });
+  // Stable, deterministic ordering is required for batch membership to
+  // stay consistent cycle to cycle - without this, whatever order
+  // loadChurches happens to return could shuffle which churches land in
+  // which batch, undermining the "each batch stays safely small" premise.
+  candidates.sort(function(a, b) {
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+
+  const batchCount = Math.max(1, Math.ceil(candidates.length / LIVE_CHECK_BATCH_SIZE));
+  const batchState = await loadBatchState(env);
+  // Modulo against the CURRENT batch count, not just whatever was stored -
+  // if the church list has grown or shrunk enough to change how many
+  // batches there are since the index was last written, this keeps the
+  // index valid instead of pointing past the end.
+  const batchIndex = ((batchState.batchIndex % batchCount) + batchCount) % batchCount;
+  const batchCandidates = candidates.slice(batchIndex * LIVE_CHECK_BATCH_SIZE, (batchIndex + 1) * LIVE_CHECK_BATCH_SIZE);
+  const batchIds = {};
+  batchCandidates.forEach(function(c) { batchIds[c.id] = true; });
+
+  // The full map of every church's last actually-checked result - lets
+  // churches OUTSIDE this cycle's batch keep showing their real last-
+  // known status instead of going blank, and doubles as the per-church
+  // fallback source when a fresh check in THIS batch fails.
+  const mergedResults = await loadMergedResults(env);
+
+  // Guarantees isLive defaults to false, then a prior result (if any)
+  // fills in the real fields, then any explicit overrides win last -
+  // used everywhere a church's fresh check couldn't be completed this
+  // cycle, so "no prior data at all" and "had prior data" both land on
+  // sensible values instead of an accidental `isLive: undefined`.
+  function carryForward(prior, overrides) {
+    return Object.assign({ isLive: false }, prior, overrides);
+  }
+
+  const staggerState = await loadStaggerState(env);
+  const staggerMs = staggerState.staggerMs;
+
+  const cycleStartedAt = Date.now();
+
+  // Writes the live in-progress snapshot the admin debug panel polls for a
+  // real progress bar/ETA. Best-effort - a failed KV write here shouldn't
+  // ever take down the actual live-check cycle, so errors are swallowed.
+  // totalCandidates/completedCount are scoped to THIS BATCH (what's
+  // actually being iterated this cycle) - batchIndex/batchCount ride
+  // along so the panel can show "batch 2 of 3" instead of a bare count
+  // that could otherwise read as if it covered every church.
+  async function writeProgress(completedCount, currentChurchName, running) {
+    try {
+      await env.CHURCHES_KV.put(LIVE_CHECK_PROGRESS_KV_KEY, JSON.stringify({
+        running: running,
+        startedAt: new Date(cycleStartedAt).toISOString(),
+        updatedAt: new Date().toISOString(),
+        totalCandidates: batchCandidates.length,
+        completedCount: completedCount,
+        currentChurchName: currentChurchName || null,
+        batchIndex: batchIndex,
+        batchCount: batchCount
+      }));
+    } catch (err) {
+      // Swallow - progress display is a nice-to-have, not worth failing
+      // the actual check over.
+    }
+  }
+
+  await writeProgress(0, batchCandidates.length ? batchCandidates[0].name : null, true);
+
+  let erroredCount = 0;
+  // Churches that were never actually attempted this cycle because we'd
+  // already exhausted Cloudflare's subrequest budget - distinct from
+  // erroredCount (a real, attempted fetch that failed).
+  let notCheckedCount = 0;
+  // Set the moment we hit Cloudflare's own per-invocation subrequest
+  // ceiling. Hard platform limit, not a YouTube rate-limit signal - once
+  // hit, every further fetch() this invocation fails instantly regardless
+  // of target or delay.
+  let hitSubrequestLimit = false;
+  // Tracked purely as a safety net for the finally block below - if the
+  // cycle throws partway through, this is how far it actually got.
+  let lastCompletedCount = 0;
+  let completedNormally = false;
+
+  // Accumulates every diagnostic sample checkChurchLive captures during
+  // this cycle (see recordLiveCheckDebugSample/flushLiveCheckDebugSamples
+  // above) - written to KV exactly once, in the finally block below,
+  // rather than once per matching church.
+  const pendingDebugSamples = [];
+
+  try {
+    for (let i = 0; i < batchCandidates.length; i++) {
+      const c = batchCandidates[i];
+
+      if (hitSubrequestLimit) {
+        // Record the rest as not-checked rather than attempting (and
+        // failing) each one identically - carries forward whatever was
+        // already known for this church rather than attempting anything.
+        notCheckedCount++;
+        const prior = mergedResults[c.id];
+        mergedResults[c.id] = carryForward(prior, {
+          churchId: c.id,
+          name: c.name,
+          error: 'Not attempted - subrequest budget exhausted this cycle',
+          usedStaleData: !!prior,
+          notChecked: true
+        });
+        await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+        lastCompletedCount = i + 1;
+        continue;
+      }
+
+      try {
+        const churchCheckStartedAt = Date.now();
+        const status = await checkChurchLive(c.youtubeUrl, env, c.id, c.name, pendingDebugSamples);
+        const churchCheckMs = Date.now() - churchCheckStartedAt;
+        // channelUrl is the fallback the frontend links to when videoId is
+        // null (confirmed in production: YouTube can serve a stripped page
+        // to our datacenter-IP requests that has the isLive:true signal but
+        // omits videoId/title/everything else). A generic "go watch on their
+        // channel" link is far better than a dead, unclickable card.
+
+        // Fourth real-world false-positive pattern, found in production
+        // (confirmed via /api/debug/check-live-now: Calvary Chapel Casa
+        // Grande, Calvary Chapel Antelope Valley, and Calvary South OC all
+        // showing this exact shape at once): for some channels, our
+        // Worker's fetch gets a page with isLive:true and a parseable
+        // viewCount (consistently "1" - our own check, no real audience),
+        // but NO startDate at all - videoId/title/author/startDate all
+        // null. Neither of checkChurchLive's own staleness guards above
+        // has anything to measure against in that case (both are gated on
+        // startDate/uploadDate being present), so a broadcast permanently
+        // stuck in this exact response shape would otherwise show as live
+        // forever, with no way to ever cut it off.
+        //
+        // This same "isLive:true, nothing else" shape is also a KNOWN,
+        // legitimate one-off response for a genuinely fresh live church
+        // (see the frontend's live-now-thumb-fallback handling) - so
+        // treating it as not-live on the very first sighting risks hiding
+        // a real, brand-new stream that just happened to get an
+        // incomplete response. Instead, track how long a given church has
+        // continuously shown this specific low-confidence pattern using
+        // our own merged-results check history (unresolvedLiveSince,
+        // carried forward cycle to cycle the same way any other field is)
+        // and only give up on it - fall through to not_live - once it's
+        // persisted past the same LIVE_CHECK_SOFT_DURATION_CAP_MS/
+        // LIVE_CHECK_MIN_REAL_AUDIENCE threshold checkChurchLive itself
+        // uses for the startDate case above. A transient one-cycle blip
+        // self-heals the moment a normal full-metadata check succeeds,
+        // which clears the marker in the else branch below.
+        if (status.isLive && !status.startDate &&
+            status.viewCount !== null && status.viewCount !== undefined &&
+            status.viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
+          const priorEntry = mergedResults[c.id];
+          const unresolvedSince = (priorEntry && priorEntry.unresolvedLiveSince) || new Date().toISOString();
+          const unresolvedMs = Date.now() - new Date(unresolvedSince).getTime();
+          if (unresolvedMs > LIVE_CHECK_SOFT_DURATION_CAP_MS) {
+            status.isLive = false;
+            status.status = 'not_live';
+            status.unresolvedLiveSince = null;
+          } else {
+            status.unresolvedLiveSince = unresolvedSince;
+          }
+        } else {
+          status.unresolvedLiveSince = null;
+        }
+
+        mergedResults[c.id] = Object.assign({
+          churchId: c.id,
+          name: c.name,
+          channelUrl: buildLiveCheckUrl(c.youtubeUrl),
+          checkMs: churchCheckMs,
+          lastCheckedAt: new Date().toISOString(),
+          error: null,
+          usedStaleData: false,
+          stale: false,
+          notChecked: false
+        }, status);
+      } catch (err) {
+        // Both the original fetch and the retry failed - fall back to the
+        // last known-good status for this church instead of assuming it
+        // went offline. If we've never seen this church before, this is
+        // just an ordinary "not live" result.
+        const prior = mergedResults[c.id];
+        // err.message is what actually carries the HTTP status code (see
+        // fetchLivePage's "...failed with status " + response.status) -
+        // this is the one place that distinguishes a 429 from a timeout
+        // from a 5xx, so keep it verbatim. Cloudflare's own subrequest-
+        // limit error text is checked for separately since it needs
+        // different handling (see hitSubrequestLimit above).
+        if (/too many subrequests/i.test(err.message || '')) {
+          hitSubrequestLimit = true;
+          notCheckedCount++;
+          mergedResults[c.id] = carryForward(prior, {
+            churchId: c.id,
+            name: c.name,
+            error: err.message,
+            usedStaleData: !!prior,
+            notChecked: true
+          });
+        } else {
+          erroredCount++;
+          mergedResults[c.id] = carryForward(prior, {
+            churchId: c.id,
+            name: c.name,
+            error: err.message,
+            usedStaleData: !!prior,
+            stale: !!prior,
+            notChecked: false,
+            lastCheckedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+      lastCompletedCount = i + 1;
+
+      // Stagger requests to YouTube instead of firing them all at once.
+      // Skip the delay after the last item, or once we've already hit the
+      // subrequest ceiling - no point waiting to attempt something we know
+      // will fail identically.
+      if (i < batchCandidates.length - 1 && !hitSubrequestLimit) {
+        await sleep(staggerMs);
+      }
+    }
+
+    // The FULL merged view across every eligible church, not just this
+    // cycle's batch - a church whose turn didn't come up this cycle still
+    // needs to appear, using whatever's already in the merged map (or a
+    // "never checked yet" placeholder for a brand-new church that hasn't
+    // had its first turn since being added). checkedThisCycle is computed
+    // fresh here from actual batch membership THIS cycle, rather than
+    // being a value carried in the persisted map - a church checked three
+    // batch-rotations ago shouldn't still claim "checked this cycle" just
+    // because that field was left over from whenever it last ran.
+    // batchNumber (1-based, for display) is this church's position in the
+    // same sorted `candidates` list batchCandidates was sliced from above -
+    // Math.floor(index / LIVE_CHECK_BATCH_SIZE) always lands on the exact
+    // batch that church's turn comes up in, since both use the identical
+    // stable id-sorted ordering. Recomputed fresh every cycle for every
+    // eligible church (not just this cycle's batch), so it stays correct
+    // as churches are added/removed and batchCount shifts.
+    const fullResults = candidates.map(function(c, index) {
+      const entry = mergedResults[c.id];
+      const checkedThisCycle = !!batchIds[c.id];
+      const batchNumber = Math.floor(index / LIVE_CHECK_BATCH_SIZE) + 1;
+      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle, batchNumber: batchNumber });
+      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle, batchNumber: batchNumber };
+    });
+
+    const liveOnly = fullResults.filter(function(r) { return r.isLive; });
+
+    // Single soonest confirmed upcoming start across every eligible church
+    // (fullResults, not just this cycle's batch - with batching, most
+    // churches' latest known status was carried forward from a previous
+    // cycle, and this countdown should reflect all of them, not just the
+    // ~50 freshly checked this time) - only ever ONE value, never a
+    // per-church list, since the frontend only ever needs "what's next,"
+    // not every waiting church's data (see Mobile-First-Design.md for why).
+    // Deliberately only trusts confirmedUpcomingStart (the
+    // liveBroadcastDetails-backed field), never the plain
+    // startDate/scheduledStartTime value on its own - that field is what
+    // turned out to be unreliable in the first place.
+    let nextUpcomingStart = null;
+    fullResults.forEach(function(r) {
+      if (r.status !== 'waiting' || !r.confirmedUpcomingStart) return;
+      const t = new Date(r.confirmedUpcomingStart).getTime();
+      if (isNaN(t)) return;
+      if (nextUpcomingStart === null || t < new Date(nextUpcomingStart).getTime()) {
+        nextUpcomingStart = r.confirmedUpcomingStart;
+      }
+    });
+
+    const cycleDurationMs = Date.now() - cycleStartedAt;
+    // actuallyChecked/errored/notChecked below are scoped to THIS BATCH -
+    // batchCandidates.length, not candidates.length, is the denominator,
+    // so the adaptive stagger system and "Recent Cycles" trend reflect
+    // the real sample size actually exercised this cycle.
+    const actuallyCheckedCount = batchCandidates.length - notCheckedCount;
+
+    await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
+      checkedAt: new Date().toISOString(),
+      live: liveOnly,
+      // Only meaningful when `live` is empty - see handleGetLiveStatus and
+      // the frontend's updateLiveNowUi for how this becomes the "Next live
+      // service begins in..." countdown. Null just means no church
+      // currently has a confirmed upcoming start time, not that the field
+      // failed to compute.
+      nextUpcomingStart: nextUpcomingStart,
+      // Cycle-level stats for observability - lets us see the *actual*,
+      // empirical error rate for our own traffic over time in KV, rather
+      // than guessing at what YouTube's threshold is.
+      stats: {
+        totalCandidates: batchCandidates.length,
+        actuallyChecked: actuallyCheckedCount,
+        errored: erroredCount,
+        notChecked: notCheckedCount,
+        staggerMsUsed: staggerMs,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        totalChurches: candidates.length
+      }
+    }));
+
+    await env.CHURCHES_KV.put(LIVE_CHECK_MERGED_RESULTS_KV_KEY, JSON.stringify(mergedResults));
+
+    // Full admin debug snapshot: every eligible church's result (not just
+    // live ones, and not just this cycle's batch), plus a rolling history
+    // of recent cycles' summary stats so a trend is visible, not just the
+    // latest cycle in isolation.
+    const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+    let debugPrevious = { history: [] };
+    if (debugRaw) {
+      try {
+        const parsed = JSON.parse(debugRaw);
+        if (parsed) debugPrevious = parsed;
+      } catch (err) {
+        // Fall through to the empty default above.
+      }
+    }
+    const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
+    history.push({
+      checkedAt: new Date().toISOString(),
+      totalCandidates: batchCandidates.length,
+      actuallyChecked: actuallyCheckedCount,
+      errored: erroredCount,
+      notChecked: notCheckedCount,
+      staggerMsUsed: staggerMs,
+      durationMs: cycleDurationMs,
+      hitSubrequestLimit: hitSubrequestLimit,
+      batchIndex: batchIndex,
+      batchCount: batchCount
+    });
+    while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
+
+    await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
+      latestCycle: {
+        checkedAt: new Date().toISOString(),
+        totalCandidates: batchCandidates.length,
+        actuallyChecked: actuallyCheckedCount,
+        errored: erroredCount,
+        notChecked: notCheckedCount,
+        staggerMsUsed: staggerMs,
+        durationMs: cycleDurationMs,
+        hitSubrequestLimit: hitSubrequestLimit,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        totalChurches: candidates.length,
+        results: fullResults
+      },
+      history: history
+    }));
+
+    // Rotate to the next batch for the following cycle, regardless of how
+    // this one went - even a batch with errors should still hand off to
+    // the next batch next time, rather than getting stuck retrying the
+    // same batch indefinitely.
+    await env.CHURCHES_KV.put(LIVE_CHECK_BATCH_STATE_KV_KEY, JSON.stringify({
+      batchIndex: (batchIndex + 1) % batchCount,
+      updatedAt: new Date().toISOString()
+    }));
+
+    // Adjust the delay for next cycle based on how THIS BATCH went, and
+    // persist it. Skipped entirely if this cycle hit Cloudflare's
+    // subrequest ceiling - that failure mode reflects a platform limit no
+    // amount of delay can fix, not YouTube's actual rate-limiting
+    // behavior, and a truncated cycle isn't a representative sample of
+    // the real error rate anyway.
+    if (!hitSubrequestLimit) {
+      const updatedStaggerMs = nextStaggerMs(staggerMs, batchCandidates.length, erroredCount);
+      if (updatedStaggerMs !== staggerMs) {
+        await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
+          staggerMs: updatedStaggerMs,
+          updatedAt: new Date().toISOString(),
+          reason: erroredCount / Math.max(batchCandidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
+            ? 'error-rate-above-threshold'
+            : 'clean-cycle-decay'
+        }));
+      }
+    }
+
+    await writeProgress(batchCandidates.length, null, false);
+    completedNormally = true;
+  } finally {
+    // Confirmed in production: without this, a cycle that throws anywhere
+    // above leaves the progress record permanently stuck at running:true
+    // (whatever completedCount it last reached), since the ONLY other
+    // write that ever sets running:false was the one directly above -
+    // never reached if something threw first.
+    if (!completedNormally) {
+      await writeProgress(lastCompletedCount, null, false);
+    }
+    // Flush whatever diagnostic samples this cycle collected, exactly
+    // once, regardless of whether the cycle completed normally or threw -
+    // a cycle that dies partway through shouldn't lose the samples
+    // already gathered from the churches it did get to.
+    await flushLiveCheckDebugSamples(env, pendingDebugSamples);
+  }
+}
+
+// Public, read-only endpoint - just returns whatever the last cron run
+// cached. No YouTube requests happen here; safe to call on every page
+// load.
+async function handleGetLiveStatus(request, env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { checkedAt: null, live: [] };
+  return new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+// Admin-only. Manually runs the same check the Cron Trigger runs
+// automatically, so live status can be tested immediately after deploy
+// without waiting up to 10 minutes for the real schedule to fire.
+async function handleDebugCheckLiveNow(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  await checkAllChurchesLive(env);
+  const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
+  return new Response(raw || '{}', {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+// Admin-only, read-only - just returns whatever the last cron cycle wrote
+// to LIVE_CHECK_DEBUG_KV_KEY (see checkAllChurchesLive). Never triggers a
+// real check itself (unlike handleDebugCheckLiveNow above) - safe to poll
+// repeatedly from an open debug panel without generating any extra
+// YouTube traffic.
+async function handleDebugLiveCheckStatus(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+  const staggerRaw = await env.CHURCHES_KV.get(LIVE_CHECK_STAGGER_STATE_KV_KEY);
+  const lastErrorRaw = await env.CHURCHES_KV.get(LIVE_CHECK_LAST_ERROR_KV_KEY);
+  const debugSamplesRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_SAMPLES_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { latestCycle: null, history: [] };
+  data.currentStaggerState = staggerRaw ? JSON.parse(staggerRaw) : { staggerMs: LIVE_CHECK_STAGGER_DEFAULT_MS };
+  data.lastCronError = lastErrorRaw ? JSON.parse(lastErrorRaw) : null;
+  // Most-recent-first - the panel cares about what's happening lately, not
+  // the oldest still-retained sample.
+  data.debugSamples = debugSamplesRaw ? JSON.parse(debugSamplesRaw).slice().reverse() : [];
+  return new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+// Admin-only, read-only - returns the live in-progress snapshot written
+// DURING a cycle (see writeProgress() inside checkAllChurchesLive), so the
+// debug panel can show a real progress bar/ETA instead of a simulated one.
+// Reflects ANY currently-running cycle, whether it was triggered by the
+// Cron Trigger or by this or another admin session's "Run Check Now" -
+// the panel doesn't need to have personally started the run to see it.
+async function handleDebugLiveCheckProgress(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const raw = await env.CHURCHES_KV.get(LIVE_CHECK_PROGRESS_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { running: false };
+  return new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handleConferences(request, ctx) {
+  const cache = caches.default;
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set('cacheVersion', String(CACHE_VERSION));
+  const cacheKey = new Request(cacheUrl.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const jsonHeaders = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'public, max-age=' + CACHE_SECONDS
+  };
+
+  try {
+    const pageRes = await fetch(SOURCE_URL, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
+    });
+    if (!pageRes.ok) throw new Error('Source site returned ' + pageRes.status);
+
+    const html = await pageRes.text();
+    const conferences = parseConferences(html);
+    if (!conferences.length) throw new Error('Parsed zero conference entries');
+
+    const body = JSON.stringify({
+      conferences: conferences,
+      source: SOURCE_URL,
+      fetchedAt: new Date().toISOString()
+    });
+    const response = new Response(body, { headers: jsonHeaders });
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  } catch (err) {
+    const body = JSON.stringify({
+      conferences: [],
+      error: err.message,
+      source: SOURCE_URL,
+      fetchedAt: new Date().toISOString()
+    });
+    return new Response(body, { headers: jsonHeaders });
+  }
+}
+
+// ---- Radio "Now Playing" ticker ----
+//
+// Same overall shape as the Conference ticker above (edge-cached JSON,
+// graceful per-item failure) but sourced from each station's own streaming
+// platform instead of scraping an HTML page. Cache TTL is deliberately much
+// shorter than Conferences (20s vs 6 hours) - now-playing data changes
+// every few minutes, while conference listings barely change at all.
+
+const RADIO_CACHE_SECONDS = 60;
+const RADIO_CACHE_VERSION = 1;
+
+// Config-driven station list. Adding a new station is just adding one entry
+// here (assuming it's on a provider already handled by RADIO_PROVIDERS below;
+// see the note there for what's involved in adding a new provider).
+//
+//   displayName - what visitors see in the ticker. May differ from the
+//                 station's own internal/technical call sign - e.g. Dove FM
+//                 is set up internally as "DOVEMAIN", but should never show
+//                 that publicly.
+//   provider    - key into RADIO_PROVIDERS below; decides how we fetch/parse
+//                 this station's now-playing data, and which of the
+//                 provider-specific fields below apply.
+//   streamUrl   - the actual raw audio stream URL the mini-player plays.
+//                 Required for every provider.
+//   cityState   - OPTIONAL, hand-entered, display-only (e.g. "Vero Beach,
+//                 FL"). Shown in the browse panel only - the ticker never
+//                 renders anything beyond displayName + now-playing text.
+//                 Fine to leave off entries that don't have it yet.
+//   homePage    - OPTIONAL, hand-entered, display-only - the station's own
+//                 website, shown as a link in the browse panel only.
+//
+//   SecureNetSystems stations also need:
+//   subdomain   - the streamdbXweb.securenetsystems.net host serving this
+//                 station's now-playing XML feed.
+//   callSign    - the technical station identifier used in the now-playing
+//                 XML endpoint's URL path (NOT necessarily the same as
+//                 displayName - see Dove FM above).
+//
+//   Icecast stations also need:
+//   host        - the host:port serving the station's status-json.xsl feed.
+//   mount       - the mount point (without leading slash) identifying this
+//                 station's stream on that Icecast server.
+//   noArtistSplit (optional) - set true only for talk/teaching stations
+//                 whose real titles have been CONFIRMED to contain " - "
+//                 without meaning "Artist - Track" (e.g. KQIP's scripture
+//                 references like "Jeremiah 49 - Jeremiah") - skips
+//                 parseIcecastJson's normal split so the first half isn't
+//                 misreported as an artist name. Defaults to false/absent
+//                 for every other Icecast station - don't set this
+//                 speculatively, only after seeing a real bad split.
+//
+//   Futuri/streamon.fm stations also need:
+//   mount       - identifies this station on yp.cdnstream1.com's metadata
+//                 API (e.g. "7077_24k" -> .../metadata/7077_24k/current.json).
+//                 Found in the station's own player page JS as
+//                 "cfg_yp_mount" or in the "currentapi" URL. Unlike the
+//                 other two providers, streamUrl here is the plain
+//                 continuous-stream ("iceaac") format from that same page's
+//                 "streams" config array, NOT the HLS ("hlsaac"/.m3u8) one -
+//                 a plain <audio> tag can't play HLS without an extra
+//                 library, but the iceaac format works exactly like a
+//                 SecureNetSystems/Icecast stream.
+//
+//   SoCast stations also need:
+//   domain      - the station's OWN website domain hosting the
+//                 "/api/music/currentProgram" WordPress REST route (e.g.
+//                 "www.radiobygrace.com") - NOT a shared SoCast
+//                 infrastructure host. Found by waiting ~10 minutes after
+//                 pressing Play on the station's own player page with
+//                 DevTools Network (filter: JS or All, search "program")
+//                 open - this call is only made once every 10 minutes and
+//                 not immediately on page load, easy to miss.
+//   accountId   - PlayerData.accountID in the station's player page JS;
+//                 also appears as the accountID query param on the above
+//                 endpoint. NOTE: an earlier, DIFFERENT SoCast endpoint
+//                 (np_{accountId}_{streamId}.js, hosted on
+//                 socast-public.s3.amazonaws.com) looked plausible at
+//                 first and returns real data too, but tracks background
+//                 song/music cues, NOT who's actually on air - confirmed
+//                 wrong in production (showed a song's artist instead of
+//                 "Ed Taylor", the actual live host). currentProgram is
+//                 the one that actually reflects on-air host/show info.
+//
+//   wpshowplaying stations also need:
+//   npUrl       - the FULL now-playing URL, stored whole rather than
+//                 decomposed into a host+path pattern (unlike the other
+//                 providers), since this format has been seen on exactly
+//                 one WordPress theme ("radiostation") so far with no
+//                 confirmed shared structure across stations. Response is
+//                 plain HTML (not XML/JSON) - a `<div id="nowPlaying">`
+//                 containing "Played earlier" / "Now playing" / "Up next"
+//                 sections, each line formatted as "{title} by {artist}".
+//                 We only care about the bolded "Now playing" line.
+//
+//   Live365 (live365json) stations also need:
+//   mountId     - Live365's mount ID, e.g. "a96507" (from the station's
+//                 streamUrl or its live365.com/station/{slug}-{mountId}
+//                 URL). Now-playing comes from a single clean fetch to
+//                 api.live365.com/station/{mountId} - see the provider
+//                 notes doc for why this is preferred over live365hls.
+//   splitCombinedTitle (optional) - set true only for stations CONFIRMED
+//                 to cram "artist - title" into the title field itself
+//                 with artist left empty (e.g. WGLJ), rather than
+//                 populating both fields separately like WRDJ does.
+//                 Defaults to false/absent - most Live365 stations don't
+//                 need this, don't set it speculatively.
+//
+//   Aiir stations also need:
+//   wsUrl       - always "wss://metadata.aiir.net/now-playing" so far
+//                 (shared across all Aiir-hosted stations, not station-
+//                 specific) - kept as a per-station field rather than
+//                 hardcoded in case that ever changes.
+//   serviceId   - Aiir's numeric station ID (e.g. "3628"). Found in the
+//                 station's player.aiir.com page source as
+//                 data-station-metadata-id-value or gm.properties.service_id.
+//                 NOT discoverable via a plain HTTP fetch of any kind -
+//                 the actual data source is a WebSocket, only found by
+//                 watching the browser's own Network > Socket traffic
+//                 while the player page was open. See fetchAiirNowPlaying
+//                 for the full mechanism (subscribe over WebSocket, take
+//                 the first real payload, close - not a polled HTTP URL).
+//
+//   ElasticPlayer stations also need:
+//   radioId     - numeric station ID on elasticplayer.xyz (e.g. "300").
+//                 The SAME id works for both the metadata endpoint
+//                 (.../api/v1/radio/{id}/history) and a plain station-info
+//                 endpoint (.../api/v1/radio/{id}, no "/history") that
+//                 conveniently also returns stream_url, title, and other
+//                 station config in one shot - handy for finding the
+//                 audio stream when the station's own site is otherwise
+//                 unreachable (e.g. bot-blocked). Now-playing has no
+//                 separate title/artist fields - see parseElasticPlayerJson
+//                 for why the whole "meta" string is kept as title as-is.
+//
+//   streamingrad.io stations also need:
+//   idPlayer    - numeric player ID on streamingrad.io (e.g. "9"), found
+//                 in the station's own embedded player page source as
+//                 id_player= in the MRP.insert(...) config and the
+//                 live.php?action=metadata&id_player= calls it makes.
+//                 Now-playing IS a single clean object (not an array like
+//                 ElasticPlayer) with separate title/artist fields already
+//                 split out - see parseStreamingRadIoJson.
+//
+//   Radio.co stations also need:
+//   stationId   - Radio.co's station ID (e.g. "s914ba6b9a"), found in the
+//                 embed config's "stream":{"station ":"..."} field (note:
+//                 that key has a trailing space in their own JS - a typo
+//                 on their end, harmless, just surprising if you go
+//                 looking for it) or directly in the streaming_url.
+//                 IMPORTANT: current_track has no separate artist field -
+//                 see parseRadioCoJson for why the whole title string is
+//                 kept as-is rather than split (mixes two inconsistent
+//                 internal formats: real songs vs. station liners/promos).
+//
+//   RadioKing stations also need:
+//   slug        - RadioKing's station slug (e.g. "calvary-chapel-radio"),
+//                 found in the embedded iframe's src
+//                 (player.radioking.io/{slug}/...) or directly in the
+//                 metadata API URL itself. Now-playing has title/artist
+//                 already properly split into separate fields - no
+//                 combined-string parsing needed, unlike most other
+//                 providers in this file. streamUrl is NOT the metadata
+//                 API's own domain - it's a separate redirect chain
+//                 (play.radioking.io/{slug} -> listen.radioking.com/...),
+//                 only found by watching actual Network > Media traffic
+//                 while the embedded player was playing.
+//
+//   publishedschedule stations also need:
+//   schedule    - a { timezone, saturday, sunday, weekday,
+//                 weekdayOverridesByDay } object (see one per station under
+//                 src/radioSchedules/) - NOT a live feed at all. This
+//                 provider makes zero HTTP requests for now-playing data;
+//                 "now playing" is computed purely from the current time in
+//                 `schedule.timezone` against a one-time, hand-transcribed
+//                 copy of the station's own published weekly schedule. See
+//                 radio-station-published-schedule-notes.md for the full
+//                 rationale, the transcription format, and why this exists
+//                 as a separate provider instead of trying to scrape a
+//                 fresh copy of the page on every poll.
+//   staticCoverUrl (optional, any provider) - a fixed image URL/path shown
+//                 in the mini player regardless of what the provider's own
+//                 parse/fetchAndParse returns for coverUrl - for a station
+//                 with a real logo but no per-track artwork source (like a
+//                 publishedschedule station, which always returns
+//                 coverUrl: null). Takes priority over the provider's own
+//                 coverUrl when both are present - see fetchStationNowPlaying.
+//   staticCoverThumbUrl (optional, any provider) - a small (128x128 or
+//                 under) version of staticCoverUrl, used ONLY for the
+//                 CarPlay/Lock Screen/Control Center artwork (see the Media
+//                 Session integration in public/index.html). iOS Safari's
+//                 MediaSession implementation renders artwork above ~128px
+//                 as a blurry/grey box instead of resizing it down, so the
+//                 mini player keeps using the bigger staticCoverUrl while
+//                 this smaller one goes to the OS-level "now playing"
+//                 surfaces instead. Not needed for stations relying on a
+//                 provider's own live coverUrl - those are passed through
+//                 as-is (see coverThumbUrl in fetchStationNowPlaying) since
+//                 there's no way to know or control their real dimensions.
+const RADIO_STATIONS = [
+  {
+    // streamUrl inferred from the status endpoint's own URL pattern
+    // (".../stream/status-json.xsl" -> ".../stream/{mount}") since the
+    // page only embeds a third-party (LibreTime) player iframe with no
+    // visible audio src to confirm against directly - verify playback
+    // next time before assuming this is exactly right.
+    id: 'ccvb',
+    displayName: 'CCVB',
+    cityState: 'Vero Beach, FL',
+    homePage: 'https://ccvb.fm/',
+    provider: 'icecast',
+    host: 'wwsh.ccvb.fm/stream',
+    mount: 'main',
+    streamUrl: 'https://wwsh.ccvb.fm/stream/main'
+  },
+  {
+    id: 'truefm',
+    displayName: 'TrueFM',
+    cityState: 'Wichita, KS',
+    homePage: 'http://www.truefm.net',
+    provider: 'icecast',
+    host: 'radio.shoutcheap.com/proxy/kaxzann1',
+    mount: 'live',
+    streamUrl: 'https://radio.shoutcheap.com/proxy/kaxzann1/stream'
+  },
+  {
+    // Same rationale as GraceFM above - WJWD/WJCZ/WTZY (Calvary Radio
+    // Network) has no live metadata feed either, so this is inferred from
+    // its own published schedule instead. streamUrl below is unchanged and
+    // confirmed live/playable independent of this change - see
+    // radio-station-published-schedule-notes.md for the transcription
+    // itself, the two judgment calls made in it (a real overnight gap, and
+    // a genuine Sunday/Monday schedule conflict), and src/radioSchedules/wjwd.js.
+    id: 'wjwd',
+    displayName: 'WJWD',
+    cityState: 'Marshall, WI',
+    homePage: 'https://jesuspeoplefm.com',
+    provider: 'publishedschedule',
+    schedule: WJWD_SCHEDULE,
+    streamUrl: 'https://lunar.citrus3.com:8034/stream',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM's staticCoverUrl above. Built from Larry's own WJWD badge
+    // image (low-res source, ~186x183) using the same rounded-square
+    // treatment.
+    staticCoverUrl: '/wjwd-icon.png',
+    staticCoverThumbUrl: '/wjwd-icon-128.png'
+  },
+  {
+    id: 'equipfm',
+    displayName: 'EQUIP FM',
+    cityState: 'Lynchburg, VA',
+    homePage: 'https://equipfm.org/sponsors/calvary-chapel-lynchburg/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb9web.securenetsystems.net',
+    callSign: 'EQUIPFM',
+    streamUrl: 'https://ice66.securenetsystems.net/EQUIPFM'
+  },
+  {
+    id: 'wiam',
+    displayName: 'WIAM',
+    cityState: 'Knoxville, TN',
+    homePage: 'https://thewaymedia.net/calvary-knoxville',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb3web.securenetsystems.net',
+    callSign: 'WIAM',
+    streamUrl: 'https://ice42.securenetsystems.net/WIAM'
+  },
+  {
+    id: 'dovefm',
+    displayName: 'DOVE FM',
+    cityState: 'Russell, PA',
+    homePage: 'https://www.dovefm.org/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'DOVEMAIN',
+    streamUrl: 'https://ice64.securenetsystems.net/DOVEMAIN'
+  },
+  {
+    // NOTE: displayName deliberately left as-is (not renamed to "REVIVE FM
+    // (TX)") even though the person's cityState note suggested that -
+    // renaming would silently un-favorite this station for anyone who's
+    // already starred it (favorites are matched by exact displayName), and
+    // this one wasn't part of the earlier explicit EQUIP FM/WIAM/DOVE FM
+    // rename request. Flag if a rename is actually wanted.
+    id: 'revivefm',
+    displayName: 'REVIVE FM',
+    cityState: 'Houston, TX',
+    homePage: 'https://revive953.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb8web.securenetsystems.net',
+    callSign: 'KEPHLP',
+    streamUrl: 'https://ice42.securenetsystems.net/KEPHLP'
+  },
+  {
+    id: 'truth-tn',
+    displayName: 'The Truth (TN)',
+    cityState: 'Greeneville, TN',
+    homePage: 'https://www.truthfm.net/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb00web.securenetsystems.net',
+    callSign: 'WZTH',
+    streamUrl: 'https://ice7.securenetsystems.net/WZTH'
+  },
+  {
+    id: 'truth-ga',
+    displayName: 'The Truth (GA)',
+    cityState: 'Clayton, GA',
+    homePage: 'https://www.truthfm.net/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WZTG',
+    streamUrl: 'https://ice26.securenetsystems.net/WZTG'
+  },
+  {
+    id: 'klht-fm',
+    displayName: 'KLHT FM',
+    cityState: 'Honolulu, HI',
+    homePage: 'https://fm.klight.org',
+    provider: 'icecast',
+    host: 'klht.rhemastreams.net:8443',
+    mount: 'klhtfm',
+    streamUrl: 'https://klht.rhemastreams.net:8443/klhtfm'
+  },
+  {
+    id: 'klht-am',
+    displayName: 'KLHT AM',
+    cityState: 'Honolulu, HI',
+    homePage: 'https://am.klight.org',
+    provider: 'icecast',
+    host: 'klht.rhemastreams.net:8443',
+    mount: 'klhtam',
+    streamUrl: 'https://klht.rhemastreams.net:8443/klhtam'
+  },
+  {
+    id: 'wtsw-lp',
+    displayName: 'WTSW-LP',
+    cityState: 'Manitowoc, WI',
+    homePage: 'https://wtswlp.org/',
+    provider: 'futuri',
+    mount: '7077_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7077_24k.aac'
+  },
+  {
+    id: 'realhoperadio',
+    displayName: 'Real Hope Radio',
+    cityState: 'Grangeville, ID',
+    homePage: 'https://realhoperadio.com/',
+    provider: 'futuri',
+    mount: '7066_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7066_24k.aac'
+  },
+  {
+    id: 'radiobygrace',
+    displayName: 'Radio by Grace',
+    cityState: 'Amarillo, TX',
+    homePage: 'http://www.radiobygrace.com',
+    provider: 'socast',
+    domain: 'www.radiobygrace.com',
+    accountId: '1023',
+    streamUrl: 'https://stream-radiobygrace.streamguys1.com/rbga.aac'
+  },
+  {
+    id: 'renewfm',
+    displayName: 'Renew FM',
+    cityState: 'Fitchburg, MA',
+    homePage: 'https://renewfm.org',
+    provider: 'wpshowplaying',
+    npUrl: 'https://renewfm.org/wp-content/themes/radiostation/showPlaying.php?device=web',
+    streamUrl: 'https://streams.radio.co/s34b0aa3a7/listen'
+  },
+  {
+    id: 'truthfm',
+    displayName: 'Truth FM',
+    cityState: 'Hagerstown, MD',
+    homePage: 'https://www.calvarycumberland.com/Listen-on-line',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WZTM',
+    streamUrl: 'https://ice26.securenetsystems.net/WZTM'
+  },
+  {
+    id: 'ksgr',
+    displayName: 'KSGR',
+    cityState: 'Corpus Christi, TX',
+    homePage: 'https://ksgr.org',
+    provider: 'icecast',
+    host: 'ksgr.ddns.net:1841',
+    mount: 'stream.mp3',
+    streamUrl: 'https://ksgr.ddns.net:1841/stream.mp3'
+  },
+  {
+    id: 'wgss',
+    displayName: 'WGSS',
+    cityState: 'Copiague, NY',
+    homePage: 'https://www.godstillspeaks.com/',
+    provider: 'radiomast',
+    streamUrl: 'https://streams.radiomast.io/bbe3faf2-3aa6-440a-9e1f-06b766d9bd70'
+  },
+  {
+    id: 'theword',
+    displayName: 'The Word',
+    cityState: 'Farmington, NY',
+    homePage: 'https://wzxv.org/',
+    provider: 'live365hls',
+    host: 'streaming.live365.com',
+    stationId: 'a10665',
+    streamUrl: 'https://streaming.live365.com/a10665'
+  },
+  {
+    id: 'wleb',
+    displayName: 'WLEB',
+    cityState: 'Lebanon, PA',
+    homePage: 'https://truthmedianetwork.org/',
+    provider: 'shoutcast',
+    host: 'broadcast.shoutcheap.com/proxy/wleblpt1',
+    streamUrl: 'https://broadcast.shoutcheap.com/proxy/wleblpt1/stream'
+  },
+  {
+    id: 'crossover',
+    displayName: 'Crossover',
+    cityState: 'Cedar City, UT',
+    homePage: 'https://crossoverfm.org/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'KCHG',
+    streamUrl: 'https://ice8.securenetsystems.net/KCHG'
+  },
+  {
+    id: 'kcpv',
+    displayName: 'KCPV',
+    cityState: 'Pahrump, NV',
+    homePage: 'https://justforjesus.us/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'KCPVLP',
+    streamUrl: 'https://ice25.securenetsystems.net/KCPVLP'
+  },
+  {
+    id: 'kouj',
+    displayName: 'KOUJ',
+    cityState: 'Norman, OK',
+    homePage: 'http://www.kouj.org/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb6web.securenetsystems.net',
+    callSign: 'KOUJ',
+    streamUrl: 'https://ice41.securenetsystems.net/KOUJ'
+  },
+  {
+    id: 'kept',
+    displayName: 'KEPT',
+    cityState: 'Hayward, CA',
+    homePage: 'https://www.keptfm.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb7web.securenetsystems.net',
+    callSign: 'KEPT',
+    streamUrl: 'https://ice9.securenetsystems.net/KEPT'
+  },
+  {
+    id: 'wrdj',
+    displayName: 'WRDJ',
+    cityState: 'Merritt Island, FL',
+    homePage: 'http://www.wrdj.com',
+    provider: 'live365json',
+    mountId: 'a96507',
+    streamUrl: 'https://streaming.live365.com/a96507'
+  },
+  {
+    id: 'thebridge',
+    displayName: 'The Bridge',
+    cityState: 'Old Bridge, NJ',
+    homePage: 'https://www.bridgeradio.org',
+    provider: 'aiir',
+    wsUrl: 'wss://metadata.aiir.net/now-playing',
+    serviceId: '3628',
+    streamUrl: 'https://stream.aiir.com/tmpilbymbrwtv'
+  },
+  {
+    id: 'thevoice',
+    displayName: 'The Voice',
+    cityState: 'Lima, OH',
+    homePage: 'https://wttpfm.com/',
+    provider: 'elasticplayer',
+    radioId: '300',
+    streamUrl: 'https://www.ophanim.net:8444/s/8730'
+  },
+  {
+    id: 'wlxm',
+    displayName: 'WLXM',
+    cityState: 'Lexington, SC',
+    homePage: 'https://cclexington.org/radio-and-tv/',
+    provider: 'shoutcast',
+    host: 'broadcast.shoutcheap.com/proxy/jossco00',
+    streamUrl: 'https://broadcast.shoutcheap.com/proxy/jossco00/;stream.mp3'
+  },
+  {
+    id: 'thelamp',
+    displayName: 'The Lamp',
+    cityState: 'Fredericksburg, VA',
+    homePage: 'https://ccfred.org/the-lamp-radio',
+    provider: 'futuri',
+    mount: '7087_24k',
+    streamUrl: 'https://ais-sa1.streamon.fm/7087_24k.aac'
+  },
+  {
+    id: 'kvng',
+    displayName: 'KVNG',
+    cityState: 'Casa Grande, AZ',
+    homePage: 'https://grace911.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb8web.securenetsystems.net',
+    callSign: 'KVNG',
+    streamUrl: 'https://ice8.securenetsystems.net/KVNG'
+  },
+  {
+    // Added 2026-09-03. Single real-title snapshot at add-time ("The Word
+    // For Today", a genuine syndicated program - not blank/generic like
+    // the GraceFM/KGPS dead-feed cases) - same bar WXMB passed before it
+    // was later found stale. Per the notes' policy for teaching-heavy
+    // SecureNetSystems stations, worth a deliberate second look in about
+    // a week to confirm the title/programStartTS are actually moving.
+    id: 'csninternational',
+    displayName: 'CSN International',
+    cityState: 'Twin Falls, ID',
+    homePage: 'https://csnradio.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'CSNAAC',
+    streamUrl: 'https://ice7.securenetsystems.net/CSNAAC'
+  },
+  {
+    id: 'klyt',
+    displayName: 'KLYT',
+    cityState: 'Albuquerque, NM',
+    homePage: 'https://klyt.fm/',
+    provider: 'radioco',
+    stationId: 's914ba6b9a',
+    streamUrl: 'https://s5.radio.co/s914ba6b9a/listen'
+  },
+  {
+    id: 'kptg',
+    displayName: 'KPTG',
+    cityState: 'Adelanto, CA',
+    homePage: 'https://www.ccadelanto.com/radio',
+    provider: 'radiocov2',
+    stationId: 'sf4a5da436',
+    streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
+  },
+  {
+    id: 'kqip',
+    displayName: 'KQIP',
+    cityState: 'Chico, CA',
+    homePage: 'https://ccchico.com/1071',
+    provider: 'icecast',
+    host: 'kqip-streamt.ccchico.com',
+    mount: 'stream.mp3',
+    streamUrl: 'https://kqip-streamt.ccchico.com/stream.mp3',
+    // This station's teaching/talk content reports titles like
+    // "Jeremiah 49 - Jeremiah" (a scripture reference, not an
+    // Artist - Track pair) - without this flag, parseIcecastJson's normal
+    // split would misreport "Jeremiah 49" as if it were a musical artist.
+    noArtistSplit: true
+  },
+  {
+    id: 'wglj',
+    displayName: 'WGLJ',
+    cityState: 'Gainesville, FL',
+    homePage: 'https://www.ccgainesville.com/radio/',
+    provider: 'live365json',
+    mountId: 'a81734',
+    streamUrl: 'https://streaming.live365.com/a81734',
+    // This station's automation crams "artist - title" into the title
+    // field as one lowercase string and leaves artist genuinely empty
+    // (e.g. "laura story - who is like our god"), unlike WRDJ which
+    // populates both fields separately - see parseLive365Json for why
+    // this needs an explicit opt-in rather than being the default.
+    splitCombinedTitle: true
+  },
+  {
+    id: 'ccukradio',
+    displayName: 'CC UK Radio',
+    cityState: 'United Kingdom',
+    homePage: 'https://www.calvarychapel.uk/radio',
+    provider: 'radioking',
+    slug: 'calvary-chapel-radio',
+    streamUrl: 'https://listen.radioking.com/radio/482243/stream/538778'
+  },
+  {
+    // Added 2026-09-03. First 'radioboss' station - see the notes doc for
+    // the full provider writeup. currenttrack_title looks like a bare code
+    // ("SAR20260902") but is confirmed real, not a dead-pipeline filename:
+    // "SAR" = "Sandy Adams Radio" (a real show on this station's own
+    // published schedule) + that day's airdate - this station's
+    // automation just names blocks {ShowInitials}{YYYYMMDD} instead of
+    // spelling the show out. Terse, but legitimate metadata.
+    id: 'kchpradio',
+    displayName: 'KCHP Radio',
+    cityState: 'Humboldt Co, CA',
+    homePage: 'https://telioschurch.com/kchpradio/',
+    provider: 'radioboss',
+    stationId: '77',
+    streamUrl: 'https://c5.radioboss.fm:8077/stream'
+  },
+  {
+    // Added 2026-09-03. First 'triton' station - Triton Digital is a large,
+    // well-documented radio-hosting/streaming platform (same tier of
+    // legitimacy as Radio.co/RadioKing already in this file), not something
+    // reverse-engineered from scratch. mount 'WROJ_LPAAC' = this station's
+    // Triton station_id ("WROJ_LP", found in the page's own inline player
+    // config) + codec suffix ("AAC") - confirmed correct by directly
+    // fetching Triton's public nowplaying API with this value and getting
+    // back real, current, non-frozen data (a specific song + artist, not a
+    // stale placeholder).
+    //
+    // streamUrl deliberately does NOT use the exact URL captured from the
+    // browser's network tab (an edge node like
+    // "18003.live.streamtheworld.com/WROJ_LPAAC_SBM?sbmid=...", where sbmid
+    // is a fresh session token generated per page load - not something a
+    // static config string can supply). Instead it uses Triton/
+    // StreamTheWorld's official redirect endpoint, which resolves to a
+    // healthy edge server on its own and needs no session token. The "_SBM"
+    // (session-based-metadata) stream variant exists so the player can read
+    // now-playing info embedded in the stream itself - we don't need that,
+    // since we already get now-playing data from Triton's separate API
+    // above, so the plain redirect stream is both simpler and a better fit.
+    // Worth a quick real playback check after this deploys.
+    id: 'refugefm',
+    displayName: 'Refuge FM',
+    cityState: 'St. Cloud, MN',
+    homePage: 'https://refuge.mn/refuge-fm',
+    provider: 'triton',
+    mount: 'WROJ_LPAAC',
+    streamUrl: 'https://playerservices.streamtheworld.com/api/livestream-redirect/WROJ_LPAAC.aac'
+  },
+  {
+    // Added 2026-09-03. Plain 'icecast' station - no new provider code
+    // needed. The page's own player is a bespoke WordPress plugin
+    // ("vmplayer") that fronts this station's real Icecast server through
+    // its own admin-ajax.php + nonce, already pre-splitting title/artist
+    // for its widget - but the underlying source is confirmed genuine
+    // Icecast (vmplayer's own config says stream_type "icecast", matching
+    // the "icecast-json" source label in its ajax response), so we go
+    // straight to the real status-json.xsl endpoint instead of depending
+    // on the WordPress site's ajax action/nonce. Confirmed directly: raw
+    // title is "Pastor Chuck Smith - The Word for Today", the standard
+    // "Host - Program" combined format our existing split-on-" - " logic
+    // already handles correctly (matches the separate title/artist fields
+    // vmplayer's own ajax response reported). streamUrl uses the clean
+    // mount URL - the page's own stream_url/mounts[].url both carry a long
+    // Google Analytics query string (_gl/_ga clickthrough params) that's
+    // just front-end tracking, not needed to fetch the stream itself.
+    id: 'kacm',
+    displayName: 'KACM',
+    cityState: 'Montrose, CO',
+    homePage: 'https://calvarymontrose.com/kacm/',
+    provider: 'icecast',
+    host: 'streamer.calvarymontrose.com',
+    mount: 'KACM',
+    streamUrl: 'https://streamer.calvarymontrose.com/KACM'
+  },
+  {
+    // Added 2026-09-04. Plain 'live365json' station, not 'live365hls' -
+    // the captured traffic was an HLS chunklist (das-edge...cdnstream.com,
+    // a fresh per-request listeningSessionId), which looks at first glance
+    // like it needs the live365hls two-hop chase, but per the notes doc
+    // policy, live365json's single clean api.live365.com/station/{mountId}
+    // fetch should always be tried first for any new Live365 station - and
+    // it worked here too. Confirmed with a live fetch that returned the
+    // exact same track as the captured HLS snippet ("Pastor Joe Focht -
+    // Straight from the Heart- Psalm 119"), so no need for the HLS chain
+    // or its per-request session-ID churn.
+    id: 'alohakihl',
+    displayName: 'Aloha KIHL',
+    cityState: 'Hilo, HI',
+    homePage: 'https://calvarychapelhilo.org/kihl-radio',
+    provider: 'live365json',
+    mountId: 'a95022',
+    streamUrl: 'https://streaming.live365.com/a95022'
+  },
+  {
+    // GraceFM/KXGRFM was originally investigated (see the SecureNetSystems
+    // section of radio-station-providers-notes.md) and rejected - its XML
+    // now-playing feed's title/artist are permanently empty with a
+    // programStartTS frozen at 2019, i.e. a dead metadata pipeline, not a
+    // quiet moment. streamUrl below is confirmed live/playable (2026-09-10)
+    // even though the metadata side is dead - those are two independent
+    // things on SecureNetSystems (see the doc's "How to find
+    // subdomain/callSign" note). Rather than skip the station entirely, its
+    // publicly published weekly schedule (gracefm.com/schedule) stands in
+    // for real-time metadata - see radio-station-published-schedule-notes.md
+    // for the full rationale and the transcription itself in
+    // src/radioSchedules/gracefm.js. A 60-day manual re-check against the
+    // live page is scheduled for 2026-11-09.
+    id: 'gracefm',
+    displayName: 'GraceFM',
+    cityState: 'Aurora, CO',
+    homePage: 'https://www.gracefm.com/',
+    provider: 'publishedschedule',
+    schedule: GRACEFM_SCHEDULE,
+    streamUrl: 'https://ice23.securenetsystems.net/KXGRFM',
+    // Static station logo, not per-program art - this provider always
+    // returns coverUrl: null (no artwork source in a published schedule),
+    // and a per-program image wouldn't be accurate anyway since the
+    // "now playing" data itself is inferred, not confirmed. Shadow-free,
+    // square-cornered version of GraceFM's own icon (see the published-
+    // schedule notes doc for why the shadowed original wasn't used).
+    staticCoverUrl: '/gracefm-icon.png',
+    staticCoverThumbUrl: '/gracefm-icon-128.png'
+  },
+  {
+    // Same pattern as GraceFM above - KEWR's Live365 JSON endpoint
+    // (api.live365.com/station/a36509) was checked first per the usual
+    // policy and confirmed dead: current-track/last-played come back empty
+    // even though the stream itself (streaming.live365.com/a36509) plays
+    // fine. Its publicly published weekly schedule
+    // (enduringwordradio.com/schedule) stands in for real-time metadata
+    // instead - see radio-station-published-schedule-notes.md for the full
+    // rationale (including the two source-page naming inconsistencies
+    // resolved and the added Sunday-evening filler entry) and the
+    // transcription itself in src/radioSchedules/kewr.js. A 60-day manual
+    // re-check against the live page is scheduled for 2026-11-16.
+    id: 'kewr',
+    displayName: 'KEWR - Enduring Word Radio',
+    cityState: 'Cedar Rapids, IA',
+    homePage: 'https://enduringwordradio.com/',
+    provider: 'publishedschedule',
+    schedule: KEWR_SCHEDULE,
+    streamUrl: 'https://streaming.live365.com/a36509',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM's staticCoverUrl above. Shadow-free, rounded-square treatment
+    // built from the station's own logo, matching the GraceFM/WJWD
+    // convention (see the published-schedule notes doc).
+    staticCoverUrl: '/kewr-icon.png',
+    staticCoverThumbUrl: '/kewr-icon-128.png'
+  },
+  {
+    // Previously investigated and rejected (see "KGPS 'The Way' (Kingman,
+    // AZ)" in radio-station-providers-notes-consolidated.md) - its XML
+    // now-playing feed (player_status_update/KGPS.xml) returns HTTP 200
+    // with a soft-404 error page body ("The system cannot find the file
+    // specified"), same dead-metadata-pipeline situation as GraceFM/KEWR
+    // above, just confirmed via live Network traffic rather than a manual
+    // fetch. Larry re-confirmed the same broken response 2026-09-18 and
+    // supplied the station's published weekly schedule directly, so it's
+    // wired up here the same way GraceFM/WJWD/KEWR were - see
+    // radio-station-published-schedule-notes.md for the full rationale, the
+    // seasonal Summer/Winter slot-swap judgment call, and the transcription
+    // itself in src/radioSchedules/kgps.js. streamUrl below is unchanged
+    // from the original investigation and confirmed live/playable
+    // independent of the dead metadata feed. A 60-day manual re-check
+    // against the live page is scheduled for 2026-11-17.
+    id: 'kgps',
+    displayName: 'KGPS',
+    cityState: 'Kingman, AZ',
+    homePage: 'https://www.kgps.org/',
+    provider: 'publishedschedule',
+    schedule: KGPS_SCHEDULE,
+    streamUrl: 'https://ice5.securenetsystems.net/KGPS',
+    // Static station logo, not per-program art - same reasoning as
+    // GraceFM/WJWD/KEWR's staticCoverUrl above. Larry's own compass/GPS-pin
+    // graphic (a nod to the call sign), given the same shadow-free,
+    // rounded-square treatment as the other publishedschedule icons.
+    staticCoverUrl: '/kgps-icon.png',
+    staticCoverThumbUrl: '/kgps-icon-128.png'
+  },
+  {
+    // New station, not previously investigated. Larry supplied the
+    // /v5/WAYGLP SecureNetSystems page source directly along with proof the
+    // now-playing XML feed (player_status_update/WAYGLP.xml) is dead - same
+    // soft-404 "system cannot find the file specified" body as
+    // GraceFM/WJWD/KEWR/KGPS above - plus the station's published weekly
+    // schedule (three separate pages: Weekdays, Saturday, Sunday). Wired up
+    // here the same way as the other publishedschedule stations - see
+    // radio-station-published-schedule-notes.md for the full rationale, the
+    // handful of spelling/casing corrections made across the three source
+    // pages, and the transcription itself in
+    // src/radioSchedules/godswayradio.js. streamUrl below is the
+    // SecureNetSystems stream URL confirmed live in the page source. A
+    // 60-day manual re-check against the live pages is scheduled for
+    // 2026-11-17.
+    id: 'godswayradio',
+    displayName: "God's Way Radio",
+    cityState: 'Miami, FL',
+    homePage: 'https://www.godswayradio.com/',
+    provider: 'publishedschedule',
+    schedule: GODSWAYRADIO_SCHEDULE,
+    streamUrl: 'https://ice25.securenetsystems.net/WAYGLP',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // triangle/play-button graphic for the station, given the same
+    // shadow-free, rounded-square treatment as the other publishedschedule
+    // icons.
+    staticCoverUrl: '/godswayradio-icon.png',
+    staticCoverThumbUrl: '/godswayradio-icon-128.png'
+  },
+  {
+    id: 'hopefm',
+    displayName: 'Hope FM',
+    cityState: 'Medford Lakes, NJ',
+    homePage: 'https://hopefm.net/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'WVBV',
+    streamUrl: 'https://ice26.securenetsystems.net/WVBV'
+  },
+  {
+    // Public branding is "WLWG" (91.7 FM, "Grace FM - Living Waters of
+    // Grace", licensed to Mount Pleasant, PA per Larry) but the technical
+    // callSign used by the actual now-playing/stream pipeline is "WJLW" -
+    // the original low-power sister station this simulcasts, per the
+    // page's own text ("we turned on the new Grace FM WLWG... on 91.7 FM").
+    // Same DOVEMAIN-style public-name-vs-technical-callSign split as Dove
+    // FM above. subdomain/callSign found in the embed snippet on
+    // calvarychapelonline.com/gracefm/ (page source Larry supplied):
+    // `cirrusencore/embed/embed.js?stationCallSign=WJLW&playerlocation=
+    // streamdb9web...`, i.e. the Cirrus Encore template, same family as
+    // Hope FM above. streamUrl below is exactly what Larry confirmed
+    // working. Larry confirmed the now-playing widget is live and updating
+    // correctly on that page - couldn't independently re-poll
+    // streamdb9web.securenetsystems.net/player_status_update/WJLW.xml
+    // ourselves to double-check freshness (blocked by the site's
+    // robots.txt for automated fetching, same limitation noted for CSN
+    // International above), so this rests on Larry's direct confirmation
+    // rather than our own snapshot.
+    //
+    // Note for future stations: this is now the THIRD distinctly different
+    // station in this file with "Grace FM"/"GraceFM" branding - KXGRFM
+    // (Aurora, CO - rejected, dead feed, later added via
+    // publishedschedule), KVNG (Casa Grande, AZ, branded "Grace 91.1"), and
+    // this one (Mount Pleasant/Greensburg, PA). Easy to mix up by name
+    // alone - go by id/subdomain/callSign, not the branding, when in doubt.
+    id: 'wlwg',
+    displayName: 'WLWG',
+    cityState: 'Mount Pleasant, PA',
+    homePage: 'https://www.calvarychapelonline.com/gracefm/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb9web.securenetsystems.net',
+    callSign: 'WJLW',
+    streamUrl: 'https://ice64.securenetsystems.net/WJLW'
+  }
+];
+
+// Extracts <title>, <artist>, and <cover> from the small XML feed each
+// SecureNetSystems station exposes. Deliberately simple regex extraction is
+// fine here (unlike the Conference ticker's messy nested HTML) because this
+// is clean, predictable, machine-generated XML with no nesting to worry
+// about. <cover> is the station's own album-art/show-image URL - Icecast has
+// no equivalent field, so coverUrl is SecureNetSystems-only and callers must
+// treat it as optional.
+function parseSecureNetSystemsXml(xml) {
+  const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/i);
+  const artistMatch = xml.match(/<artist>([\s\S]*?)<\/artist>/i);
+  const coverMatch = xml.match(/<cover>([\s\S]*?)<\/cover>/i);
+  const coverUrl = coverMatch ? decodeEntities(coverMatch[1]).trim() : '';
+  return {
+    title: titleMatch ? decodeEntities(titleMatch[1]).trim() : '',
+    artist: artistMatch ? decodeEntities(artistMatch[1]).trim() : '',
+    coverUrl: coverUrl || null
+  };
+}
+
+// Extracts now-playing info from Live365's public station JSON endpoint
+// (https://api.live365.com/station/{mountId}). Undocumented but stable -
+// same shape confirmed by station page inspection. Talk/spoken segments
+// report a real title with an empty artist string (e.g. "Revival_Radio"),
+// which is expected, not a failure - only treat completely missing data as
+// absent. The "art" field always points at a static Live365 placeholder
+// image (".../blankart.jpg") when no real cover exists, so that specific
+// URL is filtered out to null rather than shown as if it were real artwork.
+function parseLive365Json(rawJson, station) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Live365 JSON response');
+  }
+
+  const track = data && data['current-track'];
+  const rawCover = track && typeof track.art === 'string' ? track.art.trim() : '';
+  const isPlaceholderArt = /blankart\.jpg$/i.test(rawCover);
+
+  let title = track && typeof track.title === 'string' ? track.title.trim() : '';
+  let artist = track && typeof track.artist === 'string' ? track.artist.trim() : '';
+
+  // Opt-in escape hatch: confirmed in production that not every Live365
+  // station populates title/artist as genuinely separate fields the way
+  // WRDJ does - WGLJ's automation instead crams "artist - title" into the
+  // title field itself as one lowercase string, leaving artist genuinely
+  // empty (e.g. title:"laura story - who is like our god", artist:"").
+  // Only attempt the split when a station is flagged for it AND artist is
+  // actually empty (so a station's own already-correct artist - like a
+  // station-ID entry that happens to have "IID" as a real artist value -
+  // is never overwritten by a guessed split). Also intentionally does NOT
+  // attempt to fix the lowercase casing - guessing correct title-case for
+  // arbitrary artist names (apostrophes, ampersands, initials) risks
+  // introducing new wrong-looking mistakes, so it's displayed as-is.
+  if (station && station.splitCombinedTitle && !artist) {
+    const sepIndex = title.indexOf(' - ');
+    if (sepIndex !== -1) {
+      artist = title.slice(0, sepIndex).trim();
+      title = title.slice(sepIndex + 3).trim();
+    }
+  }
+
+  return {
+    title: title,
+    artist: artist,
+    coverUrl: rawCover && !isPlaceholderArt ? rawCover : null
+  };
+}
+
+// Extracts now-playing info from an Icecast status-json.xsl response. Unlike
+// SecureNetSystems, Icecast reports a single combined "title" field rather
+// than separate title/artist fields - by convention it's usually formatted
+// as "Artist - Track" (or "Host - Program" for talk stations), so we split
+// on the first " - " to recover both. If a station's title doesn't follow
+// that convention, we fall back to treating the whole string as the title
+// with no artist, rather than guessing wrong.
+function parseIcecastJson(rawJson, station) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Icecast JSON response');
+  }
+
+  // status-json.xsl returns "source" as a single object when the server has
+  // just one mount, but as an array when it has several. Requesting with
+  // ?mount= should always give us a single object, but handle the array
+  // shape too in case a server ever ignores that filter.
+  let source = data && data.icestats && data.icestats.source;
+  if (Array.isArray(source)) source = source[0];
+
+  const rawTitle = source && typeof source.title === 'string' ? source.title.trim() : '';
+  if (!rawTitle) return { title: '', artist: '', coverUrl: null };
+
+  // Opt-in escape hatch for talk/teaching stations whose titles legitimately
+  // contain " - " but aren't an "Artist - Track" pair at all (confirmed in
+  // production - KQIP reports scripture references like "Jeremiah 49 -
+  // Jeremiah", which the split below would otherwise misreport as if
+  // "Jeremiah 49" were a musical artist's name). Defaults to the normal
+  // split behavior for every other Icecast station - only set
+  // noArtistSplit: true on a station when its real titles have been
+  // confirmed to need this.
+  if (station && station.noArtistSplit) {
+    return { title: rawTitle, artist: '', coverUrl: null };
+  }
+
+  const sepIndex = rawTitle.indexOf(' - ');
+  if (sepIndex !== -1) {
+    return {
+      artist: rawTitle.slice(0, sepIndex).trim(),
+      title: rawTitle.slice(sepIndex + 3).trim(),
+      coverUrl: null
+    };
+  }
+
+  // Some stations (confirmed in production - WRBP 92.5FM) report an empty
+  // artist as a bare leading "- Title" instead of omitting the separator
+  // entirely. After trimming the string, that leaves a stray "- " prefix
+  // that the split above won't catch (no leading space left to match
+  // " - " against) - strip it here so the ticker doesn't show a dangling
+  // dash with no artist before it.
+  const bareTitle = rawTitle.replace(/^-\s+/, '').trim();
+  return { title: bareTitle, artist: '', coverUrl: null };
+}
+
+// Extracts now-playing info from a Futuri/streamon.fm "current.json"
+// metadata endpoint. Confirmed via a real response to return a one-element
+// array (not a bare object like Icecast's single-mount case) using ID3
+// frame names as keys: TIT2 for title, TPE1 for artist, WXXX_album_art for
+// cover art. WXXX_album_art can be present but an empty string when the
+// current program has no art configured (seen in production - a talk show
+// with no art, vs. a music track that would have one), so treat blank the
+// same as absent rather than showing a broken image.
+function parseFuturiJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Futuri JSON response');
+  }
+
+  const entry = Array.isArray(data) ? data[0] : data;
+  if (!entry) return { title: '', artist: '', coverUrl: null };
+
+  const title = typeof entry.TIT2 === 'string' ? entry.TIT2.trim() : '';
+  const artist = typeof entry.TPE1 === 'string' ? entry.TPE1.trim() : '';
+  const coverUrl = typeof entry.WXXX_album_art === 'string' && entry.WXXX_album_art.trim()
+    ? entry.WXXX_album_art.trim()
+    : null;
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
+// Extracts now-playing info from a SoCast player's now-playing feed. Unlike
+// the other providers, this isn't bare JSON - it's JSONP, a JS-callback
+// wrapper around a JSON object (confirmed via a real response:
+// `jsonpcallback({...});`), designed to be loaded via a <script> tag on the
+// station's own player page rather than fetched and parsed directly. We
+// don't execute it as script - just regex out the object literal and
+// Extracts on-air program info from a SoCast station's "currentProgram" API
+// - a WordPress REST route hosted on the STATION'S OWN domain (not the
+// shared socast-public.s3.amazonaws.com infrastructure used by the
+// song-tracking feed we tried first). Confirmed via a real response to be
+// the correct source for actual show/host identity (e.g. "Pastor Ed
+// Taylor / Abounding Grace") - the song-based np_x_x.js feed we originally
+// wired up instead tracks background music cues, which for a talk station
+// never reflects who's actually on air, even though both feeds technically
+// "work" and return data.
+//
+// Response is JSONP (see parseSocastJsonp's comment for what that means),
+// but with a dynamically-generated callback name unique per request
+// (e.g. "jQuery19105312052787680952_1787330750766") rather than a fixed
+// literal - the regex below matches any valid identifier as the wrapper
+// function name rather than requiring one specific name.
+function parseSocastProgramJsonp(raw) {
+  const wrapperMatch = raw.match(/^\s*[\w$]+\(([\s\S]*)\)\s*;?\s*$/);
+  if (!wrapperMatch) throw new Error('Unexpected SoCast program response format');
+
+  let parsed;
+  try {
+    parsed = JSON.parse(wrapperMatch[1]);
+  } catch (err) {
+    throw new Error('Invalid SoCast program JSON payload');
+  }
+
+  if (!parsed || parsed.status !== 'success' || !parsed.data) {
+    return { title: '', artist: '', coverUrl: null };
+  }
+
+  // No separate "artist" concept for a program schedule - program_name is
+  // already the full descriptive string (e.g. "Host Name / Show Title"),
+  // so it goes entirely into title with artist left blank. The frontend's
+  // existing "no artist -> just show the title" fallback handles this the
+  // same way it already does for Icecast stations with no artist data.
+  const title = typeof parsed.data.program_name === 'string' ? parsed.data.program_name.trim() : '';
+
+  // program_button has been the populated one in practice (a host photo);
+  // program_header_img/program_mobile_img are alternate fields in the same
+  // payload shape that were empty strings in the one real response we've
+  // confirmed, but checked here in case a different program populates one
+  // of those instead.
+  let coverUrl = null;
+  if (typeof parsed.data.program_button === 'string' && parsed.data.program_button.trim()) {
+    coverUrl = parsed.data.program_button.trim();
+  } else if (typeof parsed.data.program_header_img === 'string' && parsed.data.program_header_img.trim()) {
+    coverUrl = parsed.data.program_header_img.trim();
+  } else if (typeof parsed.data.program_mobile_img === 'string' && parsed.data.program_mobile_img.trim()) {
+    coverUrl = parsed.data.program_mobile_img.trim();
+  }
+
+  return { title: title, artist: '', coverUrl: coverUrl };
+}
+
+// Extracts the "Now playing" line from a WordPress "radiostation" theme's
+// showPlaying.php feed. This is plain HTML (not XML/JSON) built for a
+// browser to display and auto-refresh directly (the response includes its
+// own <script>setTimeout(...location.reload...)</script> - we ignore that,
+// we just re-fetch on our own poll schedule instead) - confirmed via a real
+// response to look like:
+//   <div id='nowPlaying'>...
+//     <b><i><u>Played earlier</u></i></b><br/>Song by Artist<br/>...
+//     <b><i><u>Now playing</u></i></b><br/><b>Title by Artist</b><br/>
+//     <b><i><u>Up next</u></i></b><br/>Song by Artist
+//   </div>
+// Only the bolded "Now playing" line is what we want. Each line follows a
+// "{title} by {artist}" convention - split on the first " by " the same
+// way other providers split on " - ".
+function parseWpShowPlayingHtml(html) {
+  const nowPlayingMatch = html.match(/Now playing<\/u><\/i><\/b><br\s*\/?>\s*<b>([\s\S]*?)<\/b>/i);
+  if (!nowPlayingMatch) return { title: '', artist: '', coverUrl: null };
+
+  const raw = decodeEntities(nowPlayingMatch[1].replace(/<[^>]+>/g, '')).trim();
+  if (!raw) return { title: '', artist: '', coverUrl: null };
+
+  const sepIndex = raw.indexOf(' by ');
+  if (sepIndex === -1) return { title: raw, artist: '', coverUrl: null };
+  return {
+    title: raw.slice(0, sepIndex).trim(),
+    artist: raw.slice(sepIndex + 4).trim(),
+    coverUrl: null
+  };
+}
+
+// Safe JSON.parse that returns null on failure instead of throwing - used
+// by parseRadioMastSse below to try a few candidate shapes in order rather
+// than committing to one and failing hard if it's wrong.
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Extracts now-playing info from a RadioMast.io stream's metadata feed.
+// Confirmed via a real response to be:
+//   { "metadata": "05 You Say - Laura Daigle", "metadata_ext": {} }
+// RadioMast's own docs describe this as a Server-Sent Events endpoint
+// (`new EventSource(streamUrl + "/metadata")`), meant to push updates
+// indefinitely - a fundamentally different shape than every other
+// provider here (all one-shot GET+parse). We don't hold the connection
+// open; a single fetch() is enough since the current state is sent
+// immediately upon connecting, and we just read whatever arrives first.
+// The exact raw wire format (proper "data: {...}" SSE framing vs. what
+// look liked bare JSON in manual testing) wasn't fully pinned down, so
+// this tries a few candidate shapes in order rather than assuming one:
+//   1. The whole response is bare JSON, no framing at all.
+//   2. Proper SSE framing - a "data: {...}" line as the first event.
+//   3. Last resort - the first {...} span found anywhere in the text.
+function parseRadioMastSse(raw) {
+  const trimmed = raw.trim();
+  let data = tryParseJson(trimmed);
+
+  if (!data) {
+    const firstEvent = trimmed.split(/\r?\n\r?\n/)[0];
+    const dataLine = firstEvent.split(/\r?\n/).filter(function(line) {
+      return line.indexOf('data:') === 0;
+    })[0];
+    if (dataLine) data = tryParseJson(dataLine.slice(dataLine.indexOf(':') + 1).trim());
+  }
+
+  if (!data) {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (match) data = tryParseJson(match[0]);
+  }
+
+  if (!data) throw new Error('Unexpected RadioMast metadata response format');
+
+  const combined = typeof data.metadata === 'string' ? data.metadata.trim() : '';
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  // Combined string convention here is "{Title} - {Artist}" (confirmed:
+  // "05 You Say - Laura Daigle" - Laura Daigle is the artist) - the
+  // OPPOSITE order from Icecast's "{Artist} - {Track}" convention, so
+  // don't copy that split blindly for a future RadioMast station.
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+
+  let title = combined.slice(0, sepIndex).trim();
+  const artist = combined.slice(sepIndex + 3).trim();
+
+  // Strips a leading track-number prefix some automation systems include
+  // (confirmed in production: "05 You Say" for a track actually titled
+  // "You Say") - inferred from a single real example, may need revisiting
+  // if a future station's real titles legitimately start with a number.
+  title = title.replace(/^\d{1,3}[\s.]+/, '');
+
+  return { title: title, artist: artist, coverUrl: null };
+}
+
+// Extracts now-playing info from a Live365 HLS media playlist's embedded
+// #EXTINF tags - a completely different (and much simpler) mechanism than
+// Live365's SSE-based `/metadata` endpoint, which we deliberately decided
+// NOT to build (see the "Providers we looked at and deliberately did NOT
+// build" doc section - that endpoint appeared to require spoofing Origin/
+// Referer headers to impersonate Live365's own player). This one needs
+// none of that: the current track is sitting in plain text inside the
+// public playlist file every segment already carries, confirmed via a
+// real response:
+//   #EXTINF:4.96327,PASTOR JOHN THOMAS - IN THE POTTERS HAND
+//   /L2ExMDY2NQ../.../segment-163670.mp3?listeningSessionId=...
+// Multiple #EXTINF lines can appear per fetch (one per segment in the
+// current sliding window) - we want the LAST one, since segments are
+// listed oldest-to-newest and the last is the most recently added.
+function parseLive365HlsPlaylist(m3u8Text) {
+  const matches = [...m3u8Text.matchAll(/^#EXTINF:[\d.]+,(.*)$/gm)];
+  if (!matches.length) return { title: '', artist: '', coverUrl: null };
+
+  const combined = matches[matches.length - 1][1].trim();
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  // Convention here is "{Artist} - {Title}" (confirmed: "PASTOR JOHN
+  // THOMAS - IN THE POTTERS HAND" - a preacher's name, then the sermon
+  // title) - same order as Icecast's split, NOT RadioMast's reversed one.
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+  return {
+    artist: combined.slice(0, sepIndex).trim(),
+    title: combined.slice(sepIndex + 3).trim(),
+    coverUrl: null
+  };
+}
+
+// Extracts now-playing info from a Shoutcast v2 server's native status
+// endpoint. Distinct from `icecast` above - Shoutcast and Icecast are
+// different streaming server software with different native formats, even
+// though shared hosts like shoutcheap.com can host either kind. Confirmed
+// via a real response that some shoutcheap.com proxies serve the audio
+// stream itself (not JSON) at the Icecast-style `status-json.xsl` path -
+// worth checking whether a "shoutcheap.com" station is actually Icecast or
+// Shoutcast under the hood before assuming which provider applies.
+//
+// Response shape (confirmed via a real response):
+//   { "songtitle": "Chris Falson - I See the Lord", "servertitle": "...", ... }
+// `songtitle` follows the same "Artist - Track" convention as Icecast, so
+// the split logic is identical.
+function parseShoutcastJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Shoutcast JSON response');
+  }
+
+  const combined = typeof data.songtitle === 'string' ? data.songtitle.trim() : '';
+  if (!combined) return { title: '', artist: '', coverUrl: null };
+
+  const sepIndex = combined.indexOf(' - ');
+  if (sepIndex === -1) return { title: combined, artist: '', coverUrl: null };
+  return {
+    artist: combined.slice(0, sepIndex).trim(),
+    title: combined.slice(sepIndex + 3).trim(),
+    coverUrl: null
+  };
+}
+
+// Extracts now-playing info from ElasticPlayer's "history" endpoint
+// (https://www.elasticplayer.xyz/api/v1/radio/{id}/history). Returns an
+// array, most-recent-first (by created_at) - index 0 is the current/last
+// item. Unlike Icecast/Shoutcast, there's no separate title/artist -
+// everything is a single freeform "meta" string, and its internal format
+// is inconsistent (some entries look like "Speaker - Series - Episode",
+// others like "260505 THE WATCHMAN CALL - THE TIMELINE OF END TIMES -
+// PART 5 -" where the leading segment is a program/date code, not a
+// person's name). Splitting on " - " would mislabel those as an artist,
+// so - same principle as other inconsistent talk-station formats
+// elsewhere in this file - the whole string is kept as the title with no
+// artist, rather than guessing wrong.
+function parseElasticPlayerJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid ElasticPlayer JSON response');
+  }
+
+  const latest = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  const rawMeta = latest && typeof latest.meta === 'string' ? latest.meta.trim() : '';
+  const rawCover = latest && typeof latest.image_url === 'string' ? latest.image_url.trim() : '';
+
+  return {
+    title: rawMeta,
+    artist: '',
+    coverUrl: rawCover || null
+  };
+}
+
+// Extracts now-playing info from streamingrad.io's metadata endpoint
+// (https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player={id}).
+// Confirmed response shape - a single object (not an array, unlike
+// ElasticPlayer), with title/artist as separate fields already:
+//   {"state":"1","metadata":{"title":"GREEDY","artist":"","imageDefault":
+//    "img.php?...","image":"https://is1-ssl.mzstatic.com/...400x400bb.jpg",
+//    "trackViewUrl":"https://music.apple.com/..."}}
+// artist was empty in the one response seen so far - kept as-is rather
+// than assumed broken, same principle as other providers with
+// talk/instrumental content that legitimately has no artist.
+function parseStreamingRadIoJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid streamingrad.io JSON response');
+  }
+
+  const meta = data && data.metadata;
+  const rawCover = meta && typeof meta.image === 'string' ? meta.image.trim() : '';
+
+  return {
+    title: meta && typeof meta.title === 'string' ? meta.title.trim() : '',
+    artist: meta && typeof meta.artist === 'string' ? meta.artist.trim() : '',
+    coverUrl: rawCover || null
+  };
+}
+
+// Extracts now-playing info from Radio.co's official public status API
+// (https://public.radio.co/stations/{stationId}/status) - a well-
+// documented platform, unlike most other providers in this file which
+// had to be reverse-engineered.
+//
+// Confirmed response shape (real, live data - KLYT-FM):
+//   {"current_track":{"title":"The Love I Have For You  Colton Dixon",
+//    "artwork_url":"https://images.radio.co/...jpg", ...}, ...}
+//
+// IMPORTANT: current_track has NO separate artist field at all - just one
+// "title" string. Confirmed via real production data that this platform
+// mixes TWO different internal conventions within that single field,
+// inconsistently:
+//   - actual songs: "{Track Title}  {Artist}" (note: double space, not a
+//     dash like Icecast/Shoutcast's "{Artist} - {Track}" convention)
+//   - station liners/promos/vignettes: "{Description} BY {Attribution}"
+//     (sometimes with nothing after "BY" at all)
+// Since these two formats are mixed together in the same feed with no
+// reliable way to tell which is which before parsing, splitting on either
+// pattern risks mangling the other category. Per the same principle used
+// for other inconsistent-format stations elsewhere in this file, the
+// whole string is kept as-is as the title with an empty artist, rather
+// than guess wrong.
+function parseRadioCoJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Radio.co JSON response');
+  }
+
+  const track = data && data.current_track;
+  const rawCover = track && typeof track.artwork_url === 'string' ? track.artwork_url.trim() : '';
+
+  return {
+    title: track && typeof track.title === 'string' ? track.title.trim() : '',
+    artist: '',
+    coverUrl: rawCover || null
+  };
+}
+
+// Extracts now-playing info from Radio.co's newer v2 public track API
+// (https://public.radio.co/api/v2/{stationId}/track/current) - unlike the
+// older /stations/{id}/status endpoint above (which only returns a single
+// combined "title" string with no artist field), this v2 endpoint returns
+// track_artist and track_title as clean, already-split fields - no
+// guessing/parsing needed at all.
+//
+// Confirmed real response shape (KPTG):
+//   {"data":{"title":"Raul Ries - Somebody Loves You","start_time":"...",
+//    "artwork_urls":{"standard":"https://images.radio.co/album_art/....jpg",
+//    "large":"...jpg"},"track_artist":"Raul Ries",
+//    "track_title":"Somebody Loves You", ...}}
+//
+// Note: "artwork_urls.standard" is used over "large" per station owner's
+// instruction - both are valid jpg URLs, just different sizes.
+function parseRadioCoV2Json(rawJson) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid Radio.co v2 JSON response');
+  }
+
+  const track = parsed && parsed.data;
+  const rawCover = track && track.artwork_urls && typeof track.artwork_urls.standard === 'string'
+    ? track.artwork_urls.standard.trim()
+    : '';
+
+  return {
+    title: track && typeof track.track_title === 'string' ? track.track_title.trim() : '',
+    artist: track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '',
+    coverUrl: rawCover || null
+  };
+}
+
+// Extracts now-playing info from RadioKing's public widget API
+// (https://api.radioking.io/widget/radio/{slug}/track/current) - a clean,
+// well-documented single-object response with title/artist already
+// properly split into separate fields, no combined-string parsing needed
+// at all (unlike Icecast/Shoutcast's "{Artist} - {Track}" convention, or
+// Live365/ElasticPlayer's occasional single-field quirks elsewhere in
+// this file). Confirmed real response shape:
+//   {"id":95994476,"artist":"Lloyd Pulley","title":"BRIDGING THE GAP",
+//    "album":"...","is_live":false,"cover":"https://image.radioking.io/...",
+//    "default_cover":true, ...}
+// "default_cover":true means "cover" is just a generic station logo
+// placeholder rather than real per-track artwork - filtered out the same
+// way Live365's blankart.jpg placeholder is, rather than shown as if it
+// were genuine cover art.
+function parseRadioKingJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid RadioKing JSON response');
+  }
+
+  const rawCover = data && typeof data.cover === 'string' ? data.cover.trim() : '';
+  const isDefaultCover = !!(data && data.default_cover);
+
+  return {
+    title: data && typeof data.title === 'string' ? data.title.trim() : '',
+    artist: data && typeof data.artist === 'string' ? data.artist.trim() : '',
+    coverUrl: rawCover && !isDefaultCover ? rawCover : null
+  };
+}
+
+// Registry of provider-specific fetch+parse logic. Every provider must
+// expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
+// always return { title, artist, coverUrl } regardless of the provider's own
+// native format (XML here, but a future provider might be JSON) - that's the
+// one contract the ticker rendering code relies on. coverUrl is null for any
+// provider (like Icecast) that doesn't expose station/show artwork. Adding a
+// future non-SecureNetSystems station (streamon.fm, Live365, etc.) means
+// adding one new entry here, not touching the handler, the cache logic, or
+// the frontend at all.
+const RADIO_PROVIDERS = {
+  securenetsystems: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.subdomain + '/player_status_update/' + station.callSign + '.xml';
+    },
+    parse: parseSecureNetSystemsXml
+  },
+  icecast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/status-json.xsl?mount=/' + station.mount;
+    },
+    parse: parseIcecastJson
+  },
+  futuri: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://yp.cdnstream1.com/metadata/' + station.mount + '/current.json';
+    },
+    parse: parseFuturiJson
+  },
+  socast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.domain + '/api/music/currentProgram?jsonpcallback=npCallback&accountID=' + station.accountId + '&_=' + Date.now();
+    },
+    parse: parseSocastProgramJsonp
+  },
+  wpshowplaying: {
+    buildNowPlayingUrl: function(station) {
+      return station.npUrl;
+    },
+    parse: parseWpShowPlayingHtml
+  },
+  live365json: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://api.live365.com/station/' + station.mountId;
+    },
+    parse: parseLive365Json
+  },
+  live365hls: {
+    // Deliberately named distinctly from a hypothetical future
+    // "live365sse"-style provider - this is NOT the same mechanism as the
+    // rejected SSE endpoint, and shouldn't be confused with it later.
+    // Uses fetchAndParse (not buildNowPlayingUrl/parse) because the real
+    // media playlist lives behind a master-playlist redirect that has to
+    // be followed fresh every poll - see fetchLive365NowPlaying above.
+    fetchAndParse: fetchLive365NowPlaying
+  },
+  radiomast: {
+    // Metadata URL is always just the stream URL itself + "/metadata"
+
+    // (confirmed via RadioMast's own docs and a real response) - no
+    // separate station-specific field needed beyond the streamUrl every
+    // station already has for playback.
+    buildNowPlayingUrl: function(station) {
+      return station.streamUrl + '/metadata';
+    },
+    parse: parseRadioMastSse
+  },
+  shoutcast: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/stats?json=1';
+    },
+    parse: parseShoutcastJson
+  },
+  aiir: {
+    // Aiir's now-playing data isn't served over plain HTTP at all - the
+    // player's own JS subscribes over a WebSocket and gets pushed a
+    // snapshot immediately, then just heartbeats every few minutes to
+    // keep the connection alive (confirmed via the browser's own
+    // Network > Socket traffic: subscribe -> full nowPlaying payload in
+    // well under a second -> {"action":"heartbeat"} every ~4 min after
+    // that). So we don't poll on our own schedule - we open a fresh
+    // connection, subscribe, take the first real payload, and close.
+    // Needs fetchAndParse (see live365hls above for the general pattern)
+    // since this is nothing like a single buildNowPlayingUrl+parse fetch.
+    fetchAndParse: fetchAiirNowPlaying
+  },
+  elasticplayer: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://www.elasticplayer.xyz/api/v1/radio/' + station.radioId + '/history?ts=' + Date.now();
+    },
+    parse: parseElasticPlayerJson
+  },
+  streamingradio: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://streamingrad.io/streaming-audio/live.php?action=metadata&id_player=' + station.idPlayer;
+    },
+    parse: parseStreamingRadIoJson
+  },
+  radioco: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://public.radio.co/stations/' + station.stationId + '/status';
+    },
+    parse: parseRadioCoJson
+  },
+  radiocov2: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://public.radio.co/api/v2/' + station.stationId + '/track/current';
+    },
+    parse: parseRadioCoV2Json
+  },
+  radioking: {
+    buildNowPlayingUrl: function(station) {
+      return 'https://api.radioking.io/widget/radio/' + station.slug + '/track/current';
+    },
+    parse: parseRadioKingJson
+  },
+  radioboss: {
+    // Uses fetchAndParse even though this is only ONE HTTP call - a
+    // different reason than live365hls/aiir's multi-call chains above.
+    // RadioBoss's now-playing JSON has no cover-art field in the response
+    // body at all; the artwork lives at a separate, predictable URL keyed
+    // by the same station id used in the now-playing request
+    // (https://c5.radioboss.fm/w/artwork/{stationId}.jpg, confirmed via
+    // the station's own embedded widget markup) - fetchAndParse is the
+    // only shape that gets station.stationId available alongside the
+    // parsed response to build that URL.
+    fetchAndParse: fetchRadioBossNowPlaying
+  },
+  triton: {
+    // fetchAndParse for a third reason (distinct from both live365hls/aiir's
+    // multi-call chains and radioboss's need for a station field): Triton's
+    // nowplaying XML has no artwork field at all, and unlike radioboss there
+    // is no predictable per-station artwork URL to build either - the
+    // station's own hosted player fills in cover art with a *second*, fully
+    // separate network call to Apple's public iTunes Search API keyed off
+    // the title/artist text (confirmed by capturing that exact request in
+    // the browser - a JSONP call to itunes.apple.com/search). We replicate
+    // that same second hop server-side (as plain JSON, no callback param
+    // needed - the JSONP wrapper is purely a browser/jQuery convenience,
+    // not required by the API itself).
+    fetchAndParse: fetchTritonNowPlaying
+  },
+  publishedschedule: {
+    // See fetchPublishedScheduleNowPlaying below (defined alongside the
+    // other fetchAndParse providers) for the full explanation -
+    // fetchAndParse here does zero fetch() calls at all, unlike every
+    // other fetchAndParse provider above it, all of which still make one or
+    // more real HTTP requests.
+    fetchAndParse: fetchPublishedScheduleNowPlaying
+  }
+};
+
+const LIVE365_FETCH_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' };
+
+// Live365's own base playlist URL isn't the media playlist we need - it's
+// a "master" playlist pointing to a freshly-issued, session-specific edge
+// URL that changes on every single request (confirmed in production: two
+// separate fetches returned two different listeningSessionId values).
+// This is NOT the same kind of gating as the rejected SSE `/metadata`
+// endpoint (no spoofed headers needed, nothing session-authenticated) -
+// it's just a normal, public two-step redirect we have to follow fresh
+// every poll rather than something we can cache/hardcode.
+//
+// This needs its own fetch function (rather than the generic single
+// fetch+parse used by every other provider) because it requires two HTTP
+// calls, not one - see fetchAndParse on the live365hls provider entry.
+async function fetchLive365NowPlaying(station) {
+  const masterUrl = 'https://' + station.host + '/' + station.stationId + '/playlist.m3u8';
+  const masterRes = await fetch(masterUrl, { headers: LIVE365_FETCH_HEADERS });
+  if (!masterRes.ok) throw new Error('Station ' + station.displayName + ' master playlist returned ' + masterRes.status);
+  const masterText = await masterRes.text();
+
+  const variantMatch = masterText.match(/^https?:\/\/\S+\.m3u8\S*$/m);
+  if (!variantMatch) throw new Error('Station ' + station.displayName + ' master playlist had no variant URL');
+
+  const mediaRes = await fetch(variantMatch[0], { headers: LIVE365_FETCH_HEADERS });
+  if (!mediaRes.ok) throw new Error('Station ' + station.displayName + ' media playlist returned ' + mediaRes.status);
+  const mediaText = await mediaRes.text();
+
+  return parseLive365HlsPlaylist(mediaText);
+}
+
+const AIIR_WS_TIMEOUT_MS = 5000;
+
+// Aiir's frontend player connects to a single shared WebSocket endpoint
+// (wss://metadata.aiir.net/now-playing) and subscribes per-station via a
+// {"action":"subscribe","serviceId":"..."} message - "serviceId" is the
+// same numeric ID Aiir's page HTML exposes as
+// data-station-metadata-id-value (found by inspecting the station's
+// player.aiir.com page source, NOT discoverable from a plain HTTP fetch
+// since the actual endpoint only lives in the compiled player JS bundle).
+//
+// Cloudflare Workers can speak plain outbound WebSocket via fetch() with
+// an Upgrade header - the response comes back with a `webSocket` property
+// once the server accepts (HTTP 101), which we then .accept() and use
+// like a normal WebSocket object.
+//
+// Confirmed response shape (captured live from a real subscribe):
+//   {"serviceId":"3628","nowProgramme":{...},"nowPlaying":{"type":"programme",
+//    "name":"Bridge Bible Talk","description":"","imageUrl":"https://...jpg",
+//    ...},"previouslyPlayed":[]}
+// followed by periodic {"action":"heartbeat"} pings (~every 4 min) with no
+// station data - those are keepalives, not now-playing updates, and must
+// be ignored rather than mistaken for "no data."
+//
+// NOTE: only ever observed this during a talk programme block (empty
+// "artist", "type":"programme"). Never confirmed what shape a real music
+// track takes (e.g. whether it's "type":"track" with a populated "artist"
+// field, or something else) - built defensively assuming "artist" may or
+// may not be present. If song data ends up looking wrong once a music
+// block airs, revisit this function first.
+async function fetchAiirNowPlaying(station) {
+  // Cloudflare Workers' fetch()-based WebSocket upgrade (the pattern this
+  // function uses, since it needs res.webSocket + accept()) requires an
+  // http:/https: URL scheme, even though the connection ends up being a
+  // WebSocket - wss:/ws: is only valid with the separate `new WebSocket(url)`
+  // constructor, NOT with fetch(). Confirmed in production: passing the
+  // literal wss:// URL straight to fetch() throws "Fetch API cannot load:
+  // wss://...". station.wsUrl is kept as the real wss:// URL in the config
+  // (that's what it actually is, and what you'd see in DevTools), and
+  // rewritten to https:// right here, only for the fetch() call itself.
+  const httpUrl = station.wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+
+  const res = await fetch(httpUrl, {
+    headers: {
+      Upgrade: 'websocket',
+      Connection: 'Upgrade'
+    }
+  });
+
+  const ws = res.webSocket;
+  if (res.status !== 101 || !ws) {
+    throw new Error('Station ' + station.displayName + ' WebSocket upgrade failed (status ' + res.status + ')');
+  }
+  ws.accept();
+
+  return new Promise(function(resolve, reject) {
+    const timeout = setTimeout(function() {
+      ws.close();
+      reject(new Error('Station ' + station.displayName + ' timed out waiting for aiir now-playing data'));
+    }, AIIR_WS_TIMEOUT_MS);
+
+    ws.addEventListener('message', function(event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (err) {
+        return; // ignore anything unparseable rather than fail the whole fetch
+      }
+
+      // Heartbeats and any message without a nowPlaying payload aren't
+      // real updates - keep waiting for the actual subscribe response.
+      if (!data || !data.nowPlaying) return;
+
+      clearTimeout(timeout);
+      ws.close();
+
+      const np = data.nowPlaying;
+      resolve({
+        title: typeof np.name === 'string' ? np.name.trim() : '',
+        artist: typeof np.artist === 'string' ? np.artist.trim() : '',
+        coverUrl: typeof np.imageUrl === 'string' && np.imageUrl.trim() ? np.imageUrl.trim() : null
+      });
+    });
+
+    ws.addEventListener('close', function() {
+      clearTimeout(timeout);
+      reject(new Error('Station ' + station.displayName + ' aiir WebSocket closed before any data arrived'));
+    });
+
+    ws.addEventListener('error', function() {
+      clearTimeout(timeout);
+      reject(new Error('Station ' + station.displayName + ' aiir WebSocket error'));
+    });
+
+    ws.send(JSON.stringify({ action: 'subscribe', serviceId: station.serviceId }));
+  });
+}
+
+// RadioBoss Cloud's now-playing widget API - a single plain GET, but still
+// uses fetchAndParse (not buildNowPlayingUrl+parse) because the cover-art
+// URL has to be built from station.stationId, which a plain parse(rawText)
+// never sees. currenttrack_title/currenttrack_artist are already separate
+// fields (like streamingradio's shape), no combined-string splitting
+// needed. artwork_ts (a real, current Unix timestamp, confirmed against
+// the add-time response) is appended as a cache-buster so the image
+// updates promptly when the track/art changes - artwork_next_ts, by
+// contrast, was a stale ~2023 value in the one response seen so far and
+// looks like an unused placeholder, not a real "next" pointer - ignored.
+async function fetchRadioBossNowPlaying(station) {
+  const url = 'https://c5.radioboss.fm/w/nowplayinginfo?u=' + encodeURIComponent(station.stationId) + '&_=' + Date.now();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Station ' + station.displayName + ' now-playing endpoint returned ' + res.status);
+  const data = await res.json();
+
+  const title = data && typeof data.currenttrack_title === 'string' ? data.currenttrack_title.trim() : '';
+  const artist = data && typeof data.currenttrack_artist === 'string' ? data.currenttrack_artist.trim() : '';
+  const artworkUrl = 'https://c5.radioboss.fm/w/artwork/' + encodeURIComponent(station.stationId) + '.jpg';
+  const coverUrl = data && data.artwork_ts ? (artworkUrl + '?' + data.artwork_ts) : artworkUrl;
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
+// Triton Digital's public nowplaying API - one plain GET returning small,
+// flat, machine-generated XML, so the same simple regex-extraction approach
+// used for SecureNetSystems above is fine here too. Confirmed real fields
+// from a live fetch against this exact station: cue_title (track/show
+// title) and track_artist_name (artist) - both wrapped in CDATA. Two other
+// properties are present (cue_time_duration, cue_time_start) but aren't
+// used; they're playback-position bookkeeping, not display text.
+//
+// Cover art needs a second hop: Triton's response has no artwork field, so
+// we look the title+artist up on Apple's iTunes Search API the same way the
+// station's own hosted player does (confirmed via the browser capture) and
+// take the first result's artwork, upsized from the default 100x100 to
+// 600x600 (a standard, documented iTunes artwork URL trick - the size is
+// just a path segment). Talk/spoken-word cue titles won't match a song on
+// iTunes; that's expected and just means no cover art for that cue, not an
+// error - the title/artist still display fine without it. A failed or slow
+// iTunes lookup is swallowed the same way, so a hiccup on Apple's side
+// never breaks the primary title/artist result.
+async function fetchTritonNowPlaying(station) {
+  const npUrl = 'https://np.tritondigital.com/public/nowplaying?mountName=' + encodeURIComponent(station.mount) + '&numberToFetch=1&eventType=track';
+  const npRes = await fetch(npUrl);
+  if (!npRes.ok) throw new Error('Station ' + station.displayName + ' now-playing endpoint returned ' + npRes.status);
+  const npText = await npRes.text();
+
+  const titleMatch = npText.match(/<property name="cue_title"><!\[CDATA\[([\s\S]*?)\]\]><\/property>/);
+  const artistMatch = npText.match(/<property name="track_artist_name"><!\[CDATA\[([\s\S]*?)\]\]><\/property>/);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const artist = artistMatch ? artistMatch[1].trim() : '';
+
+  let coverUrl = null;
+  if (title || artist) {
+    try {
+      const searchTerm = (artist + ' ' + title).trim();
+      const itUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(searchTerm) + '&country=us&media=music&entity=song&limit=1';
+      const itRes = await fetch(itUrl);
+      if (itRes.ok) {
+        const itData = await itRes.json();
+        if (itData && Array.isArray(itData.results) && itData.results[0] && itData.results[0].artworkUrl100) {
+          coverUrl = itData.results[0].artworkUrl100.replace('100x100bb', '600x600bb');
+        }
+      }
+    } catch (e) {
+      // Cover art is a nice-to-have; a failed/timed-out iTunes lookup
+      // shouldn't fail the whole now-playing fetch.
+    }
+  }
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
+// ---- publishedschedule provider ----
+//
+// Unlike every provider above, this one makes zero HTTP requests at now-
+// playing time - there's no live feed to poll. The "data" is a one-time,
+// hand-transcribed copy of the station's own published weekly schedule
+// (station.schedule, e.g. GRACEFM_SCHEDULE), and "now playing" is purely a
+// function of what time it is right now. See
+// radio-station-published-schedule-notes.md for the full rationale, the
+// transcription format, and per-station notes/known quirks.
+//
+// station.schedule shape:
+//   timezone   - IANA zone the published times are in (e.g. "America/Denver")
+//                so "now" gets converted into the schedule's own timezone,
+//                not hardcoded to any one station's zone.
+//   saturday, sunday, weekday - arrays of { time: "HH:MM" (24h, already in
+//                `timezone`), program, host } entries. "weekday" is the
+//                single Mon-Fri lineup that repeats identically all five
+//                days, except for weekdayOverridesByDay below.
+//   weekdayOverridesByDay (optional) - { MON|TUE|WED|THU|FRI: [ ...same
+//                entry shape... ] }, merged into `weekday` ONLY on that one
+//                specific day. Currently used by exactly one entry
+//                (GraceFM's Wednesday-only Midweek Service overriding its
+//                generic 7:00 PM weekday slot) - a one-off place to put an
+//                actual day-specific exception, not a general "day-
+//                qualified time" syntax meant to be used speculatively.
+//
+// Every entry - a single daily program, one airing of a program that
+// repeats several times a day, or a MUSIC filler block - is just a start-
+// time marker. There's deliberately no separate "duration" field anywhere:
+// a program airs until the next marker, whatever time that next marker
+// happens to start, so the same lookup logic handles both the dense Sunday/
+// weekday grids (wall-to-wall, no gaps) and Saturday's sparser grid with
+// explicit MUSIC ranges without special-casing either one. (A MUSIC block's
+// own human-readable end time in the source page always lines up with the
+// next entry's start - the code never needs to look at it.)
+function scheduleTimeToMinutes(hhmm) {
+  const parts = hhmm.split(':');
+  return (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+}
+
+// Finds whichever entry started most recently relative to nowMinutes - the
+// entry with the largest start time that's still <= now. Wraps around
+// midnight (an 11:30 PM entry stays "current" until the next entry, even if
+// that's the following day's first one) by defaulting to the last entry in
+// sorted order before scanning forward.
+function findCurrentScheduleEntry(entries, nowMinutes) {
+  if (!entries || !entries.length) return null;
+  const sorted = entries.slice().sort(function(a, b) {
+    return scheduleTimeToMinutes(a.time) - scheduleTimeToMinutes(b.time);
+  });
+  let current = sorted[sorted.length - 1];
+  for (let i = 0; i < sorted.length; i++) {
+    if (scheduleTimeToMinutes(sorted[i].time) <= nowMinutes) current = sorted[i];
+  }
+  return current;
+}
+
+const WEEKDAY_OVERRIDE_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+
+// Uses fetchAndParse purely so it can return { title, artist, coverUrl }
+// without ever calling fetch() at all - not because it needs multiple HTTP
+// calls or a station-specific field like the providers above it do. Intl
+// with an explicit timeZone gives DST-aware local time in the schedule's
+// own zone with no manual UTC-offset math and no extra dependency, since
+// Cloudflare Workers ship full ICU/timezone data.
+async function fetchPublishedScheduleNowPlaying(station) {
+  const schedule = station.schedule;
+  if (!schedule) throw new Error('Station ' + station.displayName + ' has no schedule configured');
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: schedule.timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+
+  const partsByType = {};
+  parts.forEach(function(p) { partsByType[p.type] = p.value; });
+  const dayCode = partsByType.weekday.toUpperCase(); // e.g. "WED", "SAT"
+  // Some runtimes format midnight as "24:00" rather than "00:00" - normalize
+  // so scheduleTimeToMinutes never sees an out-of-range hour.
+  const hour = parseInt(partsByType.hour, 10) % 24;
+  const nowMinutes = (hour * 60) + parseInt(partsByType.minute, 10);
+
+  let entries;
+  if (dayCode === 'SAT') {
+    entries = schedule.saturday;
+  } else if (dayCode === 'SUN') {
+    entries = schedule.sunday;
+  } else {
+    entries = schedule.weekday;
+    const overridesToday = schedule.weekdayOverridesByDay && WEEKDAY_OVERRIDE_CODES.indexOf(dayCode) !== -1
+      ? schedule.weekdayOverridesByDay[dayCode]
+      : null;
+    if (overridesToday && overridesToday.length) entries = entries.concat(overridesToday);
+  }
+
+  const match = findCurrentScheduleEntry(entries, nowMinutes);
+  return {
+    title: match ? match.program : '',
+    artist: match ? (match.host || '') : '',
+    coverUrl: null
+  };
+}
+
+async function fetchStationNowPlaying(station) {
+  const provider = RADIO_PROVIDERS[station.provider];
+  if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
+
+  // Most providers just need one fetch+parse (buildNowPlayingUrl + parse).
+  // A provider that needs more than one HTTP call (like live365hls's
+  // master-playlist-then-edge-URL chain) instead exposes fetchAndParse,
+  // which takes full control of its own fetching and returns the same
+  // { title, artist, coverUrl } shape directly.
+  let parsed;
+  if (provider.fetchAndParse) {
+    parsed = await provider.fetchAndParse(station);
+  } else {
+    const res = await fetch(provider.buildNowPlayingUrl(station), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' }
+    });
+    if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
+    const raw = await res.text();
+    parsed = provider.parse(raw, station);
+  }
+
+  return {
+    // Stable per-station identity, independent of displayName - added
+    // 2026-09-17 so favoriting/click-to-play/CarPlay-prev-next survive a
+    // future display-name change (the ticker/browse-panel/mini-player copy
+    // is free to change without silently unfavoriting anyone). See id in
+    // the RADIO_STATIONS comment block and public/index.html's favorites
+    // code.
+    id: station.id,
+    displayName: station.displayName,
+    title: parsed.title,
+    artist: parsed.artist,
+    // staticCoverUrl (optional, any provider) wins over whatever the
+    // provider itself returned - see the RADIO_STATIONS field comment. Lets
+    // a station with a real logo but no per-track artwork source (like
+    // publishedschedule, which always returns coverUrl: null) show
+    // something better than a blank mini player.
+    coverUrl: station.staticCoverUrl || parsed.coverUrl || null,
+    // Same idea, for the CarPlay/Lock Screen/Control Center artwork only
+    // (see the Media Session integration in public/index.html) - prefers
+    // the small dedicated thumbnail when a station has one, otherwise falls
+    // back to exactly whatever coverUrl above resolved to (a provider's own
+    // live art, or nothing) rather than leaving those stations with no
+    // artwork at all.
+    coverThumbUrl: station.staticCoverThumbUrl || station.staticCoverUrl || parsed.coverUrl || null,
+    streamUrl: station.streamUrl,
+    // Optional, hand-entered display-only fields - never shown in the
+    // ticker (that only ever renders displayName + now-playing text), just
+    // in the browse panel. Purely cosmetic, unrelated to any of the
+    // technical/streaming fields above. Add more the same way: (1) put it
+    // on the RADIO_STATIONS entry, (2) pass it through here AND in the
+    // error fallback below, (3) render it in the browse panel row.
+    cityState: station.cityState || null,
+    homePage: station.homePage || null,
+    // True only for stations on the publishedschedule provider - lets the
+    // frontend add a small "scheduled" callout in the mini player (see
+    // updateMiniPlayerNowPlaying in index.html) without hand-flagging each
+    // station individually. Not shown in the ticker or browse panel -
+    // there's no room for it there, and the ticker is the one place a
+    // best-effort guess and a confirmed live feed should look identical.
+    scheduled: station.provider === 'publishedschedule'
+  };
+}
+
+async function handleRadio(request, ctx) {
+  const cache = caches.default;
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set('cacheVersion', String(RADIO_CACHE_VERSION));
+  const cacheKey = new Request(cacheUrl.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const jsonHeaders = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'public, max-age=' + RADIO_CACHE_SECONDS
+  };
+
+  // Each station is fetched independently - one station's feed being down
+  // shouldn't blank out the whole ticker, same philosophy as the church
+  // live-status checker above.
+  const stations = await Promise.all(RADIO_STATIONS.map(async function(station) {
+    try {
+      return await fetchStationNowPlaying(station);
+    } catch (err) {
+      return {
+        id: station.id,
+        displayName: station.displayName,
+        title: null,
+        artist: null,
+        coverUrl: station.staticCoverUrl || null,
+        coverThumbUrl: station.staticCoverThumbUrl || station.staticCoverUrl || null,
+        streamUrl: station.streamUrl,
+        cityState: station.cityState || null,
+        homePage: station.homePage || null,
+        scheduled: station.provider === 'publishedschedule',
+        error: err.message
+      };
+    }
+  }));
+
+  const body = JSON.stringify({
+    stations: stations,
+    fetchedAt: new Date().toISOString()
+  });
+  const response = new Response(body, { headers: jsonHeaders });
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
+// ---- Feedback form ----
+//
+// Public visitors can submit a name (optional), reply email (optional),
+// and a message. We validate + rate-limit server-side, then relay it as
+// an email via Resend (env.RESEND_API_KEY, a Worker secret) to
+// env.ADMIN_EMAIL - the same secret already used for admin login, so no
+// new secret is needed for the destination address.
+async function handleFeedback(request, env) {
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: 'Bad request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Honeypot: a hidden field real users never fill in. Bots that
+  // auto-fill every field trip this and get silently "accepted" (so they
+  // don't know to retry) without ever reaching the inbox.
+  if (incoming.website) {
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const message = (incoming.message || '').trim();
+  if (!message || message.length > 5000) {
+    return new Response(JSON.stringify({ error: 'Message is required (max 5000 characters)' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const name = (incoming.name || '').trim().slice(0, 200);
+  const replyEmail = (incoming.email || '').trim().slice(0, 200);
+
+  // Lightweight rate limit: max 5 submissions per IP per hour. Reuses the
+  // existing CHURCHES_KV binding under a distinct key prefix so it never
+  // collides with church data, and each key auto-expires in an hour.
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const rateKey = `feedback_rate_${ip}`;
+  const recentCount = parseInt((await env.CHURCHES_KV.get(rateKey)) || '0', 10);
+  if (recentCount >= 5) {
+    return new Response(JSON.stringify({ error: 'Too many submissions, please try again later' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  await env.CHURCHES_KV.put(rateKey, String(recentCount + 1), { expirationTtl: 3600 });
+
+  if (!env.RESEND_API_KEY || !env.ADMIN_EMAIL) {
+    return new Response(JSON.stringify({ error: 'Feedback is not configured yet' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const emailRes = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: 'CCA Finder Feedback <onboarding@resend.dev>',
+      to: env.ADMIN_EMAIL,
+      reply_to: replyEmail || undefined,
+      subject: `CCA Finder feedback${name ? ' from ' + name : ''}`,
+      text: `From: ${name || 'Anonymous'}\nEmail: ${replyEmail || 'Not provided'}\n\n${message}`
+    })
+  });
+
+  if (!emailRes.ok) {
+    // Don't leak Resend's response body back to the client - just log
+    // enough server-side to debug, and tell the visitor it failed.
+    console.error('Resend send failed', emailRes.status, await emailRes.text());
+    return new Response(JSON.stringify({ error: 'Failed to send' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === '/conferences') {
+      return handleConferences(request, ctx);
+    }
+    if (url.pathname === '/radio-now-playing') {
+      return handleRadio(request, ctx);
+    }
+    if (url.pathname === '/api/verify-admin' && request.method === 'POST') {
+      return handleVerifyAdmin(request, env);
+    }
+    if (url.pathname === '/api/whoami') {
+      return handleWhoAmI(request, env);
+    }
+    if (url.pathname === '/api/logout' && request.method === 'POST') {
+      return handleLogout();
+    }
+    if (url.pathname === '/api/churches' && request.method === 'GET') {
+      return handleGetChurches(request, env);
+    }
+    if (url.pathname === '/api/churches' && request.method === 'POST') {
+      return handleSaveChurch(request, env);
+    }
+    if (url.pathname === '/api/churches' && request.method === 'DELETE') {
+      return handleDeleteChurch(request, env);
+    }
+    if (url.pathname === '/api/featured-video' && request.method === 'GET') {
+      return handleGetFeaturedVideo(request, env);
+    }
+    if (url.pathname === '/api/featured-video/admin' && request.method === 'GET') {
+      return handleGetFeaturedVideoAdmin(request, env);
+    }
+    if (url.pathname === '/api/featured-video' && request.method === 'POST') {
+      return handleSaveFeaturedVideo(request, env);
+    }
+    if (url.pathname === '/api/live-status' && request.method === 'GET') {
+      return handleGetLiveStatus(request, env);
+    }
+    if (url.pathname === '/api/debug/check-live-now' && request.method === 'POST') {
+      return handleDebugCheckLiveNow(request, env);
+    }
+    if (url.pathname === '/api/debug/live-check-status' && request.method === 'GET') {
+      return handleDebugLiveCheckStatus(request, env);
+    }
+    if (url.pathname === '/api/debug/live-check-progress' && request.method === 'GET') {
+      return handleDebugLiveCheckProgress(request, env);
+    }
+    if (url.pathname === '/api/feedback' && request.method === 'POST') {
+      return handleFeedback(request, env);
+    }
+    return env.ASSETS.fetch(request);
+  },
+
+  // Fired automatically by the Cron Trigger defined in wrangler config
+  // (proposed schedule: every 10 minutes). Not tied to any visitor
+  // request - runs on Cloudflare's own schedule regardless of site
+  // traffic.
+  //
+  // The try/catch here matters: an uncaught rejection inside a waitUntil()
+  // promise is what makes Cloudflare mark the whole invocation "Internal
+  // Error" in the Cron Events log, with zero detail beyond that - confirmed
+  // in production as a real dead end (the dashboard doesn't even let you
+  // click into those rows for more). Catching it here does two things:
+  // stops future ticks from showing that same opaque failure for whatever
+  // this turns out to be, and - more importantly - actually records what
+  // the error was, so it's visible in the admin debug panel instead of
+  // requiring someone to sit there live-tailing logs waiting to catch the
+  // next tick in the act. The success path clears that same record, so a
+  // fixed bug doesn't leave a stale error banner showing forever.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil((async function() {
+      try {
+        await checkAllChurchesLive(env);
+        try {
+          await env.CHURCHES_KV.delete(LIVE_CHECK_LAST_ERROR_KV_KEY);
+        } catch (deleteErr) {
+          // Not worth failing the invocation over - worst case, a
+          // resolved error banner lingers until the next successful tick
+          // tries (and succeeds) again.
+        }
+      } catch (err) {
+        try {
+          await env.CHURCHES_KV.put(LIVE_CHECK_LAST_ERROR_KV_KEY, JSON.stringify({
+            message: err && err.message ? err.message : String(err),
+            stack: err && err.stack ? err.stack : null,
+            occurredAt: new Date().toISOString()
+          }));
+        } catch (writeErr) {
+          // If even writing the error record fails, there's nothing
+          // further to do from here - the original error is lost to the
+          // opaque Cloudflare status again, but that's the same as
+          // before this change, not worse.
+        }
+      }
+    })());
+  }
+};
