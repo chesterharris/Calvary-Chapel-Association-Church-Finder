@@ -3156,8 +3156,10 @@
   <div id="liveNowSortRow" class="live-now-sort-row">
     <label for="liveNowSortSelect" class="live-now-sort-label">Sort</label>
     <select id="liveNowSortSelect" class="live-now-sort-select">
-      <option value="default">Default order</option>
       <option value="freshest">Freshest streams first</option>
+      <option value="viewcount">View count</option>
+      <option value="alphabetical">Alphabetical</option>
+      <option value="default">Default order</option>
     </select>
   </div>
   <div id="liveNowFilters" class="live-now-filters">
@@ -3332,12 +3334,15 @@
   // that kills the rest of the script (learned this one the hard way). ----
   const LIVENOW_FEATURED_FILTER_KEY = 'ccaFinderLiveNowFeaturedFilter';
   const LIVENOW_FAVORITES_FILTER_KEY = 'ccaFinderLiveNowFavoritesFilter';
-  // "Freshest streams first" sort (added 2026-09-08) - orthogonal to the two
-  // filters above, not a third one: it reorders whichever set is currently
-  // visible, it never hides anything. Persisted the same way as the filters
-  // for the same reason (a duty scheduler running this during a busy Sunday
-  // would want it to stay on across visits, not reset every time).
-  const LIVENOW_SORT_MODE_KEY = 'ccaFinderLiveNowSortMode';
+  // Sort (added 2026-09-08, extended 2026-09-21 with View count/Alphabetical)
+  // is orthogonal to the two filters above, not a third one: it reorders
+  // whichever set is currently visible, it never hides anything.
+  //
+  // Deliberately NOT persisted (explicit ask 2026-09-21, reversing the
+  // original design) - every fresh page load/refresh starts back on
+  // "Freshest streams first" regardless of whatever was last picked. Only
+  // an in-page change (picking a different option without reloading) sticks
+  // for the rest of that visit.
 
   function loadBoolFlag(key) {
     try { return localStorage.getItem(key) === 'true'; } catch (err) { return false; }
@@ -3349,17 +3354,7 @@
   let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
   let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
 
-  function loadSortMode() {
-    try {
-      return localStorage.getItem(LIVENOW_SORT_MODE_KEY) === 'freshest' ? 'freshest' : 'default';
-    } catch (err) {
-      return 'default';
-    }
-  }
-  function saveSortMode(mode) {
-    try { localStorage.setItem(LIVENOW_SORT_MODE_KEY, mode); } catch (err) { /* ignore */ }
-  }
-  let liveNowSortMode = loadSortMode();
+  let liveNowSortMode = 'freshest';
 
   // Shared by both the map's renderMarkers() and the Live Now list - a
   // church matches when no filter is on, or when it satisfies whichever
@@ -3622,6 +3617,30 @@
     return !isNaN(new Date(l.startDate).getTime());
   }
 
+  // Same idea as hasValidStartDate above, for the "View count" sort - a
+  // live entry can come back with viewCount missing/null (YouTube didn't
+  // report one), and that's different from a real 0.
+  function hasValidViewCount(l) {
+    return !!l && typeof l.viewCount === 'number' && !isNaN(l.viewCount);
+  }
+
+  // The name actually shown on a card (see the .live-now-channel line in
+  // renderLiveNowList) - author when we have it, else the church's own
+  // name. "Alphabetical" sorts on this, not the bare church record name,
+  // so the sort order matches what a visitor is looking at top-to-bottom.
+  function liveEntryDisplayName(l) {
+    return (l && (l.author || l.name)) || '';
+  }
+
+  // Case-insensitive compare on that same displayed name - matches the
+  // .toLowerCase() + localeCompare convention the radio side already uses
+  // for its own "Alphabetical" sort (see byDisplayNameAlpha etc. below),
+  // so "aaron" and "Aaron" land next to each other instead of ASCII-sorting
+  // all-caps names to the front.
+  function compareLiveEntryNames(a, b) {
+    return liveEntryDisplayName(a).toLowerCase().localeCompare(liveEntryDisplayName(b).toLowerCase());
+  }
+
   // "Freshest streams first" (added 2026-09-08) - a SORT, not a filter:
   // every entry in liveStatusData.live is still returned, just reordered.
   // Deliberately ignores the Featured/Favorites tiering entirely while
@@ -3630,16 +3649,32 @@
   // with no usable startDate sink to a stable alphabetical tail rather
   // than being dropped or sorted arbitrarily by a NaN comparison - "until
   // that data becomes available" from the request, not "hidden until
-  // then."
+  // then." "View count" (highest watching first) and "Alphabetical" (by
+  // displayed name) added 2026-09-21, same tail-sinking treatment for View
+  // count's missing-viewCount case.
   function getOrderedLiveList() {
     if (liveNowSortMode === 'freshest') {
       return liveStatusData.live.slice().sort(function(a, b) {
         const aHas = hasValidStartDate(a), bHas = hasValidStartDate(b);
         if (aHas !== bHas) return aHas ? -1 : 1;
-        if (!aHas) return (a.name || '').localeCompare(b.name || '');
+        if (!aHas) return compareLiveEntryNames(a, b);
         // Bigger timestamp (started more recently) sorts first - freshest
         // to most stale, as asked for.
         return new Date(b.startDate).getTime() - new Date(a.startDate).getTime();
+      });
+    }
+    if (liveNowSortMode === 'viewcount') {
+      return liveStatusData.live.slice().sort(function(a, b) {
+        const aHas = hasValidViewCount(a), bHas = hasValidViewCount(b);
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        if (!aHas) return compareLiveEntryNames(a, b);
+        // Highest watching count first.
+        return b.viewCount - a.viewCount;
+      });
+    }
+    if (liveNowSortMode === 'alphabetical') {
+      return liveStatusData.live.slice().sort(function(a, b) {
+        return compareLiveEntryNames(a, b);
       });
     }
     function tier(l) {
@@ -3651,8 +3686,18 @@
     return liveStatusData.live.slice().sort(function(a, b) {
       const ta = tier(a), tb = tier(b);
       if (ta !== tb) return ta - tb;
-      return (a.name || '').localeCompare(b.name || '');
+      return compareLiveEntryNames(a, b);
     });
+  }
+
+  // Whether the currently-selected sort mode has anything real to work with
+  // in the visible set - "freshest"/"viewcount" each depend on a field that
+  // can be missing per-entry; "alphabetical"/"default" always have a name to
+  // sort by, so they're never disabled on data-availability grounds.
+  function sortModeHasUsableData(mode, visible) {
+    if (mode === 'freshest') return visible.some(hasValidStartDate);
+    if (mode === 'viewcount') return visible.some(hasValidViewCount);
+    return true;
   }
 
   // A live entry with no matching church record (shouldn't normally
@@ -3687,7 +3732,7 @@
     // narrowed by Featured/Favorites if either is on - has nothing to
     // sort by. Recomputed on every render since the eligible set shifts
     // as churches start/stop streaming and as filters are toggled.
-    if (sortSelect) sortSelect.disabled = !visible.some(hasValidStartDate);
+    if (sortSelect) sortSelect.disabled = !sortModeHasUsableData(liveNowSortMode, visible);
 
     if (hiddenCount > 0) {
       msgEl.style.display = 'block';
@@ -3804,11 +3849,12 @@
   });
   // Sort only ever reorders the Live Now list itself - unlike the two
   // filters above, it has no effect on which pins show on the map, so
-  // no renderMarkers() call here.
+  // no renderMarkers() call here. Not persisted (see liveNowSortMode's own
+  // comment above) - a change here only lasts for the rest of this page
+  // view, never written to storage.
   document.getElementById('liveNowSortSelect').value = liveNowSortMode;
   document.getElementById('liveNowSortSelect').addEventListener('change', function(e) {
     liveNowSortMode = e.target.value;
-    saveSortMode(liveNowSortMode);
     renderLiveNowList();
   });
 
