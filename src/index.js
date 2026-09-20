@@ -212,6 +212,35 @@ function decodeJsonString(raw) {
   }
 }
 
+// Fallback for checkChurchLive's startDate extraction, used only when both
+// of its primary sources (itemprop="startDate" meta, liveBroadcastDetails
+// JSON) come up empty. Confirmed in production (2026-09, live-but-missing-
+// metadata diagnostic samples, Calvary Chapel Romoland and Calvary Chapel
+// Edmonds) that on this stripped page shape, the one remaining place a
+// start time survives at all is YouTube's own human-readable relative-time
+// text - e.g. "Started streaming 88 minutes ago" - sitting in a
+// videoSecondaryInfoRenderer's dateText field. This can only ever produce
+// an APPROXIMATE ISO timestamp (rounded to whatever unit YouTube's text
+// used, and accurate only as of the moment this particular fetch ran) -
+// good enough for the "how long has this been live" display the Live Now
+// cards want, not a substitute for a real, precise timestamp. Returns null
+// for any phrase it doesn't recognize rather than guessing.
+const RELATIVE_STARTED_STREAMING_UNIT_MS = {
+  second: 1000,
+  minute: 60 * 1000,
+  hour: 60 * 60 * 1000,
+  day: 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000
+};
+function startDateFromRelativeStartedStreamingPhrase(html) {
+  const match = html.match(/"dateText":\{"simpleText":"Started streaming (\d+) (second|minute|hour|day|week)s? ago"\}/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unitMs = RELATIVE_STARTED_STREAMING_UNIT_MS[match[2]];
+  if (isNaN(amount) || !unitMs) return null;
+  return new Date(Date.now() - amount * unitMs).toISOString();
+}
+
 // Removes entire <script>...</script> and <style>...</style> blocks - code and
 // all - not just the tags. Without this, embedded JS text (e.g. from analytics
 // or emoji-support snippets WordPress injects inline) can leak into the parsed
@@ -1490,6 +1519,16 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
   // videoDetails anchor above does for the shape it covers.
   const updatedMetadataVideoIdMatch = html.match(/"updatedMetadataEndpoint":\{"videoId":"([a-zA-Z0-9_-]{11})"/);
 
+  // Third fallback source for TITLE only, for the page shape confirmed in
+  // production (2026-09, live-but-missing-metadata diagnostic samples,
+  // Calvary Chapel Romoland and Calvary Chapel Edmonds) where videoDetails
+  // no longer has a bare "videoId"/"title" pair at all - it's nested one
+  // level deeper, inside playerOverlayVideoDetailsRenderer, which is a
+  // completely different shape than titleJsonMatch above anchors on. Only
+  // consulted when the primary og:title/videoDetails.title sources below
+  // both come up empty - see the `title` assignment below.
+  const titleOverlayJsonMatch = html.match(/"playerOverlayVideoDetailsRenderer":\{"title":\{"simpleText":"((?:[^"\\]|\\.)*)"/);
+
   let videoId = canonicalMatch ? canonicalMatch[1] : (videoIdJsonMatch ? videoIdJsonMatch[1] : (updatedMetadataVideoIdMatch ? updatedMetadataVideoIdMatch[1] : null));
 
   // "isLive:true but no videoId" is its own failure condition, distinct
@@ -1568,9 +1607,9 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
   // "&amp;" and "&#39;" instead of "&" and "'"). The JSON fallback path
   // already handled this correctly via decodeJsonString; this meta-tag
   // path just hadn't been given the same treatment.
-  const title = titleMetaMatch ? decodeEntities(titleMetaMatch[1]) : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : null);
+  const title = titleMetaMatch ? decodeEntities(titleMetaMatch[1]) : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : (titleOverlayJsonMatch ? decodeJsonString(titleOverlayJsonMatch[1]) : null));
   const description = descriptionMetaMatch ? decodeEntities(descriptionMetaMatch[1]) : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
-  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : null);
+  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : startDateFromRelativeStartedStreamingPhrase(html));
   const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
 
   // Belt-and-suspenders: if a startDate is present and is still in the
