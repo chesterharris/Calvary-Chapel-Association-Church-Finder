@@ -479,3 +479,77 @@ Fifth station wired up on this provider, 2026-09-18. Data lives in
   treatment as the other publishedschedule icons, mark scaled to the same
   ~80% of frame.
 - 60-day re-check reminder: **2026-11-17**.
+
+### KKJC (McMinnville, OR)
+
+Sixth station wired up on this provider, 2026-09-20. Data lives in
+`src/radioSchedules/kkjc.js`.
+
+- Not a rejected-XML-feed case like GraceFM/WJWD/KEWR/KGPS/God's Way Radio -
+  this station was never previously investigated at all. Its live player
+  (`http://live.kkjc.net`) turned out to run on Radiojar, a provider never
+  seen anywhere else in this codebase (`streamName` `"4q1m6fsb0k8uv"`).
+  Radiojar's own now-playing endpoint
+  (`https://proxy.radiojar.com/api/stations/4q1m6fsb0k8uv/now_playing/`)
+  returns valid JSON(P) but with every field permanently empty - confirmed
+  both by polling it directly and by KKJC's own site, whose "Now playing"
+  widget is permanently `class="hide"` in the page's own markup - and Larry
+  separately confirmed the same blank response. Same dead-metadata situation
+  as every other station on this provider, so it went straight to
+  `publishedschedule` rather than a new "radiojar" provider that would never
+  return anything anyway.
+- `streamUrl` (`https://stream.radiojar.com/4q1m6fsb0k8uv`) is independently
+  confirmed live/playable over HTTPS - genuinely HTTPS-capable audio, not the
+  same mixed-content dead end that sank KBOK/WRBP. Verified both as a bare
+  URL and with a cache-busting query string; Radiojar's own player.js always
+  appends one but it isn't actually required for basic playback.
+- Source: two separate plain WordPress `<table>` pages, raw page source
+  fetched directly, transcribed 2026-09-20 - `https://kkjc.net/programs/`
+  (weekday) and `https://kkjc.net/saturday-and-sunday-schedule/`
+  (weekend). Already correctly cased throughout - no ALL-CAPS title-casing
+  trap like GraceFM's.
+- **The weekend page is a single combined table, not separate
+  Saturday/Sunday tables** - unlike every other station on this provider.
+  `kkjc.js` transcribes it once as `WEEKEND_SCHEDULE` and reuses that same
+  array for both `saturday` and `sunday`.
+- The weekend table marks a program's second half-hour with a literal
+  "(continued)" row instead of repeating the program/host - 9 such rows were
+  dropped rather than transcribed as a bogus "(continued)" program; the
+  lookup's own "airs until the next marker" behavior covers the second half
+  automatically once the marker row is removed.
+- Four spelling inconsistencies, identical on both pages, resolved to the
+  real person's actual name rather than picking a winner between rows:
+  "Michael Youseff" -> **Michael Youssef** (Leading the Way); "Alastair
+  Begg" / "Alistair Begg" -> **Alistair Begg** (Truth for Life, matching the
+  spelling already used for this host on KGPS elsewhere in this file);
+  "Dr. Adrian Rodgers" / "Dr. Adrian Rogers" -> **Dr. Adrian Rogers** (Love
+  Worth Finding); "Jon Courson" / "John Courson" -> **Jon Courson**
+  (Searchlight). Separately, the inconsistent "Dr." prefix on J. Vernon
+  McGee across rows was standardized to **no prefix**, matching how KGPS/WJWD
+  already transcribe this same host.
+- **One flagged, unresolved anomaly** - not corrected, unlike the spelling
+  fixes above: the weekend 10:30 AM slot pairs "Love Worth Finding" with
+  "Dr. David Jeremiah," but everywhere else Love Worth Finding is Adrian
+  Rogers' program and David Jeremiah's own program is Turning Point. Looks
+  like a copy-paste slip on KKJC's own page, but kept exactly as shown rather
+  than guessed - Larry to confirm by ear if he's ever listening at that hour.
+- Three "Pastor/Teacher" cells on the weekend page name a ministry rather
+  than a person ("The Storyteller" / "Without Reservation", "Trail to
+  Adventure" / "God's Great Outdoors", "Friends of Israel" / "Friends of
+  Israel") - kept exactly as shown; that's genuinely what the source page's
+  own column says.
+- Timezone: `America/Los_Angeles` (McMinnville, OR - the source page's own
+  column header literally says "(Pacific Time)").
+- Logo: `staticCoverUrl: '/kkjc-icon.png'` / `staticCoverThumbUrl:
+  '/kkjc-icon-128.png'`, supplied 2026-09-20 - Larry's CalvaryMac Radio
+  badge (round mic graphic, "96.3 FM", "KKJC Christian Radio for Mac").
+  Unlike every icon above, no rounded-square black frame was built around
+  it - the supplied image is already a complete, polished circular
+  app-icon-style design (500x500, flat white square background), so an
+  extra frame underneath would just double up on framing that's already
+  there. Only the white background was removed (plain border-connected
+  flood fill from the four corners - the white is nowhere near the badge's
+  own dark gray/blue tones, so no soft-edge halo to worry about), then
+  resized to 512x512 / 128x128 to match every other station's icon
+  dimensions.
+- 60-day re-check reminder: **2026-11-19**.

@@ -15,6 +15,7 @@ import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
 import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
 import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
 import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
+import { KKJC_SCHEDULE } from './radioSchedules/kkjc.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3396,6 +3397,38 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb4web.securenetsystems.net',
     callSign: 'EFXAAC',
     streamUrl: 'https://ice6.securenetsystems.net/EFXAAC'
+  },
+  {
+    // New station, not previously investigated. Its live player
+    // (http://live.kkjc.net) runs on Radiojar - a provider never used
+    // elsewhere in this file - streamName "4q1m6fsb0k8uv". Radiojar's own
+    // now-playing feed returns valid JSON(P) but with every field
+    // permanently empty (confirmed directly, and via KKJC's own "Now
+    // playing" widget being permanently hidden in its page's own markup);
+    // Larry separately confirmed the same blank response. Genuinely dead
+    // metadata, same as every other publishedschedule station, so this goes
+    // straight to publishedschedule rather than adding a whole new
+    // "radiojar" provider for a feed that will never return anything - see
+    // radio-station-published-schedule-notes.md and the transcription
+    // itself in src/radioSchedules/kkjc.js for the full rationale, the
+    // spelling corrections, and the one flagged-but-unresolved schedule
+    // anomaly. streamUrl below is independently confirmed live/playable over
+    // HTTPS (not a mixed-content dead end like KBOK/WRBP). A 60-day manual
+    // re-check against the live schedule pages is scheduled for 2026-11-19.
+    id: 'kkjc',
+    displayName: 'KKJC',
+    cityState: 'McMinnville, OR',
+    homePage: 'https://kkjc.net/',
+    provider: 'publishedschedule',
+    schedule: KKJC_SCHEDULE,
+    streamUrl: 'https://stream.radiojar.com/4q1m6fsb0k8uv',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // CalvaryMac Radio badge - see src/radioSchedules/kkjc.js's header
+    // comment for why this one wasn't given the usual rounded-square black
+    // frame treatment.
+    staticCoverUrl: '/kkjc-icon.png',
+    staticCoverThumbUrl: '/kkjc-icon-128.png'
   }
 ];
 
