@@ -3374,6 +3374,28 @@ const RADIO_STATIONS = [
     subdomain: 'streamdb9web.securenetsystems.net',
     callSign: 'WJLW',
     streamUrl: 'https://ice64.securenetsystems.net/WJLW'
+  },
+  {
+    // Added 2026-09-21 per Larry. subdomain/callSign/streamUrl confirmed
+    // directly from the station's own /v5/ player page source (Larry
+    // supplied it): stationCallSign = "EFXAAC", stationCallUrl =
+    // "https://streamdb4web.securenetsystems.net", streamSRC =
+    // "https://ice6.securenetsystems.net/EFXAAC?playSessionID=..." - the
+    // playSessionID query param is per-visit/session-specific (regenerated
+    // on every page load), so it's dropped here same as every other
+    // SecureNetSystems entry in this file; the bare stream URL plays fine
+    // continuously without it. Larry also supplied a live now-playing XML
+    // sample from streamdb4web.securenetsystems.net/player_status_update/
+    // EFXAAC.xml showing real <title>/<artist> data, confirming the feed
+    // is live and in the standard shape parseSecureNetSystemsXml expects.
+    id: 'effectradio',
+    displayName: 'Effect Radio',
+    cityState: 'Twin Falls, ID',
+    homePage: 'https://effectradio.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb4web.securenetsystems.net',
+    callSign: 'EFXAAC',
+    streamUrl: 'https://ice6.securenetsystems.net/EFXAAC'
   }
 ];
 
