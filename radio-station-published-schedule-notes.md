@@ -625,3 +625,59 @@ Seventh station wired up on this provider, 2026-09-21. Data lives in
   flood fill and the 512x512 / 128x128 resize, to avoid squashing the
   circular mark into an oval.
 - 60-day re-check reminder: **2026-11-20**.
+
+### WXMB (Myrtle Beach, SC)
+
+Eighth station wired up on this provider, 2026-09-21. Data lives in
+`src/radioSchedules/wxmb.js`.
+
+- Like KFLK, this is a *previously-removed* station brought back, not a
+  fresh rejection. See "WXMB (Myrtle Beach, SC)" under the
+  `securenetsystems` provider in
+  `radio-station-providers-notes-consolidated.md`: added once, then pulled
+  days later once `programStartTS` was caught frozen at `29 Jul 2026
+  21:31:10` with the ticker stuck on the same `"Boldly Speaking" / "Ron
+  Dozler"` pair. Re-checked `player_status_update/WXMB.xml` directly
+  2026-09-21 and got back that exact same frozen timestamp and title/
+  artist pair, nearly two months stale now, so this goes straight to the
+  published schedule instead. `streamUrl`
+  (`https://ice25.securenetsystems.net/WXMB`) comes from the page source
+  Larry supplied (`streamSRC` in the player's inline JS) and was confirmed
+  actually playing by inspecting the page's live `<audio>` element
+  (`paused: false`, `readyState: 3`, matching `currentSrc`) rather than a
+  direct curl to the ice server, which this environment's egress policy
+  blocks.
+- Source: `https://wxmbfm.com/schedule/weekday/`,
+  `/schedule/saturday/`, `/schedule/sunday/` - plain HTML text, one
+  "H:MMam/pm- Program - Host" line per half-hour slot. The easiest
+  transcription of any station on this provider so far: no images, no
+  repeat-column flattening, no OCR-style judgment calls - a direct page
+  read matched the existing `{ time, program, host }` shape almost
+  verbatim.
+- All three days are a plain uniform half-hour grid (48 entries each, no
+  double-length blocks, no gaps) - confirmed by script to have zero
+  duplicate start times and to sum to exactly 1440 minutes per day, same
+  verification bar as every other station on this provider even though it
+  was never in doubt here.
+- One normalization, not a judgment call: the weekday page spells the
+  10:00 PM Ken Graves program "God Sword" while the Saturday/Sunday pages
+  spell it "Godsword" - unified to "GodSword" everywhere, matching the
+  spelling already used for the same program on KFLK's schedule in this
+  codebase.
+- Two spellings left exactly as each source page has them, not
+  reconciled, because the pages disagree and neither reads as the obvious
+  typo: "Zack Vazquez" (weekday's "Sword & Spirit" host) vs "Zak Vasquez"
+  (Saturday's same program); "Al Pittman" (weekday's "Dwelling Place"
+  host) vs "Al Pitman" (Saturday's same program).
+- Timezone: `America/New_York` (Myrtle Beach, SC).
+- Logo: `staticCoverUrl: '/wxmb-icon.png'` / `staticCoverThumbUrl:
+  '/wxmb-icon-128.png'`, supplied 2026-09-21 - Larry's "WXMB 101.5 Myrtle
+  Beach FM" badge. Unlike every other station's logo on this provider, the
+  source image (168x160, opaque RGB, no alpha channel) is already a
+  complete, finished rectangular badge with its own full-bleed blue
+  gradient background - no white field to flood-fill, no frame to add.
+  Only processing: padded the non-square source onto a 168x168 canvas by
+  replicating the top/bottom edge rows into the new margin (instead of
+  leaving it transparent, which would show as a seam against the badge's
+  own background), then resized to 512x512 / 128x128 via LANCZOS.
+- 60-day re-check reminder: **2026-11-20**.

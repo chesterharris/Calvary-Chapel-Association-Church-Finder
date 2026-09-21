@@ -17,6 +17,7 @@ import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
 import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
 import { KKJC_SCHEDULE } from './radioSchedules/kkjc.js';
 import { KFLK_SCHEDULE } from './radioSchedules/kflk.js';
+import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3458,6 +3459,33 @@ const RADIO_STATIONS = [
     // rounded-square black frame treatment.
     staticCoverUrl: '/kflk-icon.png',
     staticCoverThumbUrl: '/kflk-icon-128.png'
+  },
+  {
+    // Previously added, then removed - see "WXMB (Myrtle Beach, SC)" in
+    // radio-station-providers-notes-consolidated.md's `securenetsystems`
+    // section for the original investigation and the frozen-metadata
+    // removal. Re-confirmed 2026-09-21 that player_status_update/WXMB.xml
+    // still returns the exact same frozen programStartTS and
+    // "Boldly Speaking" / "Ron Dozler" title/artist pair that got it
+    // pulled the first time, so this goes straight to the station's own
+    // published schedule instead (plain HTML text, not images - see
+    // src/radioSchedules/wxmb.js). streamUrl below (from the page source
+    // Larry supplied) was confirmed actually playing via the page's live
+    // <audio> element, independent of the dead metadata feed.
+    id: 'wxmb',
+    displayName: 'WXMB',
+    cityState: 'Myrtle Beach, SC',
+    homePage: 'https://wxmbfm.com/',
+    provider: 'publishedschedule',
+    schedule: WXMB_SCHEDULE,
+    streamUrl: 'https://ice25.securenetsystems.net/WXMB',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // "WXMB 101.5 Myrtle Beach FM" badge - see src/radioSchedules/wxmb.js's
+    // header comment for why this one (unlike KFLK/KKJC) needed no
+    // background removal at all, just square padding.
+    staticCoverUrl: '/wxmb-icon.png',
+    staticCoverThumbUrl: '/wxmb-icon-128.png'
   }
 ];
 

@@ -186,6 +186,18 @@ add-time. Removed rather than left in the "may recover eventually" bucket
 month of zero movement is well past "occasionally quiet." Revisit only if
 someone happens to notice the feed moving again.
 
+**UPDATE 2026-09-21: added back, via the `publishedschedule` provider**
+rather than the dead metadata feed above. Re-checked
+`player_status_update/WXMB.xml` directly and got back the exact same
+frozen `programStartTS` (`29 Jul 2026 21:31:10`) and the same
+`"Boldly Speaking" / "Ron Dozler"` title/artist pair as the original
+removal - nearly two months stale now, confirming this was a genuinely
+dead pipeline rather than a slow news day. `streamUrl` above
+(`https://ice25.securenetsystems.net/WXMB`, from the page source Larry
+supplied) is confirmed actually playing, independent of the dead metadata
+feed - see `radio-station-published-schedule-notes.md` for the full
+rationale and WXMB's own transcription notes.
+
 **KGPS "The Way" (Kingman, AZ)** — investigated and **not added**.
 Confirmed `streamUrl: https://ice5.securenetsystems.net/KGPS` works fine
 (real playable audio). This station's player page uses a different
