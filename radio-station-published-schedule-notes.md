@@ -553,3 +553,75 @@ Sixth station wired up on this provider, 2026-09-20. Data lives in
   resized to 512x512 / 128x128 to match every other station's icon
   dimensions.
 - 60-day re-check reminder: **2026-11-19**.
+
+### KFLK "The Flock" (Minot, ND)
+
+Seventh station wired up on this provider, 2026-09-21. Data lives in
+`src/radioSchedules/kflk.js`.
+
+- Not a fresh investigation - this is the first *previously-removed*
+  station brought back via this provider, not just previously-rejected
+  (KGPS was rejected-then-added; this one was actually live once). See
+  "KFLK 'The Flock' (Minot, ND)" under the `streamingradio` provider in
+  `radio-station-providers-notes-consolidated.md`: added once, then pulled
+  days later once its now-playing feed was caught returning the exact same
+  hardcoded "Sweater Weather" response on every request. Larry
+  re-confirmed 2026-09-21 that the feed still returns that identical
+  response, byte for byte, and supplied the published schedule instead.
+  `streamUrl`
+  (`https://server02.streamingrad.io:8443/listen/kflk_the_flock_95.9_fm/radio`)
+  is unchanged from the original investigation and re-confirmed
+  live/playable independent of the dead feed.
+- Source: `https://calvarychapelminot.org/schedule-about`, three embedded
+  JPEGs (Monday-Friday, Saturday, Sunday) rather than a table or rich-text
+  block - genuinely nothing to scrape as text here. Fetched each image
+  directly (the page's own `_500`-suffixed thumbnail URL also answers at
+  `_1000` for a legible width; every other size variant 403s) and
+  transcribed by reading the images, not by guessing from surrounding page
+  text.
+- **Each day's image has up to three time columns ("1st Play"/"2nd
+  Play"/"3rd Play") instead of one row per airing** - a program that airs
+  more than once a day gets one shared row with multiple times, not
+  multiple rows. This turned out to need no new mechanism at all: each
+  column is just flattened into its own `{ time, program, host }` entry,
+  exactly the existing "a repeat is just another entry with the same
+  program/host" convention (see "Transcription format" above) already
+  used for GraceFM's combined-line repeats and WJWD's repeated table rows.
+  Confirmed correct by summing every entry's covered span per day and
+  getting exactly 1440 minutes on all three days, with zero duplicate
+  start times.
+- **One correction, not a judgment call.** The weekday grid pairs every
+  1st Play half-hour with a 2nd Play exactly 12 hours later, with one
+  single exception: the 1:00 AM slot's 2nd Play reads "16:00" instead of
+  the "13:00" the pattern predicts. Taking that literally would both leave
+  a real 13:00 hole in the PM grid *and* double-book 16:00 against 4:00
+  AM's own repeat - corrected to 13:00, confirmed as the only reading that
+  makes the entire PM half of the grid land on a perfect, gap-free,
+  non-overlapping half-hour sequence. Scoped narrowly to this one cell,
+  not applied as a general "trust the pattern over the source" rule.
+- A few small spelling/title fixes, each confirmed by cross-checking the
+  same program's other airing(s) rather than guessed in isolation:
+  "Calvar Chapel Castle Rock" -> Calvary Chapel Castle Rock (all three
+  days); "The Blanaced Word" -> The Balanced Word (Sunday); "Here's the
+  Truth Weekend Edition" (Sunday, missing "Radio") -> Here's the Truth
+  Radio Weekend Edition, matching Saturday's title for the same host/
+  church; "Unashamed of the Gospel Grace Baptist" (Saturday's title cell)
+  -> Unashamed of the Gospel, matching Sunday's cleaner title and leaving
+  the church name in the host/affiliated-ministry column where it already
+  lives.
+- Three slots run a genuine full hour rather than the usual half hour -
+  Saturday's and Sunday's "Prophesy Today", and Sunday's "Calvary Chapel
+  Minot Live!" - confirmed as real (no missing half-hour marker on the
+  original airing or any of its repeats) rather than a filler-worthy gap;
+  every minute of the day is still accounted for by some entry.
+- Timezone: `America/Chicago` (Minot, ND).
+- Logo: `staticCoverUrl: '/kflk-icon.png'` / `staticCoverThumbUrl:
+  '/kflk-icon-128.png'`, supplied 2026-09-21 - Larry's "The Flock 88.1 FM"
+  circular line-art badge (station name, a sheep silhouette, "88.1 FM").
+  Like KKJC's badge, this is already a complete circular design, so no
+  extra rounded-square black frame was added - only the flat white
+  background was removed. The source image (500x458) wasn't square, so it
+  was padded onto a transparent 500x500 canvas before the white-removal
+  flood fill and the 512x512 / 128x128 resize, to avoid squashing the
+  circular mark into an oval.
+- 60-day re-check reminder: **2026-11-20**.

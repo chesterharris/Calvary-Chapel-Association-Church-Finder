@@ -1146,6 +1146,16 @@ the same reasoning as WXMB (a genuinely dead pipeline, not just an
 occasionally-quiet talk station). Revisit only if someone happens to
 notice the feed moving again.
 
+**UPDATE 2026-09-21: added back, via the `publishedschedule` provider**
+rather than the dead metadata feed above - Larry re-confirmed the
+identical hardcoded "Sweater Weather" response and supplied the station's
+published schedule directly (three embedded images, not a text table -
+see `radio-station-published-schedule-notes.md` for the transcription
+approach, including how its unusual 1st/2nd/3rd-Play repeat columns were
+flattened and the one corrected typo). `streamUrl` above is unchanged and
+confirmed still live/playable independent of the metadata pipeline being
+dead.
+
 ---
 
 ## Provider: `radioco` (Radio.co)

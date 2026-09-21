@@ -16,6 +16,7 @@ import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
 import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
 import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
 import { KKJC_SCHEDULE } from './radioSchedules/kkjc.js';
+import { KFLK_SCHEDULE } from './radioSchedules/kflk.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3429,6 +3430,34 @@ const RADIO_STATIONS = [
     // frame treatment.
     staticCoverUrl: '/kkjc-icon.png',
     staticCoverThumbUrl: '/kkjc-icon-128.png'
+  },
+  {
+    // Previously added, then removed - see "KFLK 'The Flock' (Minot, ND)"
+    // in radio-station-providers-notes-consolidated.md's `streamingradio`
+    // section for the original investigation and the frozen-metadata
+    // removal. Larry re-confirmed 2026-09-21 that the now-playing endpoint
+    // still returns the exact same hardcoded response that got it pulled
+    // the first time, and supplied the station's published schedule
+    // instead (three embedded images, not a text table - see the
+    // transcription itself and the flattening approach used for its
+    // unusual 1st/2nd/3rd-Play repeat columns in
+    // src/radioSchedules/kflk.js). streamUrl below is unchanged from the
+    // original investigation and re-confirmed live/playable independent of
+    // the dead metadata feed.
+    id: 'kflk',
+    displayName: 'KFLK "The Flock"',
+    cityState: 'Minot, ND',
+    homePage: 'https://calvarychapelminot.org/kflk-home',
+    provider: 'publishedschedule',
+    schedule: KFLK_SCHEDULE,
+    streamUrl: 'https://server02.streamingrad.io:8443/listen/kflk_the_flock_95.9_fm/radio',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // "The Flock 88.1 FM" badge - see src/radioSchedules/kflk.js's header
+    // comment for why this one (like KKJC's) wasn't given the usual
+    // rounded-square black frame treatment.
+    staticCoverUrl: '/kflk-icon.png',
+    staticCoverThumbUrl: '/kflk-icon-128.png'
   }
 ];
 
