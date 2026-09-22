@@ -18,6 +18,7 @@ import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
 import { KKJC_SCHEDULE } from './radioSchedules/kkjc.js';
 import { KFLK_SCHEDULE } from './radioSchedules/kflk.js';
 import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
+import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3486,6 +3487,33 @@ const RADIO_STATIONS = [
     // background removal at all, just square padding.
     staticCoverUrl: '/wxmb-icon.png',
     staticCoverThumbUrl: '/wxmb-icon-128.png'
+  },
+  {
+    // Broadcasts the identical programming on two separate FM signals -
+    // 88.9 (Morris County/Central NJ) and 89.1 (Western Warren County, NJ
+    // and Northampton County, PA) - each with its own Live365 mount
+    // (88.9 = a63431, 89.1 = a62921). Confirmed with Larry 2026-09-22:
+    // not two different shows, just ~10+ seconds of drift between the two
+    // independent encodes/relays of the same feed, so one station entry
+    // with one published schedule covers both. streamUrl below uses the
+    // 88.9 mount, matching the supplied logo - see
+    // src/radioSchedules/crossway.js for the full investigation,
+    // including 89.1's prior (unrelated) now-playing-metadata rejection
+    // in radio-station-providers-notes-consolidated.md.
+    id: 'crossway',
+    displayName: 'Crossway Radio',
+    cityState: 'Dover, NJ',
+    homePage: 'https://www.crosswayradio.com/',
+    provider: 'publishedschedule',
+    schedule: CROSSWAY_SCHEDULE,
+    streamUrl: 'https://streaming.live365.com/a63431',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // "Crossway Radio 88.9 FM" badge - see
+    // src/radioSchedules/crossway.js's header comment for why this one
+    // (like WXMB's) needed no background removal or padding at all.
+    staticCoverUrl: '/crossway-icon.png',
+    staticCoverThumbUrl: '/crossway-icon-128.png'
   }
 ];
 

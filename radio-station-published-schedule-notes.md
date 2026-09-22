@@ -681,3 +681,59 @@ Eighth station wired up on this provider, 2026-09-21. Data lives in
   leaving it transparent, which would show as a seam against the badge's
   own background), then resized to 512x512 / 128x128 via LANCZOS.
 - 60-day re-check reminder: **2026-11-20**.
+
+### Crossway Radio (Dover, NJ)
+
+Ninth station wired up on this provider, 2026-09-22. Data lives in
+`src/radioSchedules/crossway.js`.
+
+- **The two-frequencies mystery.** Crossway broadcasts on two separate FM
+  signals - 88.9 (Morris County/Central NJ) and 89.1 (Western Warren
+  County, NJ and Northampton County, PA) - but their site only publishes
+  one schedule. Larry initially reported hearing two different programs
+  when listening to both frequencies, which raised a real question of
+  whether they needed two separate station entries. Root cause: each
+  frequency's "Listen Live" page embeds its own separate Live365 station
+  (confirmed via each page's iframe src) - 88.9 is mount `a63431`, 89.1 is
+  mount `a62921` (the same mount already referenced, for a different
+  reason, in the `/metadata`-SSE rejected-providers writeup in
+  `radio-station-providers-notes-consolidated.md`). That's two
+  independently-relayed encodes of Live365 content, not one. Resolved,
+  not left ambiguous: Larry re-listened and confirmed it's the *same*
+  programming on both, just ~10+ seconds out of sync between the two
+  relays - close enough to fool a casual listen, not actually two
+  schedules. One station entry, one schedule, covers both.
+- Source: `https://www.crosswayradio.com/monday-friday-broadcast`,
+  `/saturday-broadcast-schedule`, `/sunday-broadcast-schedule` - plain
+  HTML text, same easy "H:MMAM/PM - H:MMAM/PM  Program  Pastor/Teacher"
+  shape as WXMB's pages. No images, no repeat-column flattening needed.
+- Two genuine departures from the usual uniform half-hour grid, both
+  confirmed real (not a transcription slip) by each day still summing to
+  exactly 1440 minutes with zero duplicate start times: the weekday grid
+  splits 1:00-1:30 PM into two real 15-minute slots (Main Thing Radio,
+  then Key Life); Sunday's 5:00 PM "Cross Examined" runs a full hour, with
+  no 5:30 PM marker on the page at all.
+- One correction backed by outside knowledge: "Alistair Begg" is a
+  well-known, consistently-spelled broadcaster. Both weekend pages spell
+  their *first* "Truth For Life" airing (1:30 AM) correctly but their
+  *second* airing (7:00 AM) "Alistar Begg", missing the second i -
+  corrected to "Alistair Begg" in both places.
+- One spelling left exactly as each source page has it, not reconciled:
+  "Clarke Lauffer" (weekday's "Living Waters of Grace" host) vs "Claude
+  Lauffer" (both weekend pages, consistently with each other) - the pages
+  disagree and neither reads as the obvious typo.
+- `streamUrl` uses the 88.9 Live365 mount
+  (`https://streaming.live365.com/a63431`), matching the logo supplied.
+  High quality vs. low quality was a live question Larry asked directly -
+  moot here, since Live365's own station JSON lists both as the literal
+  same URL; already what this provider's convention uses (the plain MP3
+  URL, not the `.m3u8` HLS variant).
+- Timezone: `America/New_York` (all of Crossway's coverage area, both
+  frequencies, is Eastern).
+- Logo: `staticCoverUrl: '/crossway-icon.png'` / `staticCoverThumbUrl:
+  '/crossway-icon-128.png'`, supplied 2026-09-22 - Larry's "Crossway Radio
+  88.9 FM" badge. Already a complete, finished, perfectly square (225x225)
+  design with its own full-bleed blue gradient background - no
+  flood-fill, no frame, no padding needed, just a straight LANCZOS resize
+  to 512x512 / 128x128.
+- 60-day re-check reminder: **2026-11-21**.

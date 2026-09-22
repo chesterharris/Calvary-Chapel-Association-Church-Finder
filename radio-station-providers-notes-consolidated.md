@@ -1500,6 +1500,22 @@ specific station actually uses (an SSE `/metadata` call vs. a `streams`
 config with an `icehls` entry) before assuming it's a dead end just
 because this one endpoint was.
 
+**UPDATE 2026-09-22: Crossway Radio added, via the `publishedschedule`
+provider** rather than the rejected `/metadata` feed above - see
+`radio-station-published-schedule-notes.md` for the full transcription
+notes. Along the way, a second wrinkle surfaced that this original
+writeup didn't know about: Crossway actually broadcasts on two separate
+FM frequencies (88.9 and 89.1), each with its **own** Live365 mount -
+`a62921` (documented here) is 89.1, while 88.9 turned out to be a
+completely different mount, `a63431`, never investigated before. Larry
+initially heard what sounded like two different programs across the two
+frequencies; confirmed by listening more closely that it's the same
+programming on both, just ~10+ seconds out of sync between the two
+independent relays - not two different feeds needing two different
+schedules, just two encodes of one. `streamUrl` for the added station
+uses the 88.9 mount (`https://streaming.live365.com/a63431`), matching
+the station logo supplied.
+
 ---
 
 ## Finding stream URLs and endpoints for a brand-new station (any provider)
