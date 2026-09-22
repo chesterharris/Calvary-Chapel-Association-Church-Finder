@@ -737,3 +737,73 @@ Ninth station wired up on this provider, 2026-09-22. Data lives in
   flood-fill, no frame, no padding needed, just a straight LANCZOS resize
   to 512x512 / 128x128.
 - 60-day re-check reminder: **2026-11-21**.
+
+### Faith FM (Eastern Long Island, NY)
+
+Tenth station wired up on this provider, 2026-09-22. Data lives in
+`src/radioSchedules/faithfm.js`.
+
+- Brand-new station, not a previous rejection or removal - Larry supplied
+  the player's page source directly rather than a prior write-up to
+  reconcile against. The `aio-radio`/`maindigitalstream.com` player's
+  now-playing polling call returns only a bare `{"cache-time":14}`
+  heartbeat, no title/artist at all - see the new rejected-provider entry
+  in `radio-station-providers-notes-consolidated.md` - so this went
+  straight to the published schedule.
+- Source: `https://hamptonschristian.com/faithfm/faith-fm-weekly-program-
+  schedule-m-f-2/`, `/faith-fm-saturday-program-schedule/`, `/faith-fm-
+  sunday-program-schedule/` - plain HTML, but laid out as three parallel
+  sibling `<p>` lists (Time / Program / Host) rather than one table, which
+  took real care to re-align correctly rather than a straight top-to-
+  bottom read:
+  - **The weekday grid's 10:00 AM, 11:00 AM, and 3:00 PM slots each
+    expand into six rows** - a bare, literal "Various Programs" /
+    "Various Hosts" placeholder row (confirmed by screenshot to be a real
+    row of its own, not a section heading), followed by five real
+    "Monday:"/"Tuesday:"/.../"Friday:" rows with the actual per-day
+    programming. Modeled with `weekdayOverridesByDay` - previously used
+    for exactly one override (GraceFM's Wednesday-only case); this is the
+    first station to need it for all five weekday codes at once, since
+    all five genuinely differ here. Verified by script: the placeholder
+    base array sums to 1440 minutes with no duplicates, and so does each
+    of the five fully-merged Monday..Friday combinations (base entries
+    with that day's three overrides substituted in) - not just the base
+    array alone.
+  - **The Saturday page's Host column is missing one row** relative to
+    its own Time/Program columns (34 rows each, only 33 hosts) - confirmed
+    by directly counting the raw `<p>` tags in the page's HTML, not a
+    copy mistake here. Resolved by cross-checking which alignment makes
+    every row's program/host consistent with patterns already established
+    elsewhere on this same station (weekday and Sunday pages) - "A New
+    Beginning" is always Greg Laurie, "Inside the Epicenter" is always
+    Joel Rosenberg, "Haven Today" is always David Wollen, and every
+    plausible realignment matched one of these except the row left with
+    no host afterward (6:00 PM's "Jesus In Our Time"), transcribed with an
+    empty host rather than guessed.
+- A few source-side oddities kept exactly as shown, not corrected, since
+  there's no prior investigation here to compare against and nothing
+  reads as an obvious typo: the weekday page's 3:30 AM host field
+  literally repeats "Truth with Grace" (the program's own name); "6640"
+  appears as a program name twice (1:30 PM and 11:00 PM), both times
+  paired with Chuck Missler consistently enough to transcribe as-is
+  rather than assume a scraping error; Saturday's "Christian Music Mix"
+  pairs with host "Eugene McGee" even though every other instance of that
+  program on this station pairs with "Various Artists".
+- Two genuine hour-plus blocks on Sunday, confirmed real (no missing
+  marker) rather than gaps: "Worship Music Mix" runs 5:00-7:00 AM (a full
+  two hours) and again 11:00 AM-12:00 PM (one hour); "The Message You May
+  Have Missed" runs 7:00-8:00 PM (one hour).
+- `streamUrl` (`https://us2.streamingpulse.com/ssl/7176`) confirmed
+  actually playing by inspecting the page's live `<audio>` element
+  (`paused: false`, `readyState: 4`). Only one stream quality is offered
+  at all (the player config's own `"High Quality"` entry) - no low-quality
+  alternative to choose between.
+- Timezone: `America/New_York` (Eastern Long Island, NY).
+- Logo: `staticCoverUrl: '/faithfm-icon.png'` / `staticCoverThumbUrl:
+  '/faithfm-icon-128.png'`, supplied 2026-09-22 - Larry's lighthouse
+  badge. Unlike the last two stations' already-finished badges, this
+  source image (324x259) was a rectangular mark on a plain white
+  background - needed the same border-connected white-flood-fill
+  treatment as KFLK/KKJC, then padded onto a transparent square canvas
+  before the 512x512 / 128x128 resize (the source wasn't square).
+- 60-day re-check reminder: **2026-11-21**.

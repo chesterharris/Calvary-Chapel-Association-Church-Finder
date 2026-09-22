@@ -19,6 +19,7 @@ import { KKJC_SCHEDULE } from './radioSchedules/kkjc.js';
 import { KFLK_SCHEDULE } from './radioSchedules/kflk.js';
 import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
+import { FAITHFM_SCHEDULE } from './radioSchedules/faithfm.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3514,6 +3515,31 @@ const RADIO_STATIONS = [
     // (like WXMB's) needed no background removal or padding at all.
     staticCoverUrl: '/crossway-icon.png',
     staticCoverThumbUrl: '/crossway-icon-128.png'
+  },
+  {
+    // Brand-new station, not a previous rejection/removal - Larry supplied
+    // the player page source directly. Now-playing endpoint
+    // (?c=Faith%20FM&_=<ts> on the aio-radio player) returns only a bare
+    // {"cache-time":14} heartbeat, no title/artist at all, so this went
+    // straight to the published schedule instead - see
+    // src/radioSchedules/faithfm.js for the full transcription notes,
+    // including the weekday grid's per-day overrides and the Saturday
+    // page's own missing host cell.
+    id: 'faithfm',
+    displayName: 'Faith FM',
+    cityState: 'Eastern Long Island, NY',
+    homePage: 'https://hamptonschristian.com/faithfm/',
+    provider: 'publishedschedule',
+    schedule: FAITHFM_SCHEDULE,
+    streamUrl: 'https://us2.streamingpulse.com/ssl/7176',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // lighthouse-badge logo - see src/radioSchedules/faithfm.js's header
+    // comment for the background-removal/padding treatment (this one
+    // needed the same white-flood-fill treatment as KFLK/KKJC, unlike the
+    // last two stations' already-finished badges).
+    staticCoverUrl: '/faithfm-icon.png',
+    staticCoverThumbUrl: '/faithfm-icon-128.png'
   }
 ];
 

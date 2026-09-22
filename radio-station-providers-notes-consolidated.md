@@ -1516,6 +1516,25 @@ schedules, just two encodes of one. `streamUrl` for the added station
 uses the 88.9 mount (`https://streaming.live365.com/a63431`), matching
 the station logo supplied.
 
+**The "aio-radio" player (maindigitalstream.com-hosted, actual audio on
+streamingpulse.com) - confirmed via Faith FM (Eastern Long Island, NY)** -
+a self-hosted `sp-future`/`aio-radio.min.js` player template
+(`https://us7.maindigitalstream.com/{id}/`). The player's own channel
+config call (`?c=all&t=sp-future`) cleanly returns the real stream URL
+(`{"streams":{"High Quality":{"mp3":"https://us2.streamingpulse.com/ssl/
+{id}"}}}` - confirmed actually playing via the page's live `<audio>`
+element), but its now-playing polling call
+(`?c={channel name}&_={timestamp}`, fired repeatedly while playing) never
+returns a title/artist field at all - just a bare `{"cache-time":14}`
+heartbeat, both before and after starting playback. No SSE, no gating, no
+spoofed-header workaround to try here - the endpoint simply doesn't carry
+metadata for this station. Faith FM was added via the `publishedschedule`
+provider instead (see `radio-station-published-schedule-notes.md`). Not
+yet known whether every `aio-radio`-hosted station lacks metadata this way
+or whether it's configurable per station (same "don't assume one instance
+speaks for the whole platform" caveat as Live365 above) - worth checking
+the actual response, not assuming, if another `aio-radio` station comes up.
+
 ---
 
 ## Finding stream URLs and endpoints for a brand-new station (any provider)
