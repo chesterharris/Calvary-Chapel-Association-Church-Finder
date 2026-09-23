@@ -21,6 +21,7 @@ import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
 import { FAITHFM_SCHEDULE } from './radioSchedules/faithfm.js';
 import { WJCX_SCHEDULE } from './radioSchedules/wjcx.js';
+import { KYYR_SCHEDULE } from './radioSchedules/kyyr.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3664,6 +3665,27 @@ const RADIO_STATIONS = [
     // feed can return real per-track album art via its albumCover endpoint.
     staticCoverUrl: '/worshipliferadio-icon.png',
     staticCoverThumbUrl: '/worshipliferadio-icon-128.png'
+  },
+  {
+    // Brand-new station - Larry supplied the site, raw stream URL, and
+    // logo directly, and explicitly asked for this to be built from the
+    // published schedule from the start (no now-playing endpoint was ever
+    // given or looked for). See src/radioSchedules/kyyr.js for the full
+    // transcription notes, including the AM/PM section-time modeling and
+    // the Saturday/Sunday "Live Service" override slots.
+    id: 'kyyr',
+    displayName: 'KYYR',
+    cityState: 'Yakima, WA',
+    homePage: 'https://www.calvaryyakima.com/',
+    provider: 'publishedschedule',
+    schedule: KYYR_SCHEDULE,
+    streamUrl: 'http://us9.streamingpulse.com:7107/xstream',
+    // Static "KYYR / The Bridge" logo (Larry's own banner - a wide teal
+    // cityscape graphic on a plain white background that doesn't reach the
+    // corners; tightly cropped to the visible banner and centered on a
+    // white square canvas before resizing, same treatment as WTTP's logo).
+    staticCoverUrl: '/kyyr-icon.png',
+    staticCoverThumbUrl: '/kyyr-icon-128.png'
   }
 ];
 

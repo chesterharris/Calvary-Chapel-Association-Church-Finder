@@ -872,3 +872,59 @@ Eleventh station wired up on this provider, 2026-09-23. Data lives in
   onto a black square canvas (centered) rather than flood-filled, then
   resized to 512x512 / 128x128.
 - Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
+
+### KYYR "The Bridge of Hope" (Yakima, WA)
+
+Twelfth station wired up on this provider, 2026-09-23. Data lives in
+`src/radioSchedules/kyyr.js`.
+
+- Brand-new station - Larry supplied the station's own site
+  (`https://www.calvaryyakima.com/`), its raw stream URL, and the KYYR logo
+  directly. Unlike every other station on this provider, **no now-playing
+  endpoint was ever supplied or investigated** - Larry explicitly said this
+  one needed to be "created internally from Programming schedule" from the
+  start, so this went straight to the published schedule without a
+  separate dead-feed investigation.
+- Stream: `http://us9.streamingpulse.com:7107/xstream` (same
+  streamingpulse.com platform Faith FM uses, different node) - confirmed
+  genuinely live by loading the raw stream URL itself and reading its own
+  `<video>` element directly (`paused: false`, `readyState: 4`,
+  `currentTime` advancing).
+- Source: `https://www.calvaryyakima.com/radio-playlist` - plain text
+  under four section headings ("Week Day AM", "Week Day PM", "Weekend AM",
+  "Weekend PM"), each internally a 12:00-to-~11:30 range with no AM/PM
+  marker on the individual rows.
+  - **AM/PM wasn't stated, so it had to be derived, not assumed**: took AM
+    section = 12:00 AM (midnight) through 11:59 AM and PM section = 12:00
+    PM (noon) through 11:59 PM, then verified script-side that converting
+    both sections to 24-hour time produces one continuous, strictly-
+    increasing 24-hour cycle with no gap or overlap at either the noon or
+    midnight seam - true for both the weekday pair and the weekend pair,
+    which is what confirmed the assumption rather than just made it
+    plausible.
+  - **The weekend grid is one combined section like WJCX's, but NOT
+    identical for both days like WJCX's was** - two slots read "Sat. Music
+    / Sun. Live Service CCY" (9:30 AM) and "Sat. Music / Sun. Live Service"
+    (6:00 PM). Modeled as two full, separate `SATURDAY_SCHEDULE`/
+    `SUNDAY_SCHEDULE` arrays (not a shared reference) that are identical
+    everywhere except those two slots: Saturday keeps "Music", Sunday
+    becomes "Live Service" hosted by "Calvary Chapel Yakima" (CCY, per the
+    9:30 AM slot's own text - the 6:00 PM slot doesn't repeat "CCY" but is
+    presumed the same live service continuing, not a different program).
+  - Both weekday and weekend grids verified script-side: every day's
+    entries are distinct and strictly increasing across the full 24-hour
+    cycle, no duplicate times.
+  - Minor typo canonicalized: the PM grid's "Turning Point - David
+    Jeremaih" corrected to "David Jeremiah" (every other Turning Point
+    credit on the same page, including this station's own AM and weekend
+    PM slots, spells it correctly - read as a letter transposition, not an
+    intentional alternate spelling).
+- Timezone: `America/Los_Angeles` (Yakima, WA - Pacific).
+- Logo: `staticCoverUrl: '/kyyr-icon.png'` / `staticCoverThumbUrl:
+  '/kyyr-icon-128.png'`, supplied 2026-09-23 - Larry's "KYYR / The Bridge"
+  banner (97.9 fm, teal cityscape-and-cross graphic). Plain white
+  background that doesn't reach the corners (306x126 visible content
+  inside a 311x262 frame) - tightly cropped to the visible banner (8px
+  margin) and centered on a white square canvas before resizing, same
+  treatment as WTTP's logo.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
