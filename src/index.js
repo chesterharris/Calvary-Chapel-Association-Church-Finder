@@ -3051,7 +3051,19 @@ const RADIO_STATIONS = [
     homePage: 'https://wttpfm.com/',
     provider: 'elasticplayer',
     radioId: '300',
-    streamUrl: 'https://www.ophanim.net:8444/s/8730'
+    streamUrl: 'https://www.ophanim.net:8444/s/8730',
+    // Static "WTTP FM RADIO" logo (Larry's own branding for this station -
+    // he still calls it WTTP day-to-day even though displayName stays "The
+    // Voice" per his choice). Source had a black background filling the
+    // frame with the text block cramped in the upper-left and a big empty
+    // gap below the underline accent - tightly cropped to the visible
+    // content (10px margin) and re-centered on a black square canvas
+    // before resizing, so the logo reads as centered rather than
+    // top-heavy. Fallback only, same as every other staticCoverUrl in this
+    // file - history's image_url has been null in every sample seen for
+    // this station, so this is effectively always what's shown.
+    staticCoverUrl: '/wttp-icon.png',
+    staticCoverThumbUrl: '/wttp-icon-128.png'
   },
   {
     id: 'wlxm',

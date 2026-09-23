@@ -1155,6 +1155,22 @@ per-station Vue-based player pages at `elasticplayer.xyz/{slug}/`.
 - `image_url` was `null` for every entry seen so far - `coverUrl` handling
   is in place for when it's populated, just unconfirmed in practice.
 
+**UPDATE 2026-09-23: logo added, confirming `image_url` is still always
+null.** Larry re-checked this station (thinking it hadn't been added yet -
+it had, back when it was first found on this platform) and sent a fresh
+`history` sample plus a "WTTP FM RADIO" logo. The new sample's `image_url`
+values were null across every entry again, consistent with the original
+finding, so this is a clean fit for the same `staticCoverUrl` fallback-only
+pattern used elsewhere (KBLD, WorshipLifeRadio) - added as `staticCoverUrl`/
+`staticCoverThumbUrl` on the existing `thevoice` entry. Source logo had a
+black background filling the frame with the text cramped in the upper-left
+and a big empty gap below its underline accent; tightly cropped to the
+visible content (10px margin) and re-centered on a black square canvas
+before resizing, rather than just padding the original frame, so the result
+reads as centered per Larry's request instead of top-heavy. Larry chose to
+keep the display name "The Voice" rather than rename it to match the logo's
+own "WTTP FM" branding.
+
 **Stations currently configured:** The Voice (WTTP).
 
 ---
