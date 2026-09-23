@@ -174,17 +174,28 @@ There's no equivalent of `programStartTS` to catch a published schedule
 silently going stale - a live XML feed freezing is self-evident (the same
 title never changes), but a hand-transcribed schedule has no signal at all
 if the station quietly updates their lineup on their own site. The only real
-defense is a periodic manual re-check: re-open the station's schedule page,
-re-paste it, and diff by eye against the transcription.
+defense is a periodic re-check: re-open each station's schedule page(s),
+re-run the extraction, and diff the result against its
+`src/radioSchedules/*.js` transcription.
 
-**GraceFM**: a manual re-check reminder is scheduled for **2026-11-09** (60
-days from this being wired up on 2026-09-10). When that reminder fires, the
-process is: re-fetch `https://www.gracefm.com/schedule`, re-run the same
-extraction against the fresh page source, and diff the result against
-`src/radioSchedules/gracefm.js` - if the accordion markup, `nav-title` class,
-or the three section headers (`SATURDAY SCHEDULE` / `SUNDAY SCHEDULE` /
-`WEEKDAY PROGRAM SCHEDULE`) changed, the extraction itself needs revisiting,
-not just the data.
+**Consolidated as of 2026-09-23**: originally each `publishedschedule`
+station got its own standalone 60-day reminder, staggered by whenever it
+happened to be added - which meant tracking up to eleven different dates
+scattered across a couple of weeks. Replaced with a single recurring
+scheduled task (see the account's scheduled task list) that fires every 60
+days, starting 2026-11-22, and re-verifies *every* `publishedschedule`
+station in one pass instead of one at a time. Each firing: reads the
+current `RADIO_STATIONS` array in `src/index.js` to find every station with
+`provider: 'publishedschedule'`, re-visits each one's live schedule
+page(s), re-runs the same extraction method used when that station was
+originally transcribed, diffs the result against its
+`src/radioSchedules/*.js` file, and reports back anything that's changed -
+whether that's the schedule content itself or the page's underlying
+markup/structure (which would mean the extraction script needs revisiting,
+not just the data). Individual stations below no longer carry their own
+re-check date; see each station's own notes for what to diff against and
+any station-specific quirks (page structure, known source-side
+inconsistencies) worth keeping in mind when re-verifying it specifically.
 
 ---
 
@@ -211,7 +222,7 @@ not just the data.
 - `streamUrl` (`https://ice23.securenetsystems.net/KXGRFM`) confirmed
   live/playable 2026-09-10 - independent of the dead XML metadata feed that
   originally got this station rejected (see `radio-station-providers-notes.md`).
-- 60-day re-check reminder: **2026-11-09**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### WJWD / WJCZ / WTZY (Marshall, WI - Calvary Radio Network)
 
@@ -340,7 +351,7 @@ Third station wired up on this provider, 2026-09-17. Data lives in
   (`https://enduringwordradio.com/_astro/logo.9ba32d78_2nBtmL.svg`) couldn't
   be downloaded directly (blocked by the org's egress policy) - Larry to
   supply the file directly, same as GraceFM/WJWD's source images.
-- 60-day re-check reminder: **2026-11-16**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### KGPS "The Way" (Kingman, AZ)
 
@@ -422,7 +433,7 @@ Fourth station wired up on this provider, 2026-09-18. Data lives in
   no soft-edge halo to worry about) and given the same shadow-free,
   rounded-square black treatment as GraceFM/WJWD/KEWR's icons, mark scaled
   to the same ~80% of frame.
-- 60-day re-check reminder: **2026-11-17**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### God's Way Radio (Miami, FL)
 
@@ -478,7 +489,7 @@ Fifth station wired up on this provider, 2026-09-18. Data lives in
   to be near-white. Given the same shadow-free, rounded-square black
   treatment as the other publishedschedule icons, mark scaled to the same
   ~80% of frame.
-- 60-day re-check reminder: **2026-11-17**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### KKJC (McMinnville, OR)
 
@@ -552,7 +563,7 @@ Sixth station wired up on this provider, 2026-09-20. Data lives in
   own dark gray/blue tones, so no soft-edge halo to worry about), then
   resized to 512x512 / 128x128 to match every other station's icon
   dimensions.
-- 60-day re-check reminder: **2026-11-19**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### KFLK "The Flock" (Minot, ND)
 
@@ -624,7 +635,7 @@ Seventh station wired up on this provider, 2026-09-21. Data lives in
   was padded onto a transparent 500x500 canvas before the white-removal
   flood fill and the 512x512 / 128x128 resize, to avoid squashing the
   circular mark into an oval.
-- 60-day re-check reminder: **2026-11-20**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### WXMB (Myrtle Beach, SC)
 
@@ -680,7 +691,7 @@ Eighth station wired up on this provider, 2026-09-21. Data lives in
   replicating the top/bottom edge rows into the new margin (instead of
   leaving it transparent, which would show as a seam against the badge's
   own background), then resized to 512x512 / 128x128 via LANCZOS.
-- 60-day re-check reminder: **2026-11-20**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### Crossway Radio (Dover, NJ)
 
@@ -736,7 +747,7 @@ Ninth station wired up on this provider, 2026-09-22. Data lives in
   design with its own full-bleed blue gradient background - no
   flood-fill, no frame, no padding needed, just a straight LANCZOS resize
   to 512x512 / 128x128.
-- 60-day re-check reminder: **2026-11-21**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### Faith FM (Eastern Long Island, NY)
 
@@ -806,7 +817,7 @@ Tenth station wired up on this provider, 2026-09-22. Data lives in
   background - needed the same border-connected white-flood-fill
   treatment as KFLK/KKJC, then padded onto a transparent square canvas
   before the 512x512 / 128x128 resize (the source wasn't square).
-- 60-day re-check reminder: **2026-11-21**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
 ### WJCX (Bangor, ME)
 
@@ -860,4 +871,4 @@ Eleventh station wired up on this provider, 2026-09-23. Data lives in
   (not a removable white background, and not square - 457x368) - padded
   onto a black square canvas (centered) rather than flood-filled, then
   resized to 512x512 / 128x128.
-- 60-day re-check reminder: **2026-11-22**.
+- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.

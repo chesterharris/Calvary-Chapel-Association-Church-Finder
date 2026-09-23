@@ -3575,6 +3575,29 @@ const RADIO_STATIONS = [
     // square already (source was 457x368, not square).
     staticCoverUrl: '/wjcx-icon.png',
     staticCoverThumbUrl: '/wjcx-icon-128.png'
+  },
+  {
+    // Brand-new station, not a previous rejection/removal. Larry supplied
+    // the station's own site, its Cirrus Encore player page
+    // (streamdb3web.securenetsystems.net/cirrusencore/KBLD - same template
+    // as Hope FM/WVBV and WLWG/WJLW above), and a live sample of the
+    // now-playing XML feed showing real, populated title/artist/duration
+    // fields - no dead-feed investigation needed here, unlike most other
+    // stations added recently. Independently reloaded the player page
+    // ~6 minutes after Larry's sample and got a genuinely different
+    // title/artist ("Only One Name" / Jordan Colle vs. the original
+    // "Altar" / Forrest Frank), confirming the feed updates in real time
+    // rather than being frozen. `streamUrl` taken from the player page's
+    // own `streamSrcDB` variable, same convention as every other station
+    // in this section. "Bold Christian Radio" is the on-air branding.
+    id: 'kbld',
+    displayName: 'KBLD',
+    cityState: 'Kennewick, WA',
+    homePage: 'https://www.kbld.com/',
+    provider: 'securenetsystems',
+    subdomain: 'streamdb3web.securenetsystems.net',
+    callSign: 'KBLD',
+    streamUrl: 'https://ice7.securenetsystems.net/KBLD'
   }
 ];
 

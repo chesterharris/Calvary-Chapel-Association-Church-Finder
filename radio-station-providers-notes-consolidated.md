@@ -307,6 +307,30 @@ everyone else, confirming it either way. See
 notes (including its single combined Saturday/Sunday "weekend" schedule)
 and the transcription itself in `src/radioSchedules/wjcx.js`.
 
+**KBLD "Bold Christian Radio" (Kennewick, WA)** — added 2026-09-23, first
+station in a while added straight onto this provider with no dead-feed
+investigation needed. Larry supplied the station's own site
+(`kbld.com`), the Cirrus Encore player page
+(`streamdb3web.securenetsystems.net/cirrusencore/KBLD` - same template as
+Hope FM/WVBV and WLWG/WJLW above, so `subdomain`/`callSign` didn't need
+separate discovery), and a live sample of the now-playing XML feed with
+real, populated `<title>`/`<artist>`/`<duration>` fields. Independently
+re-loaded the player page about six minutes after Larry's sample and got a
+genuinely different title/artist pair back ("Only One Name" / Jordan Colle,
+vs. the original "Altar" / Forrest Frank) - straightforward confirmation
+the feed updates in real time rather than being stale/frozen, without
+needing the `programStartTS`-staleness workaround WXMB/KGPS/etc. required.
+`streamUrl` (`https://ice7.securenetsystems.net/KBLD`) taken from the
+player page's own `streamSrcDB` variable, same convention as every other
+station in this section - notably the same `ice7` edge host as WJCX above,
+different subdomain (`streamdb3web` vs. WJCX's odd no-subdomain case), a
+reminder that the `ice` number and the metadata subdomain are still
+unrelated to each other. No logo supplied yet - `staticCoverUrl`/
+`staticCoverThumbUrl` omitted for now (fine for a live-metadata
+`securenetsystems` station; the mini-player just has no cover art image
+until either Larry supplies a static badge or a track happens to populate
+the XML's own `<cover>` field, which was empty in the sample provided).
+
 ---
 
 ## Provider: `icecast`
