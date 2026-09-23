@@ -20,6 +20,7 @@ import { KFLK_SCHEDULE } from './radioSchedules/kflk.js';
 import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
 import { FAITHFM_SCHEDULE } from './radioSchedules/faithfm.js';
+import { WJCX_SCHEDULE } from './radioSchedules/wjcx.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3540,6 +3541,40 @@ const RADIO_STATIONS = [
     // last two stations' already-finished badges).
     staticCoverUrl: '/faithfm-icon.png',
     staticCoverThumbUrl: '/faithfm-icon-128.png'
+  },
+  {
+    // Brand-new station, not a previous rejection/removal - Larry supplied
+    // the station's own radio page, its Subsplash "Listen Now" link, and
+    // the WJCX logo directly. The stream (https://ice7.securenetsystems.net
+    // /WJCX, confirmed via the Subsplash player's <audio> element) is a
+    // SecureNetSystems stream, but the now-playing metadata pipeline is
+    // dead two different ways at once: the v5 player's own inline config
+    // sets polling.enabled = false for this station, and calling the
+    // now-playing endpoint by hand anyway still returns the same
+    // HTTP-200-with-error-body "system cannot find the file specified" seen
+    // for several other SecureNetSystems stations in this file. Went
+    // straight to the published schedule instead - see
+    // src/radioSchedules/wjcx.js for the full transcription notes,
+    // including the site's single combined Saturday/Sunday "weekend"
+    // schedule (unlike most stations here, which publish the two
+    // separately) and the "Bil Gallatin"/"Bil Galatin" spelling
+    // canonicalization.
+    id: 'wjcx',
+    displayName: 'WJCX',
+    cityState: 'Bangor, ME',
+    homePage: 'https://ccbangor.org/radio',
+    provider: 'publishedschedule',
+    schedule: WJCX_SCHEDULE,
+    streamUrl: 'https://ice7.securenetsystems.net/WJCX',
+    // Static station logo, not per-program art - same reasoning as the
+    // other publishedschedule stations' staticCoverUrl above. Larry's own
+    // "WJCX / Life Begins at the Cross" badge - solid black background
+    // filling the whole frame (not a removable white background), so this
+    // got the same pad-to-square-then-resize treatment as WXMB/Crossway's
+    // already-finished badges, just padded onto black instead of being
+    // square already (source was 457x368, not square).
+    staticCoverUrl: '/wjcx-icon.png',
+    staticCoverThumbUrl: '/wjcx-icon-128.png'
   }
 ];
 

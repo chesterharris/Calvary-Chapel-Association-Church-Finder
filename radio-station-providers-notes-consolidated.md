@@ -281,6 +281,32 @@ on this one. This is now the third distinctly different "Grace
 FM"/"GraceFM"-branded station in this file (see KXGRFM and KVNG above) -
 go by id/subdomain/callSign, not the branding, when in doubt.
 
+**WJCX (Bangor, ME)** — investigated and added via the `publishedschedule`
+provider instead, 2026-09-23. Larry supplied the station's own radio page
+and Subsplash "Listen Now" link rather than a player page or XML feed
+directly; `streamUrl` (`https://ice7.securenetsystems.net/WJCX`) was found
+by inspecting the Subsplash embed's `<audio>` element (`currentSrc`), which
+confirmed this is a SecureNetSystems stream even though Subsplash itself
+isn't a SecureNetSystems property. **New flavor of dead feed, worth noting
+for future stations**: navigating directly to this station's own `/v5/`
+player page (`https://radio.securenetsystems.net/v5/WJCX` - notably no
+per-account `streamdbXweb.securenetsystems.net` redirect for this one,
+unlike every other `/v5/` station in this file) shows a generic "Live
+stream" title with no now-playing polling ever firing at all (confirmed via
+live Network traffic, same technique as KGPS). Reading the page's own
+`v5.min.js` and inline globals explains why: `stationCallUrl` here is just
+`radio.securenetsystems.net` itself (not a distinct `streamdbXweb` host),
+and the page sets `polling.enabled = false` for this station specifically -
+i.e. the player is configured to never even attempt a metadata fetch, a
+more deliberate-looking dead end than KGPS/GraceFM's "attempted but
+soft-404'd" pattern. Called the endpoint by hand anyway
+(`https://radio.securenetsystems.net/player_status_update/WJCX.xml`) and
+got the same "The system cannot find the file specified" soft-404 body as
+everyone else, confirming it either way. See
+`radio-station-published-schedule-notes.md` for WJCX's full transcription
+notes (including its single combined Saturday/Sunday "weekend" schedule)
+and the transcription itself in `src/radioSchedules/wjcx.js`.
+
 ---
 
 ## Provider: `icecast`

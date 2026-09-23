@@ -807,3 +807,57 @@ Tenth station wired up on this provider, 2026-09-22. Data lives in
   treatment as KFLK/KKJC, then padded onto a transparent square canvas
   before the 512x512 / 128x128 resize (the source wasn't square).
 - 60-day re-check reminder: **2026-11-21**.
+
+### WJCX (Bangor, ME)
+
+Eleventh station wired up on this provider, 2026-09-23. Data lives in
+`src/radioSchedules/wjcx.js`.
+
+- Brand-new station, not a previous rejection or removal - Larry supplied
+  the station's own radio page (`https://ccbangor.org/radio`), its
+  Subsplash "Listen Now" link, and the WJCX logo directly.
+- Now-playing: dead two independent ways, not just one. The stream is
+  SecureNetSystems (`https://ice7.securenetsystems.net/WJCX`, confirmed via
+  the Subsplash player's `<audio>` element), but this station's own v5
+  player page (`https://radio.securenetsystems.net/v5/WJCX`) sets
+  `polling.enabled = false` in its own inline config - it never even
+  attempts a metadata fetch, unlike the usual "attempted but empty/dead"
+  cases elsewhere in this file. Calling the now-playing endpoint by hand
+  anyway (mirroring the page's own `getNowPlaying()`, built from its
+  `stationCallUrl`/`stationCallSign` globals - `stationCallUrl` here is
+  just `radio.securenetsystems.net` itself, not a distinct
+  `streamdbXweb.securenetsystems.net` host like every other
+  SecureNetSystems entry in this file) still returns the same
+  HTTP-200-with-error-body "The system cannot find the file specified"
+  seen for GraceFM/WJWD/KEWR/KGPS/WAYGLP/WXMB. Two dead ends independently,
+  so this went straight to the published schedule from the start.
+- Source: `https://ccbangor.org/radio`'s own "WEEKDAY SCHEDULE" and
+  "WEEKEND SCHEDULE" accordions - clean HTML (`<b>TIME – PROGRAM</b>` /
+  `HOST – <a>link</a>` pairs), extracted via the raw `outerHTML` rather
+  than the rendered accessibility tree (which visually jumbles adjacent
+  entries together in a way that's easy to misread by hand). Both grids
+  verified script-side: every day's entries have distinct start times and
+  sum to exactly 1440 minutes.
+  - **The site only publishes one combined "weekend" schedule**, not
+    separate Saturday and Sunday pages like most stations in this file.
+    Modeled by pointing both the `saturday` and `sunday` schedule fields at
+    the same array.
+  - **The weekend grid's 1:00 PM "Focus On The Family" slot has no host
+    name in the source** - its link goes straight from the program name to
+    the `<a>` tag with nothing in between, unlike every other row. Left as
+    an empty host rather than guessed; unlike Faith FM's missing Saturday
+    host cell, there's no other on-site mention of this program to
+    cross-reference against.
+  - **Spelling inconsistency, canonicalized**: the weekday grid's 6:00 AM
+    and 6:00 PM "Walk In The Light" entries (same program, same
+    `ccfingerlakes.org` link) spell the host "Bil Gallatin" and "Bil
+    Galatin" respectively - used "Bil Gallatin" (the first occurrence)
+    throughout.
+- Timezone: `America/New_York` (Bangor, ME - Eastern).
+- Logo: `staticCoverUrl: '/wjcx-icon.png'` / `staticCoverThumbUrl:
+  '/wjcx-icon-128.png'`, supplied 2026-09-23 - Larry's "WJCX / Life Begins
+  at the Cross" badge. Solid black background filling the whole frame
+  (not a removable white background, and not square - 457x368) - padded
+  onto a black square canvas (centered) rather than flood-filled, then
+  resized to 512x512 / 128x128.
+- 60-day re-check reminder: **2026-11-22**.
