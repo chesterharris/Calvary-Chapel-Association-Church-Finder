@@ -1537,6 +1537,75 @@ primary title/artist data from Triton itself.
 
 ---
 
+## Provider: `citrus3`
+
+**Discovered while adding WorshipLifeRadio (San Clemente, CA - a Calvary
+Chapel San Clemente ministry).** citrus3 (`citrus3.com`) is a multi-tenant
+radio hosting panel - the URLs are per-station/per-account, not a shared
+constant, similar in shape to SecureNetSystems/RadioKing above.
+
+**Station fields needed:**
+- `panelHost` - the host:port serving this station's own citrus3 panel
+  (e.g. `fast.citrus3.com:2020` for WorshipLifeRadio). Confirmed this
+  varies per account/node, not just per station name: a totally different
+  station on the same platform, WJWD, lives on `lunar.citrus3.com:8034` -
+  always take this from the station's own player page URL, never assume
+  it's shared.
+- `slug` - the station's own path segment on that panel host (e.g.
+  `worshipliferadio`), used in both endpoints below.
+
+**Now-playing endpoint:**
+`https://{panelHost}/AudioPlayer/{slug}/playerInfo`
+
+**Response shape (JSON) - confirmed via a real, live fetch:**
+```json
+{"connections":2,"nowplaying":"Rivers & Robots - We Have Overcome"}
+```
+- One combined `"Artist - Title"` string (not separate fields) - split on
+  the first literal `" - "` (space-hyphen-space). A bare title with no
+  artist just falls through to the whole string as title, same fallback
+  shape used elsewhere in this file.
+- `connections` is a live listener count, not display text - present but
+  unused.
+
+**Cover art needs a SEPARATE call** - easy to assume wrongly by analogy
+with `radioboss`'s single-endpoint pattern, so worth calling out clearly:
+`https://{panelHost}/AudioPlayer/{slug}/albumCover`
+```json
+{"coverImage":"https://is1-ssl.mzstatic.com/.../100x100bb.jpg"}
+```
+This is a tiny JSON wrapper, **not a raw image** - confirmed by actually
+reading the response body (`content-type: application/json`, 158 bytes)
+rather than assuming from the endpoint name. The URL inside is an Apple
+Music/iTunes artwork CDN link at the default `100x100bb` size - the same
+CDN `triton`'s own iTunes-lookup fallback hits above, just handed to us
+directly this time instead of having to search for it by title/artist.
+Left at `100x100bb` rather than upsized like `triton`'s `600x600bb` swap,
+since it's not yet confirmed every size variant exists for every track
+this station plays (spoken-word teaching covers in particular, which
+aren't real iTunes songs). Treated as a nice-to-have, same reasoning as
+`triton`'s iTunes lookup - a failed/malformed `albumCover` response
+shouldn't fail the primary title/artist result.
+
+**Underlying stream server confirmed to be Icecast-KH** - the panel's own
+`playerConfig` endpoint (`https://{panelHost}/api/player/{slug}/playerConfig`
+or similar found via DevTools Network while the embedded player was open)
+returns `"type":"icecast_kh"` and a `streamAddress`/`defaultMountUrl`
+pair (`https://fast.citrus3.com:8254` / `stream` for WorshipLifeRadio, so
+`streamUrl` is `https://fast.citrus3.com:8254/stream`). Despite that,
+`playerInfo`'s now-playing shape here is citrus3's own custom wrapper, NOT
+the standard `status-json.xsl` the existing `icecast` provider already
+parses - hence a brand-new provider rather than reusing it.
+
+**Confirmed genuinely live two ways:** a raw `fetch()` HEAD-style check
+against the stream URL itself returned `content-type: audio/aac` with
+live-stream (no-cache) headers, and a screenshot taken a few minutes after
+Larry's own sample showed a different track already playing.
+
+**Stations currently configured:** WorshipLifeRadio.
+
+---
+
 ## Providers we looked at and deliberately did NOT build
 
 Not every station's metadata is worth chasing. These are confirmed dead

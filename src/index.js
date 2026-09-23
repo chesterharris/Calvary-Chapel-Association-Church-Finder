@@ -2710,6 +2710,29 @@ const RADIO_CACHE_VERSION = 1;
 //                 only found by watching actual Network > Media traffic
 //                 while the embedded player was playing.
 //
+//   citrus3 stations also need:
+//   panelHost   - the host:port serving this station's own citrus3 panel
+//                 (e.g. "fast.citrus3.com:2020") - a multi-tenant platform,
+//                 so this varies per station/account, NOT a shared constant
+//                 (WorshipLifeRadio uses fast.citrus3.com:2020; a totally
+//                 different station on the same platform, WJWD, uses
+//                 lunar.citrus3.com:8034 - always confirm per station).
+//   slug        - the station's own path segment on that panel host (e.g.
+//                 "worshipliferadio"), used in both endpoints below.
+//                 Now-playing: https://{panelHost}/AudioPlayer/{slug}/
+//                 playerInfo -> {"connections":N,"nowplaying":"Artist -
+//                 Title"} (one combined string, split on the first literal
+//                 " - "). Cover art needs a SEPARATE call:
+//                 https://{panelHost}/AudioPlayer/{slug}/albumCover ->
+//                 {"coverImage":"<url>"} (a JSON wrapper around an iTunes/
+//                 Apple Music CDN artwork URL - NOT a raw image itself, easy
+//                 to assume wrongly by analogy with RadioBoss). Confirmed via
+//                 the panel's own playerConfig response that the underlying
+//                 stream server is Icecast-KH ("type":"icecast_kh"), but the
+//                 now-playing shape here is citrus3's own custom wrapper, not
+//                 the standard status-json.xsl the existing icecast provider
+//                 parses - hence a separate provider rather than reusing it.
+//
 //   publishedschedule stations also need:
 //   schedule    - a { timezone, saturday, sunday, weekday,
 //                 weekdayOverridesByDay } object (see one per station under
@@ -3612,6 +3635,23 @@ const RADIO_STATIONS = [
     // was added with (<cover> empty).
     staticCoverUrl: '/kbld-icon.png',
     staticCoverThumbUrl: '/kbld-icon-128.png'
+  },
+  {
+    id: 'worshipliferadio',
+    displayName: 'WorshipLifeRadio',
+    cityState: 'San Clemente, CA',
+    homePage: 'https://worshipliferadio.com/',
+    provider: 'citrus3',
+    panelHost: 'fast.citrus3.com:2020',
+    slug: 'worshipliferadio',
+    streamUrl: 'https://fast.citrus3.com:8254/stream',
+    // Static station logo (Larry's teal/blue wave-and-cross badge - plain
+    // white background filling the whole frame, padded onto a white square
+    // canvas rather than cropped, then resized), used as a FALLBACK only -
+    // same live-art-wins priority as KBLD, since this station's own citrus3
+    // feed can return real per-track album art via its albumCover endpoint.
+    staticCoverUrl: '/worshipliferadio-icon.png',
+    staticCoverThumbUrl: '/worshipliferadio-icon-128.png'
   }
 ];
 
@@ -4299,6 +4339,12 @@ const RADIO_PROVIDERS = {
     // not required by the API itself).
     fetchAndParse: fetchTritonNowPlaying
   },
+  citrus3: {
+    // See fetchCitrus3NowPlaying above for the full explanation -
+    // fetchAndParse needed because cover art is a second HTTP call keyed by
+    // station.panelHost/station.slug, same shape of reason as radioboss.
+    fetchAndParse: fetchCitrus3NowPlaying
+  },
   publishedschedule: {
     // See fetchPublishedScheduleNowPlaying below (defined alongside the
     // other fetchAndParse providers) for the full explanation -
@@ -4505,6 +4551,73 @@ async function fetchTritonNowPlaying(station) {
       // Cover art is a nice-to-have; a failed/timed-out iTunes lookup
       // shouldn't fail the whole now-playing fetch.
     }
+  }
+
+  return { title: title, artist: artist, coverUrl: coverUrl };
+}
+
+// Citrus3 (fast.citrus3.com and similar multi-tenant panel hosts) - a
+// hosted Icecast-KH platform (confirmed via its own playerConfig response,
+// "type":"icecast_kh"), but its now-playing endpoint is a small custom JSON
+// wrapper, not the standard Icecast status-json.xsl shape the plain
+// `icecast` provider above already handles - hence a separate provider
+// rather than reusing that one. Two station-specific fields needed:
+// `panelHost` (the host:port serving this station's AudioPlayer panel -
+// confirmed via WJWD's own citrus3 stream living on a completely different
+// subdomain/port, "lunar.citrus3.com:8034", that this is a multi-tenant
+// service where each account gets its own node, not a single shared host)
+// and `slug` (the station's own path segment, e.g. "worshipliferadio").
+//
+// Needs fetchAndParse (like radioboss/triton above) because getting cover
+// art takes a second HTTP call to a different endpoint keyed by the same
+// slug - a plain parse(rawText) never sees station.panelHost/station.slug
+// to build that second URL.
+//
+// playerInfo shape (confirmed live): {"connections":2,"nowplaying":
+// "Rivers & Robots - We Have Overcome"} - title/artist arrive pre-combined
+// as a single "Artist - Title" string (confirmed against both a music
+// example and a teaching example, "Dr. J. Vernon McGee - Exodus 19:4-25",
+// seen moments apart on the same live station - format holds for both).
+// Split on the first literal " - " (space-hyphen-space); a bare Bible
+// reference like "19:4-25" has no spaces around its internal hyphen so
+// this is safe. No separate connections/listener-count field is surfaced
+// anywhere in the app today - available if that's ever wanted.
+//
+// albumCover shape (confirmed live): NOT a raw image - a tiny JSON wrapper
+// {"coverImage":"https://is1-ssl.mzstatic.com/.../100x100bb.jpg"}, an Apple
+// Music/iTunes artwork CDN URL at the default 100x100 size (same CDN
+// Triton's own iTunes-lookup fallback above hits, just handed to us
+// directly this time instead of having to search for it). Left at
+// 100x100bb rather than upsized like Triton's 600x600bb swap, since it's
+// not yet confirmed every size variant exists for every track this station
+// plays (spoken-word teaching covers in particular, which aren't real
+// iTunes songs). Treated as a nice-to-have, same reasoning as Triton's
+// iTunes lookup - a failed/malformed albumCover response shouldn't fail
+// the primary title/artist result.
+async function fetchCitrus3NowPlaying(station) {
+  const npUrl = 'https://' + station.panelHost + '/AudioPlayer/' + station.slug + '/playerInfo';
+  const npRes = await fetch(npUrl);
+  if (!npRes.ok) throw new Error('Station ' + station.displayName + ' now-playing endpoint returned ' + npRes.status);
+  const npData = await npRes.json();
+
+  const combined = npData && typeof npData.nowplaying === 'string' ? npData.nowplaying.trim() : '';
+  const sepIndex = combined.indexOf(' - ');
+  const artist = sepIndex !== -1 ? combined.slice(0, sepIndex).trim() : '';
+  const title = sepIndex !== -1 ? combined.slice(sepIndex + 3).trim() : combined;
+
+  let coverUrl = null;
+  try {
+    const coverUrlEndpoint = 'https://' + station.panelHost + '/AudioPlayer/' + station.slug + '/albumCover';
+    const coverRes = await fetch(coverUrlEndpoint);
+    if (coverRes.ok) {
+      const coverData = await coverRes.json();
+      if (coverData && typeof coverData.coverImage === 'string' && coverData.coverImage) {
+        coverUrl = coverData.coverImage;
+      }
+    }
+  } catch (e) {
+    // Cover art is a nice-to-have; a failed/malformed albumCover response
+    // shouldn't fail the whole now-playing fetch.
   }
 
   return { title: title, artist: artist, coverUrl: coverUrl };
