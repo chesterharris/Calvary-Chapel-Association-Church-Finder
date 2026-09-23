@@ -878,6 +878,24 @@ Eleventh station wired up on this provider, 2026-09-23. Data lives in
 Twelfth station wired up on this provider, 2026-09-23. Data lives in
 `src/radioSchedules/kyyr.js`.
 
+**REMOVED 2026-09-23, the same day it was added.** Not a metadata/schedule
+problem - the schedule and logo below are fine and kept as-is for a fast
+re-add. The *stream itself* doesn't reliably play: see the "Stream" note
+below for the mixed-content saga (plain-HTTP URL blocked by the browser,
+the platform's own HTTPS-safe replacement returning a persistent 502).
+Also see the **UPDATE 2026-09-23** note on "KYYR-LP" under the `icecast`
+provider in `radio-station-providers-notes-consolidated.md` - this is now
+the *second* independent hosting platform this station has failed to play
+reliably over HTTPS on, which is a real pattern, not a one-off fluke.
+Larry emailed the station directly asking their radio tech to check the
+streamingpulse.com relay. **To re-add**: restore the `import { KYYR_SCHEDULE }
+from './radioSchedules/kyyr.js';` line and the `kyyr` entry in
+`RADIO_STATIONS` (both removed from `src/index.js`, file itself untouched),
+confirm `https://us9.streamingpulse.com/stream/CalvaryYakima` actually
+plays first, then run through the consolidated 60-day schedule check once
+before trusting the schedule data is still current (it wasn't re-verified
+at removal time, only at initial transcription).
+
 - Brand-new station - Larry supplied the station's own site
   (`https://www.calvaryyakima.com/`), its raw stream URL, and the KYYR logo
   directly. Unlike every other station on this provider, **no now-playing
@@ -885,11 +903,28 @@ Twelfth station wired up on this provider, 2026-09-23. Data lives in
   one needed to be "created internally from Programming schedule" from the
   start, so this went straight to the published schedule without a
   separate dead-feed investigation.
-- Stream: `http://us9.streamingpulse.com:7107/xstream` (same
-  streamingpulse.com platform Faith FM uses, different node) - confirmed
-  genuinely live by loading the raw stream URL itself and reading its own
-  `<video>` element directly (`paused: false`, `readyState: 4`,
-  `currentTime` advancing).
+- Stream: originally wired up with `http://us9.streamingpulse.com:7107/xstream`
+  (same streamingpulse.com platform Faith FM uses, different node) - Larry's
+  own find, confirmed genuinely live by loading the raw stream URL itself
+  and reading its own `<video>` element directly (`paused: false`,
+  `readyState: 4`, `currentTime` advancing). **Changed 2026-09-23**, the
+  same day, after Larry reported it wasn't playing from the site itself
+  even though the raw URL played fine on its own - the raw URL is plain
+  HTTP, and this site is HTTPS, so loading it as the mini player's `<audio>`
+  src was being silently blocked by the browser's mixed-content policy
+  (confirmed: the element's own state stayed frozen at `paused: false`,
+  `readyState: 0`, `currentTime: 0`, `networkState: 2` indefinitely - never
+  even attempted a network request). Found the platform's own HTTPS-safe
+  mount by tracing the station's real player chain -
+  `https://www.calvaryyakima.com/bridge-of-hope`'s embedded iframe
+  (`https://us7.maindigitalstream.com/3163/`) uses
+  `https://us9.streamingpulse.com/stream/CalvaryYakima` as its own `<audio>`
+  src - and switched `streamUrl` to that. **Caveat**: that endpoint was
+  itself returning a 502 "Failed to fetch stream" as of this same check
+  (confirmed 3x a few seconds apart) - a problem on streamingpulse's/the
+  station's own relay, true of their own official player at the same
+  moment, unrelated to this fix. Still the right URL going forward; worth a
+  quick real-world playback check once it's confirmed back up.
 - Source: `https://www.calvaryyakima.com/radio-playlist` - plain text
   under four section headings ("Week Day AM", "Week Day PM", "Weekend AM",
   "Weekend PM"), each internally a 12:00-to-~11:30 range with no AM/PM
@@ -927,4 +962,7 @@ Twelfth station wired up on this provider, 2026-09-23. Data lives in
   inside a 311x262 frame) - tightly cropped to the visible banner (8px
   margin) and centered on a white square canvas before resizing, same
   treatment as WTTP's logo.
-- Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
+- Not currently in the consolidated 60-day schedule check rotation while
+  removed - that sweep only walks stations actually present in
+  `RADIO_STATIONS`. Re-add it to that rotation implicitly just by
+  re-adding the station itself.

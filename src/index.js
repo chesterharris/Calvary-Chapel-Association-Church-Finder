@@ -21,7 +21,10 @@ import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
 import { FAITHFM_SCHEDULE } from './radioSchedules/faithfm.js';
 import { WJCX_SCHEDULE } from './radioSchedules/wjcx.js';
-import { KYYR_SCHEDULE } from './radioSchedules/kyyr.js';
+// KYYR_SCHEDULE import removed 2026-09-23 along with the station itself -
+// see the comment at the end of RADIO_STATIONS. The data file
+// (src/radioSchedules/kyyr.js) is untouched; re-add this import when the
+// station is re-added.
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -3665,28 +3668,15 @@ const RADIO_STATIONS = [
     // feed can return real per-track album art via its albumCover endpoint.
     staticCoverUrl: '/worshipliferadio-icon.png',
     staticCoverThumbUrl: '/worshipliferadio-icon-128.png'
-  },
-  {
-    // Brand-new station - Larry supplied the site, raw stream URL, and
-    // logo directly, and explicitly asked for this to be built from the
-    // published schedule from the start (no now-playing endpoint was ever
-    // given or looked for). See src/radioSchedules/kyyr.js for the full
-    // transcription notes, including the AM/PM section-time modeling and
-    // the Saturday/Sunday "Live Service" override slots.
-    id: 'kyyr',
-    displayName: 'KYYR',
-    cityState: 'Yakima, WA',
-    homePage: 'https://www.calvaryyakima.com/',
-    provider: 'publishedschedule',
-    schedule: KYYR_SCHEDULE,
-    streamUrl: 'http://us9.streamingpulse.com:7107/xstream',
-    // Static "KYYR / The Bridge" logo (Larry's own banner - a wide teal
-    // cityscape graphic on a plain white background that doesn't reach the
-    // corners; tightly cropped to the visible banner and centered on a
-    // white square canvas before resizing, same treatment as WTTP's logo).
-    staticCoverUrl: '/kyyr-icon.png',
-    staticCoverThumbUrl: '/kyyr-icon-128.png'
   }
+  // KYYR "The Bridge of Hope" (Yakima, WA) was added here 2026-09-23, then
+  // REMOVED the same day - the stream itself doesn't reliably play over
+  // HTTPS (mixed-content block on the plain-HTTP URL; the platform's own
+  // HTTPS-safe replacement returned a persistent 502). Schedule data and
+  // logo are kept on disk (src/radioSchedules/kyyr.js, public/kyyr-icon*.png)
+  // for a fast re-add once Larry hears back from the station's radio tech.
+  // Full story: "KYYR 'The Bridge of Hope' (Yakima, WA)" in
+  // radio-station-published-schedule-notes.md.
 ];
 
 // Extracts <title>, <artist>, and <cover> from the small XML feed each

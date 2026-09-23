@@ -505,12 +505,21 @@ currently shows a generic automation placeholder ("KXGR PRODUCTION")
 rather than real show info most of the time - worth periodically checking
 whether it starts reflecting real programming. WRBP 92.5FM (WI) was added,
 then **removed** after confirming a hard mixed-content block in production
-(see gotcha above). KYYR-LP ("The Bridge of Hope FM 97.9," Yakima WA) was **never added** after confirming
-the identical hard mixed-content failure - notably, the station's *own*
+(see gotcha above). KYYR-LP ("The Bridge of Hope FM 97.9," Yakima WA) was **never added** on THIS
+provider after confirming the identical hard mixed-content failure on an
+Icecast host found for it at the time - notably, the station's *own*
 website's player also failed to load the stream with the same Mixed
 Content / `ERR_CONNECTION_CLOSED` error in DevTools, strong outside
 confirmation the streaming port itself has no TLS support at all, not
-something specific to how we'd embed it. KQIP (Chico, CA) - straightforward
+something specific to how we'd embed it. **UPDATE 2026-09-23: KYYR was
+later added anyway, via `publishedschedule` on a completely different
+platform (streamingpulse.com, supplied fresh by Larry) - then removed
+again the same day for the same underlying mixed-content family of
+problem.** See "KYYR 'The Bridge of Hope' (Yakima, WA)" in
+`radio-station-published-schedule-notes.md` for the full story - this is
+now the second independent confirmation that this station's streaming
+infrastructure doesn't reliably support HTTPS embedding, across two
+unrelated hosting platforms. KQIP (Chico, CA) - straightforward
 single-mount Icecast setup (`host: 'kqip-streamt.ccchico.com'`,
 `mount: 'stream.mp3'`), notable only for needing `noArtistSplit: true`
 (see gotcha above) since its teaching-content titles are scripture
