@@ -325,11 +325,30 @@ player page's own `streamSrcDB` variable, same convention as every other
 station in this section - notably the same `ice7` edge host as WJCX above,
 different subdomain (`streamdb3web` vs. WJCX's odd no-subdomain case), a
 reminder that the `ice` number and the metadata subdomain are still
-unrelated to each other. No logo supplied yet - `staticCoverUrl`/
-`staticCoverThumbUrl` omitted for now (fine for a live-metadata
-`securenetsystems` station; the mini-player just has no cover art image
-until either Larry supplies a static badge or a track happens to populate
-the XML's own `<cover>` field, which was empty in the sample provided).
+unrelated to each other.
+
+**UPDATE 2026-09-23: logo added, and the coverUrl/coverThumbUrl priority
+rule changed because of it.** Larry supplied a square, already-finished
+badge (teal/orange "KBLD Bold Christian Radio" circular mark) - straight
+resize, no flood-fill or padding needed. Every other station with
+`staticCoverUrl` set is on `publishedschedule` (`coverUrl` is always
+`null` there, so the static badge is effectively the only thing that can
+ever show), but KBLD has a genuinely live feed whose `<cover>` field is
+only sometimes populated (empty in the original add-time sample). Simply
+setting `staticCoverUrl` the usual way would have permanently hidden any
+real per-track album art this station's feed ever sends, since the old
+rule had `staticCoverUrl` unconditionally win. Asked Larry how he wanted
+this handled; he chose to have live art preferred with the badge as a
+fallback rather than either "always show the badge" or "leave the badge
+unused." **`fetchStationNowPlaying`'s `coverUrl`/`coverThumbUrl`
+resolution order was flipped** (provider's live `coverUrl` now checked
+first, `staticCoverUrl`/`staticCoverThumbUrl` only used when it's absent)
+to support this - see the updated comments there and on the
+`staticCoverUrl`/`staticCoverThumbUrl` RADIO_STATIONS field docs. Confirmed
+this is safe for every pre-existing station: no station before KBLD had
+both `staticCoverUrl` set AND a provider capable of returning a non-null
+live `coverUrl`, so the flip can't change any existing station's rendered
+artwork, only KBLD's.
 
 ---
 

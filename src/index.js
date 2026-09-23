@@ -2723,12 +2723,15 @@ const RADIO_CACHE_VERSION = 1;
 //                 as a separate provider instead of trying to scrape a
 //                 fresh copy of the page on every poll.
 //   staticCoverUrl (optional, any provider) - a fixed image URL/path shown
-//                 in the mini player regardless of what the provider's own
-//                 parse/fetchAndParse returns for coverUrl - for a station
-//                 with a real logo but no per-track artwork source (like a
-//                 publishedschedule station, which always returns
-//                 coverUrl: null). Takes priority over the provider's own
-//                 coverUrl when both are present - see fetchStationNowPlaying.
+//                 in the mini player as a fallback when the provider's own
+//                 parse/fetchAndParse doesn't return a coverUrl for the
+//                 current track - for a station with a real logo but no
+//                 per-track artwork source (like a publishedschedule
+//                 station, which always returns coverUrl: null, so this is
+//                 effectively always shown) or a live-metadata station
+//                 whose feed only sometimes populates its own cover art
+//                 (like KBLD - see fetchStationNowPlaying). The provider's
+//                 own live coverUrl wins whenever it's actually present.
 //   staticCoverThumbUrl (optional, any provider) - a small (128x128 or
 //                 under) version of staticCoverUrl, used ONLY for the
 //                 CarPlay/Lock Screen/Control Center artwork (see the Media
@@ -3597,7 +3600,18 @@ const RADIO_STATIONS = [
     provider: 'securenetsystems',
     subdomain: 'streamdb3web.securenetsystems.net',
     callSign: 'KBLD',
-    streamUrl: 'https://ice7.securenetsystems.net/KBLD'
+    streamUrl: 'https://ice7.securenetsystems.net/KBLD',
+    // Static station logo (Larry's teal/orange "KBLD Bold Christian Radio"
+    // badge - already square, straight resize, no other processing
+    // needed), used as a FALLBACK only - unlike every publishedschedule
+    // station's staticCoverUrl, this doesn't win over live art. See the
+    // coverUrl/coverThumbUrl priority flip in fetchStationNowPlaying,
+    // made specifically for this station so it can keep showing real
+    // per-track album art from its live feed when a track has it, and
+    // only falls back to this badge on tracks like the one this station
+    // was added with (<cover> empty).
+    staticCoverUrl: '/kbld-icon.png',
+    staticCoverThumbUrl: '/kbld-icon-128.png'
   }
 ];
 
@@ -4634,19 +4648,25 @@ async function fetchStationNowPlaying(station) {
     displayName: station.displayName,
     title: parsed.title,
     artist: parsed.artist,
-    // staticCoverUrl (optional, any provider) wins over whatever the
-    // provider itself returned - see the RADIO_STATIONS field comment. Lets
-    // a station with a real logo but no per-track artwork source (like
-    // publishedschedule, which always returns coverUrl: null) show
-    // something better than a blank mini player.
-    coverUrl: station.staticCoverUrl || parsed.coverUrl || null,
+    // The provider's own live coverUrl wins whenever the current track
+    // actually has one; staticCoverUrl (optional, any provider) is the
+    // fallback for when it doesn't - see the RADIO_STATIONS field comment.
+    // For a publishedschedule station (always coverUrl: null) this means
+    // staticCoverUrl effectively always shows; for a live-metadata station
+    // like KBLD whose feed only sometimes populates <cover>, real per-track
+    // art is preferred and the static badge only fills the gaps - flipped
+    // 2026-09-23 specifically so KBLD could have both without losing real
+    // album art permanently (no other station had staticCoverUrl AND a live
+    // coverUrl source before this, so this couldn't change behavior for any
+    // pre-existing station).
+    coverUrl: parsed.coverUrl || station.staticCoverUrl || null,
     // Same idea, for the CarPlay/Lock Screen/Control Center artwork only
     // (see the Media Session integration in public/index.html) - prefers
-    // the small dedicated thumbnail when a station has one, otherwise falls
-    // back to exactly whatever coverUrl above resolved to (a provider's own
-    // live art, or nothing) rather than leaving those stations with no
-    // artwork at all.
-    coverThumbUrl: station.staticCoverThumbUrl || station.staticCoverUrl || parsed.coverUrl || null,
+    // the small dedicated thumbnail when a station has one and there's no
+    // live art for the current track, otherwise falls back to exactly
+    // whatever coverUrl above resolved to (a provider's own live art, or
+    // nothing) rather than leaving those stations with no artwork at all.
+    coverThumbUrl: parsed.coverUrl || station.staticCoverThumbUrl || station.staticCoverUrl || null,
     streamUrl: station.streamUrl,
     // Optional, hand-entered display-only fields - never shown in the
     // ticker (that only ever renders displayName + now-playing text), just
