@@ -1698,6 +1698,40 @@ or whether it's configurable per station (same "don't assume one instance
 speaks for the whole platform" caveat as Live365 above) - worth checking
 the actual response, not assuming, if another `aio-radio` station comes up.
 
+**Radiojar** - first seen via KKJC (McMinnville, OR), confirmed dead there
+(see the `publishedschedule` write-up in
+`radio-station-published-schedule-notes.md`): `https://proxy.radiojar.com/
+api/stations/{streamName}/now_playing/` returns valid JSON but with every
+field permanently null/empty. No provider was ever built for it as a
+result - not a technical dead end like Live365's gating, just genuinely
+empty metadata.
+
+**Calvary PV Radio (Puerto Vallarta, Mexico)** - investigated 2026-09-24,
+**skipped entirely, not added even via `publishedschedule`.** Larry
+supplied the station's page (`https://calvarypv.com/calvary-pv-radio/`,
+embedding a Radiojar widget, `streamName` `3mwyu51d1neuv`) and its stream
+URL directly. Confirmed the identical dead-metadata shape as KKJC at
+`https://proxy.radiojar.com/api/stations/3mwyu51d1neuv/now_playing/` -
+same all-null response. But this station has a SECOND, independent problem
+KKJC didn't have, and it's the one that actually killed it: **the stream
+itself only resolves to plain HTTP, not HTTPS.** `https://stream.radiojar.
+com/3mwyu51d1neuv` 302-redirects to a short-lived signed URL on a specific
+edge node (confirmed twice, two different edge nodes assigned across two
+separate requests - `http://n0f.radiojar.com/3mwyu51d1neuv?rj-ttl=5&rj-
+tok=...` and `http://n12.radiojar.com/...` - both plain HTTP, not just one
+unlucky edge). That's the same hard mixed-content wall that took down
+KYYR the day before - this site is HTTPS, so an `<audio>` src that
+redirects to HTTP gets silently blocked, regardless of what
+`publishedschedule` would otherwise let us do for the missing metadata.
+**Important: this does NOT mean every Radiojar station is HTTP-only** -
+KKJC's own Radiojar stream (`https://stream.radiojar.com/4q1m6fsb0k8uv`)
+was independently confirmed to resolve to a genuinely HTTPS-capable edge,
+so this is evidently a per-account/per-station Radiojar configuration, not
+a platform-wide limitation - check each one directly rather than assuming
+either way. If this station's Radiojar account is ever reconfigured for
+HTTPS delivery, it's a normal `publishedschedule` candidate at that point -
+schedule not yet transcribed, no logo processed, nothing else done here.
+
 ---
 
 ## Finding stream URLs and endpoints for a brand-new station (any provider)
