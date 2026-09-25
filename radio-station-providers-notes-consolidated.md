@@ -1631,6 +1631,67 @@ Larry's own sample showed a different track already playing.
 
 ---
 
+## Provider: `azuracast`
+
+**Discovered while adding Koinonia Radio (Hannover, Germany).** AzuraCast is
+a well-known, widely self-hosted open-source radio automation/streaming
+platform (same tier of legitimacy as Radio.co/RadioKing/Triton above, not
+something reverse-engineered from scratch) - every instance exposes the
+same public station API, no account-specific quirks to reverse-engineer.
+
+**Station fields needed:**
+- `host` - the instance's own domain (e.g. `www.koinonia-radio.de`).
+- `shortcode` - the station's own short identifier on that instance (e.g.
+  `koinonia_radio`), used in the now-playing URL.
+
+**Now-playing endpoint:**
+`https://{host}/api/nowplaying/{shortcode}`
+
+**Response shape (JSON) - confirmed via a real, live fetch, trimmed to the
+relevant part:**
+```json
+{
+  "station": {
+    "frontend": "icecast",
+    "backend": "liquidsoap",
+    "listen_url": "https://www.koinonia-radio.de/listen/koinonia_radio/radio.mp3"
+  },
+  "now_playing": {
+    "song": {
+      "artist": "KJ-52 feat. Funky",
+      "title": "Fuego",
+      "art": "https://www.koinonia-radio.de/api/station/1/art/f40cb413099757dc63326f2a.jpg"
+    }
+  }
+}
+```
+- `artist`/`title` arrive already cleanly split - no combined-string
+  parsing needed, unlike Icecast/Shoutcast/citrus3.
+- Per-track cover art (`song.art`) is right there in the same response - no
+  separate artwork call needed, unlike radioboss/citrus3/triton above.
+- The full payload is much larger than shown (station config, live-DJ
+  status, a `playing_next` entry, a `song_history` array) - all ignored,
+  we only read `now_playing.song`.
+- `station.frontend`/`station.backend` confirm the underlying stack
+  (Icecast + Liquidsoap here) but aren't used directly - `listen_url` is
+  what becomes `streamUrl`, already the correct final stream address with
+  no redirect-following or mount-guessing needed.
+
+**Confirmed genuinely live:** Larry's own captured sample showed "KJ-52
+feat. Funky - Fuego"; an independent re-fetch of the same endpoint minutes
+later returned a different track ("Supertones - escape from reason"),
+confirming the feed updates in real time rather than being frozen.
+
+**Not yet confirmed:** actual audio playback once embedded on the deployed
+(HTTPS) map page - `streamUrl` is HTTPS from the start (no KYYR/Calvary PV
+Radio-style mixed-content risk expected), but per the standard checklist
+this still needs a real playback test on the live site before considering
+the integration fully proven.
+
+**Stations currently configured:** Koinonia Radio (Hannover, Germany).
+
+---
+
 ## Providers we looked at and deliberately did NOT build
 
 Not every station's metadata is worth chasing. These are confirmed dead
