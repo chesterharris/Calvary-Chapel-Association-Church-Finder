@@ -975,6 +975,56 @@
     overflow-y: auto;
     padding: 12px 16px;
   }
+  .live-stream-stats-section {
+    flex-shrink: 0;
+    border-top: 1px solid var(--line);
+    padding: 10px 16px 14px;
+    background: rgba(47,75,60,0.06);
+    max-height: 46vh;
+    overflow-y: auto;
+  }
+  .live-stream-stats-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .live-stream-stats-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--evergreen);
+  }
+  .live-stream-stats-peak {
+    font-size: 11px;
+    color: var(--ink);
+    opacity: 0.75;
+    text-align: right;
+  }
+  .live-stream-stats-chart-block { margin-top: 12px; }
+  .live-stream-stats-chart-block:first-of-type { margin-top: 0; }
+  .live-stream-stats-chart-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink);
+    opacity: 0.65;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .live-stream-stats-chart svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .live-stream-stats-chart-empty {
+    font-size: 11.5px;
+    color: var(--ink);
+    opacity: 0.6;
+    padding: 10px 0;
+    text-align: center;
+  }
   .live-only-filter-row {
     display: flex;
     align-items: center;
@@ -3185,6 +3235,27 @@
   </div>
   <div id="liveNowClearFiltersMsg" class="live-now-clear-filters-msg" style="display:none;"></div>
   <div id="liveNowList" class="live-now-list"></div>
+  <!-- Always rendered, even with 0 live churches right now (per your call
+       on the zero-count case elsewhere in this pane) - a footer, not part
+       of the scrolling list above, so it's visible without scrolling past
+       every live card. Both charts are built client-side from the same
+       /api/live-stream-stats sample array - see renderLiveStreamStatsCharts()
+       - bucketed to the VISITOR'S OWN local time, not any fixed server
+       timezone, since churches/radio stations here span many time zones. -->
+  <div id="liveStreamStatsSection" class="live-stream-stats-section">
+    <div class="live-stream-stats-header">
+      <span class="live-stream-stats-title">Live Stream Activity</span>
+      <span id="liveStreamStatsPeak" class="live-stream-stats-peak"></span>
+    </div>
+    <div class="live-stream-stats-chart-block">
+      <div class="live-stream-stats-chart-label">Today</div>
+      <div id="liveStreamStatsTodayChart" class="live-stream-stats-chart"></div>
+    </div>
+    <div class="live-stream-stats-chart-block">
+      <div class="live-stream-stats-chart-label">Last 7 Days</div>
+      <div id="liveStreamStatsWeekChart" class="live-stream-stats-chart"></div>
+    </div>
+  </div>
 </div>
 
 <div id="radioBrowsePanel" class="side-panel" style="display: none;">
@@ -3473,6 +3544,190 @@
     });
     liveChurchIds = new Set(liveStatusData.live.map(function(l) { return l.churchId; }));
     updateLiveNowUi();
+  }
+
+  // ---- Live Stream Activity charts (Today / Last 7 Days) - see
+  // #liveStreamStatsSection above. Both charts are hand-built inline SVG
+  // (no chart library, matching this site's existing dependency-free
+  // style), built client-side from the one /api/live-stream-stats sample
+  // array - "Today" is that array filtered down to the VISITOR'S OWN
+  // local midnight-to-now, "Last 7 Days" is the whole rolling window,
+  // unfiltered. There's no separate endpoint or query param per chart;
+  // the backend just appends one {t, count, viewers} sample per ~2-min
+  // cron cycle and trims anything older than 7 days (see
+  // LIVE_STREAM_STATS_KV_KEY in src/index.js) - deliberately the exact
+  // same liveOnly data the public live-status list itself is built from,
+  // so this can never disagree with what a visitor sees in the list.
+  // Inherits the live-detection feed's own known scraping noise (see
+  // live-stream-detection-notes.md) - this is a chart of what the feed
+  // reported, not an independently-verified viewer count.
+
+  // Matches the backend's own cron cadence (see LIVE_STATUS_POLL_MS
+  // above) - no point polling faster than new samples can possibly
+  // appear.
+  const LIVE_STREAM_STATS_POLL_MS = 120000; // 2 min
+
+  let liveStreamStatsData = { samples: [], allTimePeak: null };
+
+  async function loadLiveStreamStats() {
+    try {
+      const res = await fetch('/api/live-stream-stats', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to load live stream stats: ' + res.status);
+      liveStreamStatsData = await res.json();
+    } catch (err) {
+      console.error('Could not load live stream stats from server:', err);
+      liveStreamStatsData = { samples: [], allTimePeak: null };
+    }
+    renderLiveStreamStatsCharts();
+  }
+
+  // Builds one hand-rolled inline SVG line chart for a single series
+  // (church count OR summed viewer count - never both on one axis, see
+  // buildLiveStreamStatsSvgPair below for how the two get shown
+  // together). `points` is [{x, y}] in chronological order, x a raw
+  // ms-epoch timestamp. xMin/xMax are passed in explicitly rather than
+  // inferred from the data, so a chart with few/no samples yet still
+  // draws the full intended axis range (midnight-to-now, or 7-days-to-
+  // now) instead of a squashed one. yMax is floored at 1 so an all-zero
+  // series still renders as a flat line at the baseline rather than a
+  // divide-by-zero NaN path.
+  function buildLiveStreamStatsSvgPath(points, xMin, xMax, yMax, width, height, padTop, padBottom, padSide) {
+    const plotW = width - padSide * 2;
+    const plotH = height - padTop - padBottom;
+    function xPos(x) {
+      if (xMax === xMin) return padSide;
+      return padSide + ((x - xMin) / (xMax - xMin)) * plotW;
+    }
+    function yPos(y) {
+      return padTop + (1 - (Math.max(0, y) / yMax)) * plotH;
+    }
+    if (!points.length) return { line: '', area: '', xPos: xPos, yPos: yPos };
+    const line = 'M ' + points.map(function(p) { return xPos(p.x).toFixed(1) + ' ' + yPos(p.y).toFixed(1); }).join(' L ');
+    const baseline = (height - padBottom).toFixed(1);
+    const area = line + ' L ' + xPos(points[points.length - 1].x).toFixed(1) + ' ' + baseline +
+      ' L ' + xPos(points[0].x).toFixed(1) + ' ' + baseline + ' Z';
+    return { line: line, area: area, xPos: xPos, yPos: yPos };
+  }
+
+  // Renders one full chart: primary series (church count, solid evergreen
+  // line + soft fill) plus the bonus secondary series (summed concurrent
+  // viewers, dashed ember line, its OWN independent y-scale since viewer
+  // totals run far higher than church counts) - your "340 people watching
+  // across those 5" idea, shown alongside rather than replacing the
+  // count Sunday-through-Saturday axis you originally asked for. `ticks`
+  // is an array of {x, label} for the bottom axis labels (hour-of-day for
+  // Today, weekday abbreviation for Last 7 Days).
+  function renderLiveStreamStatsChart(containerId, samples, xMin, xMax, ticks, emptyMessage) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!samples.length) {
+      el.innerHTML = '<div class="live-stream-stats-chart-empty">' + emptyMessage + '</div>';
+      return;
+    }
+    const width = 300, height = 84;
+    const padTop = 6, padBottom = 16, padSide = 2;
+    const countPoints = samples.map(function(s) { return { x: new Date(s.t).getTime(), y: s.count }; });
+    const viewerPoints = samples.map(function(s) { return { x: new Date(s.t).getTime(), y: s.viewers || 0 }; });
+    const countMax = Math.max(1, countPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
+    const viewerMax = Math.max(1, viewerPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
+
+    const countShape = buildLiveStreamStatsSvgPath(countPoints, xMin, xMax, countMax, width, height, padTop, padBottom, padSide);
+    const viewerShape = buildLiveStreamStatsSvgPath(viewerPoints, xMin, xMax, viewerMax, width, height, padTop, padBottom, padSide);
+    const baselineY = (height - padBottom).toFixed(1);
+
+    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="Concurrent live streams over time">';
+    svg += '<line x1="' + padSide + '" y1="' + baselineY + '" x2="' + (width - padSide) + '" y2="' + baselineY + '" stroke="var(--line)" stroke-width="1"/>';
+    // Viewer count drawn first (behind), lighter/dashed, so the primary
+    // church-count line always reads clearly on top of it.
+    if (viewerShape.line) {
+      svg += '<path d="' + viewerShape.line + '" fill="none" stroke="var(--ember)" stroke-width="1.25" stroke-dasharray="3,2" opacity="0.55" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    if (countShape.area) {
+      svg += '<path d="' + countShape.area + '" fill="rgba(47,75,60,0.16)" stroke="none"/>';
+    }
+    if (countShape.line) {
+      svg += '<path d="' + countShape.line + '" fill="none" stroke="var(--evergreen)" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    ticks.forEach(function(tick) {
+      const tx = countShape.xPos(tick.x).toFixed(1);
+      svg += '<text x="' + tx + '" y="' + (height - 4) + '" font-size="7.5" text-anchor="middle" fill="var(--ink)" opacity="0.55">' + tick.label + '</text>';
+    });
+    svg += '</svg>';
+    el.innerHTML = svg;
+  }
+
+  // Hour-of-day ticks (12a / 6a / 12p / 6p / now) for the Today chart -
+  // always anchored to the visitor's own local clock, never a fixed
+  // server timezone.
+  function liveStreamStatsTodayTicks(startOfDay, now) {
+    const labels = ['12a', '6a', '12p', '6p'];
+    const ticks = labels.map(function(label, i) {
+      return { x: startOfDay + i * 6 * 60 * 60 * 1000, label: label };
+    });
+    ticks.push({ x: now, label: 'now' });
+    return ticks;
+  }
+
+  // One tick per local midnight falling inside the rolling 7-day window,
+  // labeled with that day's weekday abbreviation - since this is a true
+  // rolling window (your call: "start with a true rolling most-recent-7-
+  // days"), these labels shift day to day rather than always reading
+  // Sunday-through-Saturday, but they still orient the visitor to which
+  // day is which along the axis.
+  function liveStreamStatsWeekTicks(xMin, xMax) {
+    const ticks = [];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const firstMidnight = new Date(xMin);
+    firstMidnight.setHours(24, 0, 0, 0);
+    for (let t = firstMidnight.getTime(); t <= xMax; t += dayMs) {
+      ticks.push({ x: t, label: new Date(t).toLocaleDateString(undefined, { weekday: 'short' }) });
+    }
+    return ticks;
+  }
+
+  function renderLiveStreamStatsCharts() {
+    const samples = Array.isArray(liveStreamStatsData.samples) ? liveStreamStatsData.samples : [];
+    const now = Date.now();
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todaySamples = samples.filter(function(s) {
+      const t = new Date(s.t).getTime();
+      return !isNaN(t) && t >= startOfToday.getTime();
+    });
+    renderLiveStreamStatsChart(
+      'liveStreamStatsTodayChart',
+      todaySamples,
+      startOfToday.getTime(),
+      now,
+      liveStreamStatsTodayTicks(startOfToday.getTime(), now),
+      'Collecting today’s data…'
+    );
+
+    const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+    renderLiveStreamStatsChart(
+      'liveStreamStatsWeekChart',
+      samples,
+      weekStart,
+      now,
+      liveStreamStatsWeekTicks(weekStart, now),
+      'Collecting this week’s data…'
+    );
+
+    const peakEl = document.getElementById('liveStreamStatsPeak');
+    if (peakEl) {
+      const peak = liveStreamStatsData.allTimePeak;
+      if (peak && peak.count > 0) {
+        const peakWhen = new Date(peak.t);
+        const churchWord = peak.count === 1 ? 'church' : 'churches';
+        let text = 'Peak: ' + peak.count + ' ' + churchWord;
+        if (peak.viewers > 0) text += ' (' + peak.viewers.toLocaleString() + ' watching)';
+        text += ' — ' + peakWhen.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + peakWhen.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+        peakEl.textContent = text;
+      } else {
+        peakEl.textContent = '';
+      }
+    }
   }
 
   function minutesSince(isoString) {
@@ -7921,6 +8176,8 @@
     updateSyncStatus();
     await loadLiveStatus();
     setInterval(loadLiveStatus, LIVE_STATUS_POLL_MS);
+    await loadLiveStreamStats();
+    setInterval(loadLiveStreamStats, LIVE_STREAM_STATS_POLL_MS);
   }
 
   function updateSyncStatus() {
