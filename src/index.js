@@ -3743,6 +3743,34 @@ const RADIO_STATIONS = [
     // feed can return real per-track album art via its albumCover endpoint.
     staticCoverUrl: '/worshipliferadio-icon.png',
     staticCoverThumbUrl: '/worshipliferadio-icon-128.png'
+  },
+  {
+    // First 'azuracast' station - see the provider notes doc for the full
+    // writeup. Added 2026-09-25 from Larry's own captured now-playing
+    // response (https://www.koinonia-radio.de/api/nowplaying/koinonia_radio,
+    // real populated artist/title/art, not a placeholder). Independently
+    // re-fetched the same endpoint minutes later and got a genuinely
+    // different track ("Supertones - escape from reason" vs. Larry's
+    // original "KJ-52 feat. Funky - Fuego"), confirming the feed updates in
+    // real time rather than being frozen. streamUrl is already HTTPS (no
+    // KYYR/Calvary-PV-Radio-style mixed-content risk), taken directly from
+    // the API's own station.listen_url field. homePage is the sponsoring
+    // congregation's own site (Larry's link, koinonia-gemeinde.de) rather
+    // than the radio platform's own domain (koinonia-radio.de) - the two
+    // are related but distinct sites.
+    //
+    // NOT YET independently confirmed: actual audio playback once embedded
+    // on the deployed (HTTPS) map page - only the metadata feed itself has
+    // been verified live so far. Per the standard checklist, test real
+    // playback on the deployed site before considering this fully done.
+    id: 'koinoniaradio',
+    displayName: 'Koinonia Radio',
+    cityState: 'Hannover, Germany',
+    homePage: 'https://www.koinonia-gemeinde.de/',
+    provider: 'azuracast',
+    host: 'www.koinonia-radio.de',
+    shortcode: 'koinonia_radio',
+    streamUrl: 'https://www.koinonia-radio.de/listen/koinonia_radio/radio.mp3'
   }
   // KYYR "The Bridge of Hope" (Yakima, WA) was added here 2026-09-23, then
   // REMOVED the same day - the stream itself doesn't reliably play over
@@ -4297,6 +4325,36 @@ function parseRadioKingJson(rawJson) {
   };
 }
 
+// Extracts now-playing info from AzuraCast's public station API
+// (https://{host}/api/nowplaying/{shortcode}) - a large, well-documented
+// JSON payload (station config, live-DJ status, song history, playing-next),
+// of which we only need one nested object. Confirmed real response shape
+// (Koinonia Radio):
+//   {"station": {...}, "now_playing": {"song": {"artist":"KJ-52 feat. Funky",
+//   "title":"Fuego","art":"https://www.koinonia-radio.de/api/station/1/
+//   art/....jpg", ...}, ...}, ...}
+// artist/title arrive already cleanly split (no "Artist - Title" combined
+// string to parse, unlike Icecast/Shoutcast), and per-track cover art is
+// right there in the same object - no separate artwork call needed, unlike
+// radioboss/citrus3/triton above.
+function parseAzuraCastJson(rawJson) {
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('Invalid AzuraCast JSON response');
+  }
+
+  const song = data && data.now_playing && data.now_playing.song;
+  const rawCover = song && typeof song.art === 'string' ? song.art.trim() : '';
+
+  return {
+    title: song && typeof song.title === 'string' ? song.title.trim() : '',
+    artist: song && typeof song.artist === 'string' ? song.artist.trim() : '',
+    coverUrl: rawCover || null
+  };
+}
+
 // Registry of provider-specific fetch+parse logic. Every provider must
 // expose buildNowPlayingUrl(station) and parse(rawText), and parse() must
 // always return { title, artist, coverUrl } regardless of the provider's own
@@ -4443,6 +4501,21 @@ const RADIO_PROVIDERS = {
     // fetchAndParse needed because cover art is a second HTTP call keyed by
     // station.panelHost/station.slug, same shape of reason as radioboss.
     fetchAndParse: fetchCitrus3NowPlaying
+  },
+  azuracast: {
+    // AzuraCast is a well-known, widely self-hosted open-source radio
+    // automation/streaming platform (same tier of legitimacy as
+    // Radio.co/RadioKing/Triton elsewhere in this file, not something
+    // reverse-engineered) - every instance exposes the same public
+    // /api/nowplaying/{shortcode} JSON endpoint. First station: Koinonia
+    // Radio (Hannover, Germany), added 2026-09-25. See parseAzuraCastJson
+    // below for the response shape - already cleanly split into
+    // now_playing.song.artist/title/art, no combined-string parsing or
+    // separate artwork-URL lookup needed at all.
+    buildNowPlayingUrl: function(station) {
+      return 'https://' + station.host + '/api/nowplaying/' + station.shortcode;
+    },
+    parse: parseAzuraCastJson
   },
   publishedschedule: {
     // See fetchPublishedScheduleNowPlaying below (defined alongside the
