@@ -3771,6 +3771,38 @@ const RADIO_STATIONS = [
     host: 'www.koinonia-radio.de',
     shortcode: 'koinonia_radio',
     streamUrl: 'https://www.koinonia-radio.de/listen/koinonia_radio/radio.mp3'
+  },
+  {
+    // Larry supplied this as "Phoenix, AZ" / reach.radio, but the site's
+    // own <title> on every page and its About page ("690AM 106.7FM - ON
+    // THE AIR IN TUCSON, AZ") both confirm it's actually "Reach Radio
+    // Tucson" - flagged to Larry, recorded here as Tucson pending any
+    // correction.
+    //
+    // Now-playing endpoint (/api/stream-info-sse) found via the page's own
+    // Network tab while it was open - not referenced anywhere in the
+    // rendered HTML/page text, and Larry couldn't find it either. See
+    // fetchReachRadioNowPlaying for the full writeup: this is a bespoke,
+    // genuinely open Server-Sent Events connection, not a shared
+    // third-party platform. Confirmed genuinely live: the feed's "LIVE THE
+    // WORD Friday" / "Eric Souza" matched the site's own displayed
+    // schedule at the same moment (next up: "Turning Point" / Dr. David
+    // Jeremiah, 4:30-5:00 PM) - not a stale placeholder.
+    //
+    // streamUrl is Larry's own supplied direct stream URL
+    // (reach.radio/api/audio-stream) - already HTTPS, same domain as the
+    // page itself, confirmed returning 200 in the browser's own Network
+    // tab (no KYYR/Calvary-PV-Radio-style mixed-content risk expected).
+    // NOT YET independently confirmed: actual audio playback once embedded
+    // on the deployed map page - per the standard checklist, test real
+    // playback on the deployed site before considering this fully done.
+    id: 'reachradio',
+    displayName: 'Reach Radio',
+    cityState: 'Tucson, AZ',
+    homePage: 'https://reach.radio/',
+    provider: 'reachradio',
+    nowPlayingUrl: 'https://reach.radio/api/stream-info-sse',
+    streamUrl: 'https://reach.radio/api/audio-stream'
   }
   // KYYR "The Bridge of Hope" (Yakima, WA) was added here 2026-09-23, then
   // REMOVED the same day - the stream itself doesn't reliably play over
@@ -4482,6 +4514,14 @@ const RADIO_PROVIDERS = {
     // parsed response to build that URL.
     fetchAndParse: fetchRadioBossNowPlaying
   },
+  reachradio: {
+    // Bespoke to this one station's own site - see fetchReachRadioNowPlaying
+    // above for the full writeup. fetchAndParse needed because this is a
+    // genuinely open Server-Sent Events connection (not a one-shot GET) -
+    // has to be read and cancelled manually rather than parsed from an
+    // already-completed response body/text.
+    fetchAndParse: fetchReachRadioNowPlaying
+  },
   triton: {
     // fetchAndParse for a third reason (distinct from both live365hls/aiir's
     // multi-call chains and radioboss's need for a station field): Triton's
@@ -4651,6 +4691,100 @@ async function fetchAiirNowPlaying(station) {
     });
 
     ws.send(JSON.stringify({ action: 'subscribe', serviceId: station.serviceId }));
+  });
+}
+
+const REACHRADIO_SSE_TIMEOUT_MS = 8000;
+
+// Reach Radio's own custom-built site (Astro frontend, Sanity CMS for
+// content) exposes its now-playing data as a genuine Server-Sent Events
+// stream at /api/stream-info-sse - bespoke to this one station's own site,
+// not a shared third-party radio platform like every other provider in
+// this file. Found via the page's own Network tab while it was open (not
+// referenced anywhere in the rendered HTML/page text, and not guessable
+// from the site's public API for the raw audio stream, /api/audio-stream).
+//
+// Confirmed real response, captured live:
+//   event: time-update
+//   id: 1
+//   data: {"title":"LIVE THE WORD Friday","artist":"Eric Souza"}
+// Cross-checked against the site's own displayed schedule at the same
+// moment ("Playing Next: Turning Point / Dr. David Jeremiah, 4:30-5:00 PM")
+// - genuinely live, not a stale placeholder. No cover-art field of any
+// kind in the payload - unsurprising, this is a teaching/talk station
+// (program name + host, not song + artist), same general shape as
+// WJWD/EQUIP FM elsewhere in this file. Only ever observed one event
+// (title/artist only, no other keys) - if a future track/event shows
+// additional fields, revisit this function first.
+//
+// This is a genuinely long-lived connection (the server keeps it open for
+// future pushes) - a plain fetch().text() would hang waiting for the
+// connection to close, which may never happen. So this reads the response
+// body manually, resolves as soon as the first "data:" line parses valid
+// JSON, and cancels the reader/connection immediately after - same
+// "connect once, take the first real payload, close" shape as
+// fetchAiirNowPlaying above, just over a readable stream instead of a
+// WebSocket.
+async function fetchReachRadioNowPlaying(station) {
+  const res = await fetch(station.nowPlayingUrl);
+  if (!res.ok || !res.body) {
+    throw new Error('Station ' + station.displayName + ' stream-info-sse returned ' + res.status);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+
+  return new Promise(function(resolve, reject) {
+    const timeout = setTimeout(function() {
+      reader.cancel();
+      reject(new Error('Station ' + station.displayName + ' timed out waiting for stream-info-sse data'));
+    }, REACHRADIO_SSE_TIMEOUT_MS);
+
+    let buffer = '';
+
+    function pump() {
+      reader.read().then(function(result) {
+        if (result.done) {
+          clearTimeout(timeout);
+          reject(new Error('Station ' + station.displayName + ' stream-info-sse closed before any data arrived'));
+          return;
+        }
+
+        buffer += decoder.decode(result.value, { stream: true });
+
+        // SSE events are separated by a blank line; whichever line inside
+        // one starts with "data:" carries the actual JSON payload.
+        const events = buffer.split(/\r?\n\r?\n/);
+        for (let i = 0; i < events.length - 1; i++) {
+          const dataLine = events[i].split(/\r?\n/).filter(function(line) {
+            return line.indexOf('data:') === 0;
+          })[0];
+          if (!dataLine) continue;
+
+          const parsed = tryParseJson(dataLine.slice(dataLine.indexOf(':') + 1).trim());
+          if (!parsed) continue;
+
+          clearTimeout(timeout);
+          reader.cancel();
+          resolve({
+            title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+            artist: typeof parsed.artist === 'string' ? parsed.artist.trim() : '',
+            coverUrl: null
+          });
+          return;
+        }
+
+        // Keep whatever's left after the last blank-line boundary (an
+        // incomplete trailing event) and read more.
+        buffer = events[events.length - 1];
+        pump();
+      }).catch(function(err) {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    }
+
+    pump();
   });
 }
 

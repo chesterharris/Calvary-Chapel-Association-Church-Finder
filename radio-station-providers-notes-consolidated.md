@@ -1692,6 +1692,68 @@ the integration fully proven.
 
 ---
 
+## Provider: `reachradio`
+
+**Discovered while adding Reach Radio.** Larry supplied the homepage
+(reach.radio) and the direct stream URL, but said he couldn't find where
+the site's own displayed now-playing info was coming from. Found via
+Chrome DevTools' Network tab while the homepage was open (not referenced
+anywhere in the rendered HTML/page text) - a genuine Server-Sent Events
+endpoint, bespoke to this one station's own custom-built site (Astro
+frontend, Sanity CMS), not a shared third-party radio platform like every
+other provider above.
+
+**Location correction:** Larry described this as "Phoenix, AZ", but the
+site's own `<title>` on every page and its About page ("690AM 106.7FM -
+ON THE AIR IN TUCSON, AZ") both confirm it's actually based in Tucson.
+Flagged to Larry; recorded as Tucson pending any correction.
+
+**Now-playing endpoint:**
+`https://reach.radio/api/stream-info-sse`
+
+**Response shape - confirmed via a real, live fetch (genuine SSE framing,
+not bare JSON):**
+```
+event: time-update
+id: 1
+data: {"title":"LIVE THE WORD Friday","artist":"Eric Souza"}
+```
+- `title`/`artist` arrive already cleanly split.
+- No cover-art field of any kind - unsurprising, this is a teaching/talk
+  station (program name + host, not song + artist), same general shape as
+  WJWD/EQUIP FM above. Only one event was ever observed (title/artist
+  only) - if a future event shows additional fields, revisit
+  `fetchReachRadioNowPlaying`.
+
+**This is a genuinely open, long-lived connection** - unlike every other
+`fetchAndParse` provider above (all one-shot HTTP calls, even `radiomast`'s
+SSE endpoint which appears to hand back its initial state and let the
+fetch complete normally), the server here keeps the connection open for
+future pushes. A plain `fetch().text()` would hang waiting for it to
+close, which may never happen - `fetchReachRadioNowPlaying` instead reads
+the response body manually via its own reader, resolves as soon as the
+first `data:` line parses as valid JSON, and cancels the reader/connection
+immediately after (same "connect once, take the first real payload,
+close" shape as `aiir`'s WebSocket handling above, just over a readable
+stream). An 8s timeout (`REACHRADIO_SSE_TIMEOUT_MS`) guards against the
+connection opening but never sending anything.
+
+**Confirmed genuinely live:** the feed's "LIVE THE WORD Friday" / "Eric
+Souza" matched the site's own displayed schedule at the same moment (next
+up: "Turning Point" / Dr. David Jeremiah, 4:30-5:00 PM) - not a stale
+placeholder.
+
+**Stream URL:** Larry's own supplied direct URL
+(`https://reach.radio/api/audio-stream`) - already HTTPS, same domain as
+the page itself, confirmed returning a real 200 in the browser's own
+Network tab. Not yet independently confirmed as actual audio playback
+once embedded on the deployed map page - per the standard checklist, test
+real playback on the deployed site before considering this fully proven.
+
+**Stations currently configured:** Reach Radio (Tucson, AZ).
+
+---
+
 ## Providers we looked at and deliberately did NOT build
 
 Not every station's metadata is worth chasing. These are confirmed dead
