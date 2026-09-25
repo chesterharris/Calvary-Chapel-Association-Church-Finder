@@ -1706,9 +1706,9 @@ other provider above.
 **Location correction:** Larry described this as "Phoenix, AZ", but the
 site's own `<title>` on every page and its About page ("690AM 106.7FM -
 ON THE AIR IN TUCSON, AZ") both confirm it's actually based in Tucson.
-Flagged to Larry; recorded as Tucson pending any correction.
+Flagged to Larry and confirmed correct.
 
-**Now-playing endpoint:**
+**Now-playing text endpoint:**
 `https://reach.radio/api/stream-info-sse`
 
 **Response shape - confirmed via a real, live fetch (genuine SSE framing,
@@ -1719,29 +1719,69 @@ id: 1
 data: {"title":"LIVE THE WORD Friday","artist":"Eric Souza"}
 ```
 - `title`/`artist` arrive already cleanly split.
-- No cover-art field of any kind - unsurprising, this is a teaching/talk
-  station (program name + host, not song + artist), same general shape as
-  WJWD/EQUIP FM above. Only one event was ever observed (title/artist
-  only) - if a future event shows additional fields, revisit
-  `fetchReachRadioNowPlaying`.
+- No cover-art field of any kind in this payload - see "Cover art" below
+  for where that actually comes from. Only one event shape was ever
+  observed (title/artist only) - if a future event shows additional
+  fields, revisit `fetchReachRadioSseNowPlaying`.
 
 **This is a genuinely open, long-lived connection** - unlike every other
 `fetchAndParse` provider above (all one-shot HTTP calls, even `radiomast`'s
 SSE endpoint which appears to hand back its initial state and let the
 fetch complete normally), the server here keeps the connection open for
 future pushes. A plain `fetch().text()` would hang waiting for it to
-close, which may never happen - `fetchReachRadioNowPlaying` instead reads
-the response body manually via its own reader, resolves as soon as the
-first `data:` line parses as valid JSON, and cancels the reader/connection
-immediately after (same "connect once, take the first real payload,
-close" shape as `aiir`'s WebSocket handling above, just over a readable
-stream). An 8s timeout (`REACHRADIO_SSE_TIMEOUT_MS`) guards against the
-connection opening but never sending anything.
+close, which may never happen - `fetchReachRadioSseNowPlaying` instead
+reads the response body manually via its own reader, resolves as soon as
+the first `data:` line parses as valid JSON, and cancels the
+reader/connection immediately after (same "connect once, take the first
+real payload, close" shape as `aiir`'s WebSocket handling above, just over
+a readable stream). An 8s timeout (`REACHRADIO_SSE_TIMEOUT_MS`) guards
+against the connection opening but never sending anything.
 
 **Confirmed genuinely live:** the feed's "LIVE THE WORD Friday" / "Eric
 Souza" matched the site's own displayed schedule at the same moment (next
 up: "Turning Point" / Dr. David Jeremiah, 4:30-5:00 PM) - not a stale
 placeholder.
+
+**Cover art - a SECOND, completely separate endpoint, not part of the SSE
+payload at all.** Larry noticed the site shows a per-program photo (e.g.
+Dr. David Jeremiah's photo for "Turning Point") and asked where it was
+coming from, since it isn't visible anywhere in the rendered page. Reading
+the site's own bundled JS (`MediaBarContainer...js`) directly showed the
+mechanism: whenever the SSE pushes a new host name, the client looks it up
+against a locally-cached roster
+(`window.globalState.mediaBarState.teachersList().find(t =>
+t.name.toLowerCase().includes(...))`) to resolve a photo. It's a
+name-matched local lookup, never a live "art" field pushed by the SSE.
+
+That roster comes from `GET https://reach.radio/scheduled-list` - a normal
+(non-streaming) request this Unpoly-based site's own frontend makes for
+its schedule-list UI. Confirmed via a real, live fetch: it returns an HTML
+fragment whose root element carries the actual data as an
+HTML-attribute-encoded JSON blob:
+```html
+<div id="scheduled-list" up-data="{&#34;todayScheduleWithMusicBreaks&#34;:
+[{&#34;name&#34;:&#34;Tony Clark&#34;,&#34;title&#34;:&#34;The Word Made
+Plain&#34;,&#34;photo&#34;:&#34;https://cdn.sanity.io/...jpg&#34;,
+&#34;slug&#34;:&#34;tony-clark&#34;,&#34;time&#34;:&#34;5:00 AM - 5:30
+AM&#34;,&#34;startTime&#34;:&#34;5:00 AM&#34;,&#34;endTime&#34;:&#34;5:30
+AM&#34;},...],&#34;allTeachers&#34;:[...]}">
+```
+`parseReachRadioScheduleHtml` extracts and HTML-decodes that attribute,
+then reads `allTeachers` (not `todayScheduleWithMusicBreaks`) - the
+deduped name+photo roster, matching what the site's own JS reads from.
+`findReachRadioTeacherPhoto` does the same bidirectional, case-insensitive
+substring match the site's own JS uses (a plain equality check would miss
+real matches, since the SSE's live "artist" string and the roster's
+"name" field aren't always identical - e.g. a shorter on-air name vs. a
+fuller published one).
+
+Both fetches (SSE text + schedule roster) run concurrently in
+`fetchReachRadioNowPlaying`, and the roster fetch is treated as a
+nice-to-have exactly like `triton`'s iTunes lookup and `citrus3`'s
+albumCover call above - a failed/unparseable roster fetch just means a
+missing photo, never a failed now-playing result. Sanity-tested the
+HTML-entity decoding and name-matching logic in isolation (including a
+real ampersand-containing name, "Scott & Sean Richards") before shipping.
 
 **Stream URL:** Larry's own supplied direct URL
 (`https://reach.radio/api/audio-stream`) - already HTTPS, same domain as
