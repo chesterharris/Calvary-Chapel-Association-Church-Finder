@@ -1054,6 +1054,20 @@ const LIVE_CHECK_BATCH_STATE_KV_KEY = 'live-check-batch-state';
 // church's full last-known state, live or not.
 const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
 
+// Public-facing concurrent-live-stream history, read by the Live Now
+// pane's two charts (frontend: "Today" and rolling "Last 7 Days"). One
+// sample is appended per cron cycle (see checkAllChurchesLive) using
+// liveOnly.length/liveOnly's summed viewCount - the exact same data the
+// pane's own live list is built from, so the chart can never disagree
+// with what a visitor sees in the list itself. Samples older than
+// LIVE_STREAM_STATS_RETENTION_MS are trimmed each cycle; allTimePeak is
+// never trimmed and only ever moves forward. Both charts read from this
+// one key - "Today" is just this array filtered client-side to the
+// visitor's own local midnight-to-now, "Last 7 Days" is the whole thing -
+// there's no separate storage or cron path for the two views.
+const LIVE_STREAM_STATS_KV_KEY = 'live-stream-stats';
+const LIVE_STREAM_STATS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
 // (confirmed in testing: a 429 after just a couple of fetches in quick
@@ -2332,6 +2346,49 @@ async function checkAllChurchesLive(env) {
 
     await env.CHURCHES_KV.put(LIVE_CHECK_MERGED_RESULTS_KV_KEY, JSON.stringify(mergedResults));
 
+    // Public-facing concurrent-live-stream history (see LIVE_STREAM_STATS_KV_KEY
+    // above) - one sample per cycle, built from the exact same liveOnly array
+    // the public live-status snapshot above uses, so the two can never
+    // disagree. Each live church's viewCount is nullable (scraped from
+    // YouTube's page HTML); null/non-numeric contributes 0 to the summed
+    // total rather than breaking the sum, so this under-counts total
+    // viewers whenever a live church's count couldn't be parsed that cycle,
+    // never over-counts.
+    const statsRaw = await env.CHURCHES_KV.get(LIVE_STREAM_STATS_KV_KEY);
+    let statsPrevious = { samples: [], allTimePeak: null };
+    if (statsRaw) {
+      try {
+        const parsed = JSON.parse(statsRaw);
+        if (parsed) statsPrevious = parsed;
+      } catch (err) {
+        // Fall through to the empty default above.
+      }
+    }
+    const statsSamples = Array.isArray(statsPrevious.samples) ? statsPrevious.samples : [];
+    const sampleTimestamp = new Date().toISOString();
+    const sampleCount = liveOnly.length;
+    const sampleViewers = liveOnly.reduce(function(sum, r) {
+      return sum + (typeof r.viewCount === 'number' && !isNaN(r.viewCount) ? r.viewCount : 0);
+    }, 0);
+    statsSamples.push({ t: sampleTimestamp, count: sampleCount, viewers: sampleViewers });
+    const statsCutoffMs = Date.now() - LIVE_STREAM_STATS_RETENTION_MS;
+    while (statsSamples.length && new Date(statsSamples[0].t).getTime() < statsCutoffMs) {
+      statsSamples.shift();
+    }
+
+    // Never trimmed, never reset - only ever moves forward when a new
+    // sample's count beats (not ties) the stored record, so the very
+    // first sample recorded always becomes the initial all-time peak.
+    let allTimePeak = statsPrevious.allTimePeak || null;
+    if (!allTimePeak || sampleCount > allTimePeak.count) {
+      allTimePeak = { count: sampleCount, viewers: sampleViewers, t: sampleTimestamp };
+    }
+
+    await env.CHURCHES_KV.put(LIVE_STREAM_STATS_KV_KEY, JSON.stringify({
+      samples: statsSamples,
+      allTimePeak: allTimePeak
+    }));
+
     // Full admin debug snapshot: every eligible church's result (not just
     // live ones, and not just this cycle's batch), plus a rolling history
     // of recent cycles' summary stats so a trend is visible, not just the
@@ -2432,6 +2489,24 @@ async function checkAllChurchesLive(env) {
 async function handleGetLiveStatus(request, env) {
   const raw = await env.CHURCHES_KV.get(LIVE_STATUS_KV_KEY);
   const data = raw ? JSON.parse(raw) : { checkedAt: null, live: [] };
+  return new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+// Public, read-only endpoint for the Live Now pane's two charts ("Today"
+// and rolling "Last 7 Days" - see LIVE_STREAM_STATS_KV_KEY above). Both
+// charts are built client-side from this one same `samples` array -
+// "Today" just filters it down to the visitor's own local midnight-to-now,
+// "Last 7 Days" uses the whole thing - so there's no separate endpoint or
+// query param per chart. No YouTube requests happen here; safe to call on
+// every page load, same as handleGetLiveStatus above.
+async function handleGetLiveStreamStats(request, env) {
+  const raw = await env.CHURCHES_KV.get(LIVE_STREAM_STATS_KV_KEY);
+  const data = raw ? JSON.parse(raw) : { samples: [], allTimePeak: null };
   return new Response(JSON.stringify(data), {
     headers: {
       'Content-Type': 'application/json',
@@ -4995,6 +5070,9 @@ export default {
     }
     if (url.pathname === '/api/live-status' && request.method === 'GET') {
       return handleGetLiveStatus(request, env);
+    }
+    if (url.pathname === '/api/live-stream-stats' && request.method === 'GET') {
+      return handleGetLiveStreamStats(request, env);
     }
     if (url.pathname === '/api/debug/check-live-now' && request.method === 'POST') {
       return handleDebugCheckLiveNow(request, env);
