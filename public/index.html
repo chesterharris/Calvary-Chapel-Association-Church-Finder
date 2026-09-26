@@ -970,18 +970,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .live-now-list {
+  .live-now-scroll-area {
     flex: 1;
     overflow-y: auto;
+  }
+  .live-now-list {
     padding: 12px 16px;
   }
   .live-stream-stats-section {
-    flex-shrink: 0;
     border-top: 1px solid var(--line);
     padding: 10px 16px 14px;
     background: rgba(47,75,60,0.06);
-    max-height: 46vh;
-    overflow-y: auto;
   }
   .live-stream-stats-header {
     display: flex;
@@ -3234,26 +3233,39 @@
     </label>
   </div>
   <div id="liveNowClearFiltersMsg" class="live-now-clear-filters-msg" style="display:none;"></div>
-  <div id="liveNowList" class="live-now-list"></div>
-  <!-- Always rendered, even with 0 live churches right now (per your call
-       on the zero-count case elsewhere in this pane) - a footer, not part
-       of the scrolling list above, so it's visible without scrolling past
-       every live card. Both charts are built client-side from the same
-       /api/live-stream-stats sample array - see renderLiveStreamStatsCharts()
-       - bucketed to the VISITOR'S OWN local time, not any fixed server
-       timezone, since churches/radio stations here span many time zones. -->
-  <div id="liveStreamStatsSection" class="live-stream-stats-section">
-    <div class="live-stream-stats-header">
-      <span class="live-stream-stats-title">Live Stream Activity</span>
-      <span id="liveStreamStatsPeak" class="live-stream-stats-peak"></span>
-    </div>
-    <div class="live-stream-stats-chart-block">
-      <div class="live-stream-stats-chart-label">Today</div>
-      <div id="liveStreamStatsTodayChart" class="live-stream-stats-chart"></div>
-    </div>
-    <div class="live-stream-stats-chart-block">
-      <div class="live-stream-stats-chart-label">Last 7 Days</div>
-      <div id="liveStreamStatsWeekChart" class="live-stream-stats-chart"></div>
+  <!-- Single shared scroll area for the list + the stats section below it -
+       per your call, the charts are NOT a separate docked footer (that
+       squeezed the live list itself into its own tiny "keyhole" scroll
+       region, especially bad on mobile). Instead #liveNowList and
+       #liveStreamStatsSection are both plain, non-scrolling children here,
+       and THIS wrapper is the one thing that scrolls - so a visitor
+       scrolls through every live card and simply keeps going into the
+       charts at the end, one continuous scroll. Kept as a separate
+       wrapper (rather than moving the stats markup literally inside
+       #liveNowList) because renderLiveNowList() replaces #liveNowList's
+       entire innerHTML on every refresh/filter change - nesting the
+       charts inside it would wipe them out on every poll. -->
+  <div id="liveNowScrollArea" class="live-now-scroll-area">
+    <div id="liveNowList" class="live-now-list"></div>
+    <!-- Always rendered, even with 0 live churches right now (per your
+         call on the zero-count case elsewhere in this pane). Both charts
+         are built client-side from the same /api/live-stream-stats sample
+         array - see renderLiveStreamStatsCharts() - bucketed to the
+         VISITOR'S OWN local time, not any fixed server timezone, since
+         churches/radio stations here span many time zones. -->
+    <div id="liveStreamStatsSection" class="live-stream-stats-section">
+      <div class="live-stream-stats-header">
+        <span class="live-stream-stats-title">Live Stream Activity</span>
+        <span id="liveStreamStatsPeak" class="live-stream-stats-peak"></span>
+      </div>
+      <div class="live-stream-stats-chart-block">
+        <div class="live-stream-stats-chart-label">Today</div>
+        <div id="liveStreamStatsTodayChart" class="live-stream-stats-chart"></div>
+      </div>
+      <div class="live-stream-stats-chart-block">
+        <div class="live-stream-stats-chart-label">Last 7 Days</div>
+        <div id="liveStreamStatsWeekChart" class="live-stream-stats-chart"></div>
+      </div>
     </div>
   </div>
 </div>
