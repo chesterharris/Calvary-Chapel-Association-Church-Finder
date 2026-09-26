@@ -74,10 +74,24 @@ to poll every page load" pattern as the existing `handleGetLiveStatus` /
 ## Frontend
 
 Two hand-rolled inline SVG line charts (no chart library, matching the
-site's existing dependency-free style) in a new footer section at the
-bottom of `#liveNowPanel`, below `#liveNowList` - always rendered, even at
-0 concurrent streams, per the same "always show the real number" call
+site's existing dependency-free style) - always rendered, even at 0
+concurrent streams, per the same "always show the real number" call
 already made for the "0 Live Now" header case elsewhere in this pane.
+
+**Layout**: lives in `#liveStreamStatsSection`, a sibling of `#liveNowList`
+inside a shared wrapper, `#liveNowScrollArea` (`flex: 1; overflow-y:
+auto;`), rather than nested inside `#liveNowList` or docked as its own
+separately-scrolling footer. Both moved out from under `#liveNowList`'s
+own scroll/max-height so the whole panel - the live list, then the charts
+- scrolls as one continuous area, with the charts landing as the last
+thing a visitor reaches, not boxed into a small pane-within-a-pane. This
+replaced an earlier layout where the charts sat in their own docked,
+independently-scrolling footer below the (also independently-scrolling)
+live list - which Larry flagged as needing "a keyhole" of scrolling on
+mobile to see past. They're kept as siblings rather than nesting the
+charts inside `#liveNowList` because `renderLiveNowList()` replaces that
+element's entire `innerHTML` on every refresh/poll/filter-change, which
+would otherwise wipe out the chart markup along with it.
 
 Key decisions:
 
@@ -86,11 +100,18 @@ Key decisions:
   and "today" (midnight cutoff) and the weekday tick labels on the 7-day
   chart are computed client-side from `new Date(...)`, since the site's
   audience spans many US and international time zones.
-- The bonus viewer-count series is drawn on the **same chart**, not a
-  separate one - a lighter, dashed line behind the primary church-count
-  line, scaled independently (viewer totals run far higher than church
-  counts, so sharing one y-axis would flatten the count line to
-  invisibility).
+- **Each chart plots one series only: concurrent church count.** An
+  earlier version also drew a second, independently-scaled line for
+  summed viewer count on the same plot. Dropped after Larry got confused
+  by the unlabeled second line and asked what it was - loading the
+  `dataviz` skill at that point flagged the design itself as a named
+  anti-pattern (a "dual-axis chart": two differently-scaled series
+  sharing one plot invents a visual correlation that isn't really there,
+  since the alignment between the two scales is arbitrary). Rather than
+  just add a legend to a misleading chart, the viewer-count series was
+  removed from the graph entirely per Larry's call - it's still shown, as
+  plain text in the peak callout ("Peak: 9 churches (57 watching)..."),
+  just never graphed.
 - The "Last 7 Days" chart's weekday tick labels shift day-to-day (since
   it's a genuine rolling window, not a calendar week) - they orient the
   visitor to which day is which along the axis, they just won't always
@@ -110,10 +131,11 @@ live-detection feed described in `live-stream-detection-notes.md`
 what that feed reported at each cycle, not an independently verified
 count. If the detection logic misfires for a given church at a given
 cycle, that shows up here too. Per-church `viewCount` is separately
-nullable (regex-scraped from YouTube's page HTML), so the "viewers" line
-under-counts on any cycle where a live church's count didn't parse -
-documented as a known, one-directional bias (under- never over-counts),
-not a bug.
+nullable (regex-scraped from YouTube's page HTML), so the summed viewer
+total (shown as plain text in the peak callout, not graphed - see
+"Frontend" above) under-counts on any cycle where a live church's count
+didn't parse - documented as a known, one-directional bias (under- never
+over-counts), not a bug.
 
 ## Testing
 

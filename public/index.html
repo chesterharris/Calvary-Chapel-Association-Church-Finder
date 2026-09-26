@@ -3594,11 +3594,11 @@
   }
 
   // Builds one hand-rolled inline SVG line chart for a single series
-  // (church count OR summed viewer count - never both on one axis, see
-  // buildLiveStreamStatsSvgPair below for how the two get shown
-  // together). `points` is [{x, y}] in chronological order, x a raw
-  // ms-epoch timestamp. xMin/xMax are passed in explicitly rather than
-  // inferred from the data, so a chart with few/no samples yet still
+  // (concurrent church count - see renderLiveStreamStatsChart below for
+  // why viewer count isn't plotted here at all). `points` is [{x, y}] in
+  // chronological order, x a raw ms-epoch timestamp. xMin/xMax are passed
+  // in explicitly rather than inferred from the data, so a chart with
+  // few/no samples yet still
   // draws the full intended axis range (midnight-to-now, or 7-days-to-
   // now) instead of a squashed one. yMax is floored at 1 so an all-zero
   // series still renders as a flat line at the baseline rather than a
@@ -3621,14 +3621,17 @@
     return { line: line, area: area, xPos: xPos, yPos: yPos };
   }
 
-  // Renders one full chart: primary series (church count, solid evergreen
-  // line + soft fill) plus the bonus secondary series (summed concurrent
-  // viewers, dashed ember line, its OWN independent y-scale since viewer
-  // totals run far higher than church counts) - your "340 people watching
-  // across those 5" idea, shown alongside rather than replacing the
-  // count Sunday-through-Saturday axis you originally asked for. `ticks`
-  // is an array of {x, label} for the bottom axis labels (hour-of-day for
-  // Today, weekday abbreviation for Last 7 Days).
+  // Renders one full chart: a single series, concurrent church count
+  // (solid evergreen line + soft fill). Originally also drew a second,
+  // independently-scaled "summed viewers" line on the same plot - dropped
+  // per your call, after the dataviz skill flagged that as a textbook
+  // dual-axis chart ("the alignment of the two scales is arbitrary, so
+  // the chart invents a correlation that isn't in the data") - exactly
+  // what caused the confusion in the first place. The viewer count is
+  // still shown, just as plain text in the peak callout ("Peak: 9 churches
+  // (57 watching)...") rather than graphed. `ticks` is an array of
+  // {x, label} for the bottom axis labels (hour-of-day for Today, weekday
+  // abbreviation for Last 7 Days).
   function renderLiveStreamStatsChart(containerId, samples, xMin, xMax, ticks, emptyMessage) {
     const el = document.getElementById(containerId);
     if (!el) return;
@@ -3639,21 +3642,13 @@
     const width = 300, height = 84;
     const padTop = 6, padBottom = 16, padSide = 2;
     const countPoints = samples.map(function(s) { return { x: new Date(s.t).getTime(), y: s.count }; });
-    const viewerPoints = samples.map(function(s) { return { x: new Date(s.t).getTime(), y: s.viewers || 0 }; });
     const countMax = Math.max(1, countPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
-    const viewerMax = Math.max(1, viewerPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
 
     const countShape = buildLiveStreamStatsSvgPath(countPoints, xMin, xMax, countMax, width, height, padTop, padBottom, padSide);
-    const viewerShape = buildLiveStreamStatsSvgPath(viewerPoints, xMin, xMax, viewerMax, width, height, padTop, padBottom, padSide);
     const baselineY = (height - padBottom).toFixed(1);
 
     let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="Concurrent live streams over time">';
     svg += '<line x1="' + padSide + '" y1="' + baselineY + '" x2="' + (width - padSide) + '" y2="' + baselineY + '" stroke="var(--line)" stroke-width="1"/>';
-    // Viewer count drawn first (behind), lighter/dashed, so the primary
-    // church-count line always reads clearly on top of it.
-    if (viewerShape.line) {
-      svg += '<path d="' + viewerShape.line + '" fill="none" stroke="var(--ember)" stroke-width="1.25" stroke-dasharray="3,2" opacity="0.55" stroke-linejoin="round" stroke-linecap="round"/>';
-    }
     if (countShape.area) {
       svg += '<path d="' + countShape.area + '" fill="rgba(47,75,60,0.16)" stroke="none"/>';
     }
