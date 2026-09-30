@@ -12,6 +12,7 @@
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { GRACEFM_SCHEDULE } from './radioSchedules/gracefm.js';
 import { WJWD_SCHEDULE } from './radioSchedules/wjwd.js';
+import { WHLP_SCHEDULE } from './radioSchedules/whlp.js';
 import { KEWR_SCHEDULE } from './radioSchedules/kewr.js';
 import { KGPS_SCHEDULE } from './radioSchedules/kgps.js';
 import { GODSWAYRADIO_SCHEDULE } from './radioSchedules/godswayradio.js';
@@ -2924,6 +2925,49 @@ const RADIO_STATIONS = [
     // treatment.
     staticCoverUrl: '/wjwd-icon.png',
     staticCoverThumbUrl: '/wjwd-icon-128.png'
+  },
+  {
+    // Added 2026-10-01. Same network/site as WJWD above (Calvary Radio
+    // Network, jesuspeoplefm.com) but its OWN genuinely separate simulcast
+    // group and schedule page - confirmed distinct, not a duplicate of
+    // WJWD's, after Larry reported hearing different audio on the two
+    // stations at the same moment (see src/radioSchedules/whlp.js for the
+    // full side-by-side comparison and the handful of real differences
+    // found). citrus3's own live playerInfo/albumCover feed for this station
+    // was checked and found to be a dead one (just echoes the station's own
+    // name, generic stock cover art - same as some other citrus3 stations
+    // already passed over in this project) - published-schedule is the only
+    // usable now-playing source here, same as WJWD.
+    id: 'whlp',
+    displayName: 'WHLP',
+    cityState: 'Hanna, IN',
+    homePage: 'https://jesuspeoplefm.com',
+    provider: 'publishedschedule',
+    schedule: WHLP_SCHEDULE,
+    // citrus3 panel URL Larry gave (https://lunar.citrus3.com:2020/public/
+    // whlp899fm) is the station's listen/status PAGE, not the raw stream -
+    // confirmed live/playable 2026-10-01 (200, audio/mpeg) by following that
+    // page's own "Tune in" PLS link to the actual mount below.
+    streamUrl: 'https://lunar.citrus3.com:8030/stream',
+    // Built 2026-09-30 from a WHLP badge image Larry provided (circular
+    // glossy sphere w/ fish icon, same house style as WJWD's, but with
+    // "WHLP" as a separate solid-black text line above the sphere rather
+    // than baked into it - a real difference in the source art, not a
+    // processing slip). Same rounded-square canvas geometry as WJWD's
+    // icons (~63px corner radius on the 512px canvas, badge content
+    // scaled to fill the canvas at the same padding WJWD's sphere uses),
+    // but WHITE background rather than WJWD's black - a first attempt
+    // used black to match WJWD exactly, but WHLP's "WHLP" lettering is
+    // solid black (meant to read against white), so on black it nearly
+    // disappeared (only the anti-aliased edge pixels stayed visible,
+    // as a ghost outline) - Larry flagged this and asked for white
+    // instead. Larry's source was already on a plain white background,
+    // so the fix was simple: crop to content, scale, and paste directly
+    // onto a white canvas rather than cutting out a transparent badge
+    // shape - no alpha-matting needed since both backgrounds are the
+    // same white.
+    staticCoverUrl: '/whlp-icon.png',
+    staticCoverThumbUrl: '/whlp-icon-128.png'
   },
   {
     id: 'equipfm',
