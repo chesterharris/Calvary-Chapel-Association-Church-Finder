@@ -251,6 +251,37 @@ function startDateFromRelativeStartedStreamingPhrase(html) {
   return new Date(Date.now() - amount * unitMs).toISOString();
 }
 
+// Sibling fallback for the SAME dateText field the function above reads,
+// for its other phrasing: once a broadcast has been live roughly a day or
+// longer, YouTube swaps the relative "N units ago" text for an absolute
+// calendar date instead - e.g. "Started streaming on Sep 27, 2026" -  which
+// the regex above was never written to recognize, so it silently returned
+// null for this phrasing and left startDate (and therefore both of
+// checkChurchLive's duration-based stale-stream guards, which are gated on
+// startDate/recencyAnchor being non-null) unable to run at all. Confirmed in
+// production (2026-09, Calvary Chapel Casa Grande: a stream left running for
+// multiple hours - well past the relative-phrase window - with only the
+// automated check's own "1 watching" and no other startDate/uploadDate
+// source on the page at all, so this was the only route back to a stale-
+// stream duration for it).
+//
+// Only a calendar day, not a time of day, so the returned ISO timestamp is
+// approximate to within "sometime that UTC day" rather than to the minute -
+// coarser than the relative-phrase fallback above, but still enough
+// precision for the hour-scale duration checks this feeds (4h soft cap, 24h
+// hard ceiling): a stream that's actually reached this absolute-date
+// phrasing has necessarily been live long enough that even the worst-case
+// "it actually started right at the end of that UTC day" reading still puts
+// it well past both thresholds. Returns null for any phrase it doesn't
+// recognize (including an unparseable date) rather than guessing.
+function startDateFromAbsoluteStartedStreamingPhrase(html) {
+  const match = html.match(/"dateText":\{"simpleText":"Started streaming on ([A-Za-z]+ \d{1,2}, \d{4})"\}/);
+  if (!match) return null;
+  const asDate = new Date(match[1]);
+  if (isNaN(asDate.getTime())) return null;
+  return asDate.toISOString();
+}
+
 // Removes entire <script>...</script> and <style>...</style> blocks - code and
 // all - not just the tags. Without this, embedded JS text (e.g. from analytics
 // or emoji-support snippets WordPress injects inline) can leak into the parsed
@@ -1854,7 +1885,7 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
   // path just hadn't been given the same treatment.
   const title = titleMetaMatch ? decodeEntities(titleMetaMatch[1]) : (titleJsonMatch ? decodeJsonString(titleJsonMatch[1]) : (titleOverlayJsonMatch ? decodeJsonString(titleOverlayJsonMatch[1]) : null));
   const description = descriptionMetaMatch ? decodeEntities(descriptionMetaMatch[1]) : (descriptionJsonMatch ? decodeJsonString(descriptionJsonMatch[1]) : null);
-  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : startDateFromRelativeStartedStreamingPhrase(html));
+  const startDate = startDateMetaMatch ? startDateMetaMatch[1] : (startDateJsonMatch ? startDateJsonMatch[1] : (startDateFromRelativeStartedStreamingPhrase(html) || startDateFromAbsoluteStartedStreamingPhrase(html)));
   const uploadDate = uploadDateMetaMatch ? uploadDateMetaMatch[1] : (uploadDateJsonMatch ? uploadDateJsonMatch[1] : null);
 
   // Belt-and-suspenders: if a startDate is present and is still in the
