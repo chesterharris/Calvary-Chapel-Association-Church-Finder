@@ -3282,6 +3282,42 @@ const RADIO_STATIONS = [
     streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
   },
   {
+    // Added 2026-10-03. Larry gave this one as "Simple Truths Radio" -
+    // not the station's call-sign/city branding on its own homepage (that
+    // page markets the on-demand "Keep It Simple Talk Show" program, hosted
+    // by Xavier Ries), but confirmed as the actual internet-radio stream's
+    // own self-identification: its liner drops in the real Radio.co status
+    // JSON Larry pasted say "Simple Truths Radio - ..." directly, and the
+    // live embed player's own page title (https://embed.radio.co/player/
+    // 4bbd025.html, found via the station's radio page source) is literally
+    // "Simple Truths Radio". Same homePage as KPTG's own radio page in
+    // spirit (a Calvary Chapel's own "/radio" page embedding a Radio.co
+    // player), but a different church (Pasadena, not Adelanto).
+    //
+    // Uses the older v1 "radioco" provider (see parseRadioCoJson) rather
+    // than KPTG's v2 - the status JSON Larry pasted is the v1 shape (single
+    // combined "title" field under current_track, no separate
+    // track_artist/track_title), not v2's cleanly-split fields.
+    //
+    // IMPORTANT: streamUrl is NOT the "s5.radio.co" host used by KLYT/KPTG/
+    // CSN above - that was a bad guess-by-pattern here, caught by actually
+    // testing it (direct navigation returned a real HTTP 403 from
+    // s5.radio.co for this station's ID, while KLYT's own s5 URL loaded
+    // fine side-by-side - proving the subdomain isn't a fixed convention
+    // across all Radio.co stations). The status JSON's own
+    // "streaming_hostname":"stream.radio.co" field was the real clue;
+    // confirmed by finding "https://stream.radio.co/s6b48fcaa7" directly in
+    // the live embed player's own script output, then confirming
+    // .../listen on that host loads as real audio/mpeg (not an error page).
+    id: 'simpletruthsradio',
+    displayName: 'Simple Truths Radio',
+    cityState: 'Pasadena, CA',
+    homePage: 'https://calvarychapelpasadena.com/radio',
+    provider: 'radioco',
+    stationId: 's6b48fcaa7',
+    streamUrl: 'https://stream.radio.co/s6b48fcaa7/listen'
+  },
+  {
     id: 'kqip',
     displayName: 'KQIP',
     cityState: 'Chico, CA',
