@@ -186,6 +186,18 @@ add-time. Removed rather than left in the "may recover eventually" bucket
 month of zero movement is well past "occasionally quiet." Revisit only if
 someone happens to notice the feed moving again.
 
+**UPDATE 2026-09-21: added back, via the `publishedschedule` provider**
+rather than the dead metadata feed above. Re-checked
+`player_status_update/WXMB.xml` directly and got back the exact same
+frozen `programStartTS` (`29 Jul 2026 21:31:10`) and the same
+`"Boldly Speaking" / "Ron Dozler"` title/artist pair as the original
+removal - nearly two months stale now, confirming this was a genuinely
+dead pipeline rather than a slow news day. `streamUrl` above
+(`https://ice25.securenetsystems.net/WXMB`, from the page source Larry
+supplied) is confirmed actually playing, independent of the dead metadata
+feed - see `radio-station-published-schedule-notes.md` for the full
+rationale and WXMB's own transcription notes.
+
 **KGPS "The Way" (Kingman, AZ)** — investigated and **not added**.
 Confirmed `streamUrl: https://ice5.securenetsystems.net/KGPS` works fine
 (real playable audio). This station's player page uses a different
@@ -268,6 +280,75 @@ own captured snapshot - worth a second look if the ticker ever seems stuck
 on this one. This is now the third distinctly different "Grace
 FM"/"GraceFM"-branded station in this file (see KXGRFM and KVNG above) -
 go by id/subdomain/callSign, not the branding, when in doubt.
+
+**WJCX (Bangor, ME)** — investigated and added via the `publishedschedule`
+provider instead, 2026-09-23. Larry supplied the station's own radio page
+and Subsplash "Listen Now" link rather than a player page or XML feed
+directly; `streamUrl` (`https://ice7.securenetsystems.net/WJCX`) was found
+by inspecting the Subsplash embed's `<audio>` element (`currentSrc`), which
+confirmed this is a SecureNetSystems stream even though Subsplash itself
+isn't a SecureNetSystems property. **New flavor of dead feed, worth noting
+for future stations**: navigating directly to this station's own `/v5/`
+player page (`https://radio.securenetsystems.net/v5/WJCX` - notably no
+per-account `streamdbXweb.securenetsystems.net` redirect for this one,
+unlike every other `/v5/` station in this file) shows a generic "Live
+stream" title with no now-playing polling ever firing at all (confirmed via
+live Network traffic, same technique as KGPS). Reading the page's own
+`v5.min.js` and inline globals explains why: `stationCallUrl` here is just
+`radio.securenetsystems.net` itself (not a distinct `streamdbXweb` host),
+and the page sets `polling.enabled = false` for this station specifically -
+i.e. the player is configured to never even attempt a metadata fetch, a
+more deliberate-looking dead end than KGPS/GraceFM's "attempted but
+soft-404'd" pattern. Called the endpoint by hand anyway
+(`https://radio.securenetsystems.net/player_status_update/WJCX.xml`) and
+got the same "The system cannot find the file specified" soft-404 body as
+everyone else, confirming it either way. See
+`radio-station-published-schedule-notes.md` for WJCX's full transcription
+notes (including its single combined Saturday/Sunday "weekend" schedule)
+and the transcription itself in `src/radioSchedules/wjcx.js`.
+
+**KBLD "Bold Christian Radio" (Kennewick, WA)** — added 2026-09-23, first
+station in a while added straight onto this provider with no dead-feed
+investigation needed. Larry supplied the station's own site
+(`kbld.com`), the Cirrus Encore player page
+(`streamdb3web.securenetsystems.net/cirrusencore/KBLD` - same template as
+Hope FM/WVBV and WLWG/WJLW above, so `subdomain`/`callSign` didn't need
+separate discovery), and a live sample of the now-playing XML feed with
+real, populated `<title>`/`<artist>`/`<duration>` fields. Independently
+re-loaded the player page about six minutes after Larry's sample and got a
+genuinely different title/artist pair back ("Only One Name" / Jordan Colle,
+vs. the original "Altar" / Forrest Frank) - straightforward confirmation
+the feed updates in real time rather than being stale/frozen, without
+needing the `programStartTS`-staleness workaround WXMB/KGPS/etc. required.
+`streamUrl` (`https://ice7.securenetsystems.net/KBLD`) taken from the
+player page's own `streamSrcDB` variable, same convention as every other
+station in this section - notably the same `ice7` edge host as WJCX above,
+different subdomain (`streamdb3web` vs. WJCX's odd no-subdomain case), a
+reminder that the `ice` number and the metadata subdomain are still
+unrelated to each other.
+
+**UPDATE 2026-09-23: logo added, and the coverUrl/coverThumbUrl priority
+rule changed because of it.** Larry supplied a square, already-finished
+badge (teal/orange "KBLD Bold Christian Radio" circular mark) - straight
+resize, no flood-fill or padding needed. Every other station with
+`staticCoverUrl` set is on `publishedschedule` (`coverUrl` is always
+`null` there, so the static badge is effectively the only thing that can
+ever show), but KBLD has a genuinely live feed whose `<cover>` field is
+only sometimes populated (empty in the original add-time sample). Simply
+setting `staticCoverUrl` the usual way would have permanently hidden any
+real per-track album art this station's feed ever sends, since the old
+rule had `staticCoverUrl` unconditionally win. Asked Larry how he wanted
+this handled; he chose to have live art preferred with the badge as a
+fallback rather than either "always show the badge" or "leave the badge
+unused." **`fetchStationNowPlaying`'s `coverUrl`/`coverThumbUrl`
+resolution order was flipped** (provider's live `coverUrl` now checked
+first, `staticCoverUrl`/`staticCoverThumbUrl` only used when it's absent)
+to support this - see the updated comments there and on the
+`staticCoverUrl`/`staticCoverThumbUrl` RADIO_STATIONS field docs. Confirmed
+this is safe for every pre-existing station: no station before KBLD had
+both `staticCoverUrl` set AND a provider capable of returning a non-null
+live `coverUrl`, so the flip can't change any existing station's rendered
+artwork, only KBLD's.
 
 ---
 
@@ -424,12 +505,21 @@ currently shows a generic automation placeholder ("KXGR PRODUCTION")
 rather than real show info most of the time - worth periodically checking
 whether it starts reflecting real programming. WRBP 92.5FM (WI) was added,
 then **removed** after confirming a hard mixed-content block in production
-(see gotcha above). KYYR-LP ("The Bridge of Hope FM 97.9," Yakima WA) was **never added** after confirming
-the identical hard mixed-content failure - notably, the station's *own*
+(see gotcha above). KYYR-LP ("The Bridge of Hope FM 97.9," Yakima WA) was **never added** on THIS
+provider after confirming the identical hard mixed-content failure on an
+Icecast host found for it at the time - notably, the station's *own*
 website's player also failed to load the stream with the same Mixed
 Content / `ERR_CONNECTION_CLOSED` error in DevTools, strong outside
 confirmation the streaming port itself has no TLS support at all, not
-something specific to how we'd embed it. KQIP (Chico, CA) - straightforward
+something specific to how we'd embed it. **UPDATE 2026-09-23: KYYR was
+later added anyway, via `publishedschedule` on a completely different
+platform (streamingpulse.com, supplied fresh by Larry) - then removed
+again the same day for the same underlying mixed-content family of
+problem.** See "KYYR 'The Bridge of Hope' (Yakima, WA)" in
+`radio-station-published-schedule-notes.md` for the full story - this is
+now the second independent confirmation that this station's streaming
+infrastructure doesn't reliably support HTTPS embedding, across two
+unrelated hosting platforms. KQIP (Chico, CA) - straightforward
 single-mount Icecast setup (`host: 'kqip-streamt.ccchico.com'`,
 `mount: 'stream.mp3'`), notable only for needing `noArtistSplit: true`
 (see gotcha above) since its teaching-content titles are scripture
@@ -1074,6 +1164,22 @@ per-station Vue-based player pages at `elasticplayer.xyz/{slug}/`.
 - `image_url` was `null` for every entry seen so far - `coverUrl` handling
   is in place for when it's populated, just unconfirmed in practice.
 
+**UPDATE 2026-09-23: logo added, confirming `image_url` is still always
+null.** Larry re-checked this station (thinking it hadn't been added yet -
+it had, back when it was first found on this platform) and sent a fresh
+`history` sample plus a "WTTP FM RADIO" logo. The new sample's `image_url`
+values were null across every entry again, consistent with the original
+finding, so this is a clean fit for the same `staticCoverUrl` fallback-only
+pattern used elsewhere (KBLD, WorshipLifeRadio) - added as `staticCoverUrl`/
+`staticCoverThumbUrl` on the existing `thevoice` entry. Source logo had a
+black background filling the frame with the text cramped in the upper-left
+and a big empty gap below its underline accent; tightly cropped to the
+visible content (10px margin) and re-centered on a black square canvas
+before resizing, rather than just padding the original frame, so the result
+reads as centered per Larry's request instead of top-heavy. Larry chose to
+keep the display name "The Voice" rather than rename it to match the logo's
+own "WTTP FM" branding.
+
 **Stations currently configured:** The Voice (WTTP).
 
 ---
@@ -1214,7 +1320,37 @@ principle as other inconsistent-format providers elsewhere in this doc
 (see ElasticPlayer above for a similar case). Revisit only if a cleaner,
 reliably-distinguishable pattern emerges across more Radio.co stations.
 
-**Stations currently configured:** KLYT.
+**Stations currently configured:** KLYT, Simple Truths Radio.
+
+**Gotcha confirmed 2026-10-03 while adding Simple Truths Radio (Calvary
+Chapel Pasadena) - the stream subdomain is NOT a fixed, site-wide Radio.co
+convention, even though every station added here so far happened to put
+it right in the station fields.** Three real Radio.co stations in this
+file use three different stream hosts: KLYT uses `s5.radio.co`, WAOG-LP
+below uses `streaming.radio.co`, and Simple Truths Radio uses
+`stream.radio.co`. Pattern-matching a new station's `streamUrl` off an
+existing one's host (e.g. assuming "it's always s5.radio.co, just swap
+the station ID") is a real trap - it was tried here first and produced a
+URL that looked identical in shape but returned a genuine HTTP 403 "Access
+to ... was denied" when actually loaded, while the correct host loaded
+fine and served real `audio/mpeg`. **Always get the actual host from the
+station's own page** rather than guessing: the status JSON's own
+`"streaming_hostname"` field names it directly, and/or the station's live
+embed player page (`https://embed.radio.co/player/{embedId}.html`, found
+in the station's own radio page source) will have the real
+`https://{host}/{stationId}` URL baked into its script output - confirmed
+by loading that embed page and grepping its HTML/JS for `radio.co` URLs.
+
+**Simple Truths Radio (Calvary Chapel Pasadena, CA)** - `stationId`
+`s6b48fcaa7`, `streamUrl` `https://stream.radio.co/s6b48fcaa7/listen`.
+Worth noting: the display name came from the stream's own
+self-identification (liner drops in its `history` array literally say
+"Simple Truths Radio - ..."; the live embed player's own page title is
+also "Simple Truths Radio"), not from the station's homepage branding -
+that page (`https://calvarychapelpasadena.com/radio`) actually markets a
+different, on-demand program name ("Keep It Simple Talk Show," hosted by
+Xavier Ries). The internet-radio stream and the named talk show appear to
+be two different things sharing one page.
 
 **WAOG-LP / The Shield FM (Aberdeen, NC)** — investigated and **not added**,
 per the no-now-playing-data policy (see the "Adding a new station" checklist,
@@ -1456,6 +1592,238 @@ primary title/artist data from Triton itself.
 
 ---
 
+## Provider: `citrus3`
+
+**Discovered while adding WorshipLifeRadio (San Clemente, CA - a Calvary
+Chapel San Clemente ministry).** citrus3 (`citrus3.com`) is a multi-tenant
+radio hosting panel - the URLs are per-station/per-account, not a shared
+constant, similar in shape to SecureNetSystems/RadioKing above.
+
+**Station fields needed:**
+- `panelHost` - the host:port serving this station's own citrus3 panel
+  (e.g. `fast.citrus3.com:2020` for WorshipLifeRadio). Confirmed this
+  varies per account/node, not just per station name: a totally different
+  station on the same platform, WJWD, lives on `lunar.citrus3.com:8034` -
+  always take this from the station's own player page URL, never assume
+  it's shared.
+- `slug` - the station's own path segment on that panel host (e.g.
+  `worshipliferadio`), used in both endpoints below.
+
+**Now-playing endpoint:**
+`https://{panelHost}/AudioPlayer/{slug}/playerInfo`
+
+**Response shape (JSON) - confirmed via a real, live fetch:**
+```json
+{"connections":2,"nowplaying":"Rivers & Robots - We Have Overcome"}
+```
+- One combined `"Artist - Title"` string (not separate fields) - split on
+  the first literal `" - "` (space-hyphen-space). A bare title with no
+  artist just falls through to the whole string as title, same fallback
+  shape used elsewhere in this file.
+- `connections` is a live listener count, not display text - present but
+  unused.
+
+**Cover art needs a SEPARATE call** - easy to assume wrongly by analogy
+with `radioboss`'s single-endpoint pattern, so worth calling out clearly:
+`https://{panelHost}/AudioPlayer/{slug}/albumCover`
+```json
+{"coverImage":"https://is1-ssl.mzstatic.com/.../100x100bb.jpg"}
+```
+This is a tiny JSON wrapper, **not a raw image** - confirmed by actually
+reading the response body (`content-type: application/json`, 158 bytes)
+rather than assuming from the endpoint name. The URL inside is an Apple
+Music/iTunes artwork CDN link at the default `100x100bb` size - the same
+CDN `triton`'s own iTunes-lookup fallback hits above, just handed to us
+directly this time instead of having to search for it by title/artist.
+Left at `100x100bb` rather than upsized like `triton`'s `600x600bb` swap,
+since it's not yet confirmed every size variant exists for every track
+this station plays (spoken-word teaching covers in particular, which
+aren't real iTunes songs). Treated as a nice-to-have, same reasoning as
+`triton`'s iTunes lookup - a failed/malformed `albumCover` response
+shouldn't fail the primary title/artist result.
+
+**Underlying stream server confirmed to be Icecast-KH** - the panel's own
+`playerConfig` endpoint (`https://{panelHost}/api/player/{slug}/playerConfig`
+or similar found via DevTools Network while the embedded player was open)
+returns `"type":"icecast_kh"` and a `streamAddress`/`defaultMountUrl`
+pair (`https://fast.citrus3.com:8254` / `stream` for WorshipLifeRadio, so
+`streamUrl` is `https://fast.citrus3.com:8254/stream`). Despite that,
+`playerInfo`'s now-playing shape here is citrus3's own custom wrapper, NOT
+the standard `status-json.xsl` the existing `icecast` provider already
+parses - hence a brand-new provider rather than reusing it.
+
+**Confirmed genuinely live two ways:** a raw `fetch()` HEAD-style check
+against the stream URL itself returned `content-type: audio/aac` with
+live-stream (no-cache) headers, and a screenshot taken a few minutes after
+Larry's own sample showed a different track already playing.
+
+**Stations currently configured:** WorshipLifeRadio.
+
+---
+
+## Provider: `azuracast`
+
+**Discovered while adding Koinonia Radio (Hannover, Germany).** AzuraCast is
+a well-known, widely self-hosted open-source radio automation/streaming
+platform (same tier of legitimacy as Radio.co/RadioKing/Triton above, not
+something reverse-engineered from scratch) - every instance exposes the
+same public station API, no account-specific quirks to reverse-engineer.
+
+**Station fields needed:**
+- `host` - the instance's own domain (e.g. `www.koinonia-radio.de`).
+- `shortcode` - the station's own short identifier on that instance (e.g.
+  `koinonia_radio`), used in the now-playing URL.
+
+**Now-playing endpoint:**
+`https://{host}/api/nowplaying/{shortcode}`
+
+**Response shape (JSON) - confirmed via a real, live fetch, trimmed to the
+relevant part:**
+```json
+{
+  "station": {
+    "frontend": "icecast",
+    "backend": "liquidsoap",
+    "listen_url": "https://www.koinonia-radio.de/listen/koinonia_radio/radio.mp3"
+  },
+  "now_playing": {
+    "song": {
+      "artist": "KJ-52 feat. Funky",
+      "title": "Fuego",
+      "art": "https://www.koinonia-radio.de/api/station/1/art/f40cb413099757dc63326f2a.jpg"
+    }
+  }
+}
+```
+- `artist`/`title` arrive already cleanly split - no combined-string
+  parsing needed, unlike Icecast/Shoutcast/citrus3.
+- Per-track cover art (`song.art`) is right there in the same response - no
+  separate artwork call needed, unlike radioboss/citrus3/triton above.
+- The full payload is much larger than shown (station config, live-DJ
+  status, a `playing_next` entry, a `song_history` array) - all ignored,
+  we only read `now_playing.song`.
+- `station.frontend`/`station.backend` confirm the underlying stack
+  (Icecast + Liquidsoap here) but aren't used directly - `listen_url` is
+  what becomes `streamUrl`, already the correct final stream address with
+  no redirect-following or mount-guessing needed.
+
+**Confirmed genuinely live:** Larry's own captured sample showed "KJ-52
+feat. Funky - Fuego"; an independent re-fetch of the same endpoint minutes
+later returned a different track ("Supertones - escape from reason"),
+confirming the feed updates in real time rather than being frozen.
+
+**Not yet confirmed:** actual audio playback once embedded on the deployed
+(HTTPS) map page - `streamUrl` is HTTPS from the start (no KYYR/Calvary PV
+Radio-style mixed-content risk expected), but per the standard checklist
+this still needs a real playback test on the live site before considering
+the integration fully proven.
+
+**Stations currently configured:** Koinonia Radio (Hannover, Germany).
+
+---
+
+## Provider: `reachradio`
+
+**Discovered while adding Reach Radio.** Larry supplied the homepage
+(reach.radio) and the direct stream URL, but said he couldn't find where
+the site's own displayed now-playing info was coming from. Found via
+Chrome DevTools' Network tab while the homepage was open (not referenced
+anywhere in the rendered HTML/page text) - a genuine Server-Sent Events
+endpoint, bespoke to this one station's own custom-built site (Astro
+frontend, Sanity CMS), not a shared third-party radio platform like every
+other provider above.
+
+**Location correction:** Larry described this as "Phoenix, AZ", but the
+site's own `<title>` on every page and its About page ("690AM 106.7FM -
+ON THE AIR IN TUCSON, AZ") both confirm it's actually based in Tucson.
+Flagged to Larry and confirmed correct.
+
+**Now-playing text endpoint:**
+`https://reach.radio/api/stream-info-sse`
+
+**Response shape - confirmed via a real, live fetch (genuine SSE framing,
+not bare JSON):**
+```
+event: time-update
+id: 1
+data: {"title":"LIVE THE WORD Friday","artist":"Eric Souza"}
+```
+- `title`/`artist` arrive already cleanly split.
+- No cover-art field of any kind in this payload - see "Cover art" below
+  for where that actually comes from. Only one event shape was ever
+  observed (title/artist only) - if a future event shows additional
+  fields, revisit `fetchReachRadioSseNowPlaying`.
+
+**This is a genuinely open, long-lived connection** - unlike every other
+`fetchAndParse` provider above (all one-shot HTTP calls, even `radiomast`'s
+SSE endpoint which appears to hand back its initial state and let the
+fetch complete normally), the server here keeps the connection open for
+future pushes. A plain `fetch().text()` would hang waiting for it to
+close, which may never happen - `fetchReachRadioSseNowPlaying` instead
+reads the response body manually via its own reader, resolves as soon as
+the first `data:` line parses as valid JSON, and cancels the
+reader/connection immediately after (same "connect once, take the first
+real payload, close" shape as `aiir`'s WebSocket handling above, just over
+a readable stream). An 8s timeout (`REACHRADIO_SSE_TIMEOUT_MS`) guards
+against the connection opening but never sending anything.
+
+**Confirmed genuinely live:** the feed's "LIVE THE WORD Friday" / "Eric
+Souza" matched the site's own displayed schedule at the same moment (next
+up: "Turning Point" / Dr. David Jeremiah, 4:30-5:00 PM) - not a stale
+placeholder.
+
+**Cover art - a SECOND, completely separate endpoint, not part of the SSE
+payload at all.** Larry noticed the site shows a per-program photo (e.g.
+Dr. David Jeremiah's photo for "Turning Point") and asked where it was
+coming from, since it isn't visible anywhere in the rendered page. Reading
+the site's own bundled JS (`MediaBarContainer...js`) directly showed the
+mechanism: whenever the SSE pushes a new host name, the client looks it up
+against a locally-cached roster
+(`window.globalState.mediaBarState.teachersList().find(t =>
+t.name.toLowerCase().includes(...))`) to resolve a photo. It's a
+name-matched local lookup, never a live "art" field pushed by the SSE.
+
+That roster comes from `GET https://reach.radio/scheduled-list` - a normal
+(non-streaming) request this Unpoly-based site's own frontend makes for
+its schedule-list UI. Confirmed via a real, live fetch: it returns an HTML
+fragment whose root element carries the actual data as an
+HTML-attribute-encoded JSON blob:
+```html
+<div id="scheduled-list" up-data="{&#34;todayScheduleWithMusicBreaks&#34;:
+[{&#34;name&#34;:&#34;Tony Clark&#34;,&#34;title&#34;:&#34;The Word Made
+Plain&#34;,&#34;photo&#34;:&#34;https://cdn.sanity.io/...jpg&#34;,
+&#34;slug&#34;:&#34;tony-clark&#34;,&#34;time&#34;:&#34;5:00 AM - 5:30
+AM&#34;,&#34;startTime&#34;:&#34;5:00 AM&#34;,&#34;endTime&#34;:&#34;5:30
+AM&#34;},...],&#34;allTeachers&#34;:[...]}">
+```
+`parseReachRadioScheduleHtml` extracts and HTML-decodes that attribute,
+then reads `allTeachers` (not `todayScheduleWithMusicBreaks`) - the
+deduped name+photo roster, matching what the site's own JS reads from.
+`findReachRadioTeacherPhoto` does the same bidirectional, case-insensitive
+substring match the site's own JS uses (a plain equality check would miss
+real matches, since the SSE's live "artist" string and the roster's
+"name" field aren't always identical - e.g. a shorter on-air name vs. a
+fuller published one).
+
+Both fetches (SSE text + schedule roster) run concurrently in
+`fetchReachRadioNowPlaying`, and the roster fetch is treated as a
+nice-to-have exactly like `triton`'s iTunes lookup and `citrus3`'s
+albumCover call above - a failed/unparseable roster fetch just means a
+missing photo, never a failed now-playing result. Sanity-tested the
+HTML-entity decoding and name-matching logic in isolation (including a
+real ampersand-containing name, "Scott & Sean Richards") before shipping.
+
+**Stream URL:** Larry's own supplied direct URL
+(`https://reach.radio/api/audio-stream`) - already HTTPS, same domain as
+the page itself, confirmed returning a real 200 in the browser's own
+Network tab. Not yet independently confirmed as actual audio playback
+once embedded on the deployed map page - per the standard checklist, test
+real playback on the deployed site before considering this fully proven.
+
+**Stations currently configured:** Reach Radio (Tucson, AZ).
+
+---
+
 ## Providers we looked at and deliberately did NOT build
 
 Not every station's metadata is worth chasing. These are confirmed dead
@@ -1488,6 +1856,75 @@ specific station actually uses (an SSE `/metadata` call vs. a `streams`
 config with an `icehls` entry) before assuming it's a dead end just
 because this one endpoint was.
 
+**UPDATE 2026-09-22: Crossway Radio added, via the `publishedschedule`
+provider** rather than the rejected `/metadata` feed above - see
+`radio-station-published-schedule-notes.md` for the full transcription
+notes. Along the way, a second wrinkle surfaced that this original
+writeup didn't know about: Crossway actually broadcasts on two separate
+FM frequencies (88.9 and 89.1), each with its **own** Live365 mount -
+`a62921` (documented here) is 89.1, while 88.9 turned out to be a
+completely different mount, `a63431`, never investigated before. Larry
+initially heard what sounded like two different programs across the two
+frequencies; confirmed by listening more closely that it's the same
+programming on both, just ~10+ seconds out of sync between the two
+independent relays - not two different feeds needing two different
+schedules, just two encodes of one. `streamUrl` for the added station
+uses the 88.9 mount (`https://streaming.live365.com/a63431`), matching
+the station logo supplied.
+
+**The "aio-radio" player (maindigitalstream.com-hosted, actual audio on
+streamingpulse.com) - confirmed via Faith FM (Eastern Long Island, NY)** -
+a self-hosted `sp-future`/`aio-radio.min.js` player template
+(`https://us7.maindigitalstream.com/{id}/`). The player's own channel
+config call (`?c=all&t=sp-future`) cleanly returns the real stream URL
+(`{"streams":{"High Quality":{"mp3":"https://us2.streamingpulse.com/ssl/
+{id}"}}}` - confirmed actually playing via the page's live `<audio>`
+element), but its now-playing polling call
+(`?c={channel name}&_={timestamp}`, fired repeatedly while playing) never
+returns a title/artist field at all - just a bare `{"cache-time":14}`
+heartbeat, both before and after starting playback. No SSE, no gating, no
+spoofed-header workaround to try here - the endpoint simply doesn't carry
+metadata for this station. Faith FM was added via the `publishedschedule`
+provider instead (see `radio-station-published-schedule-notes.md`). Not
+yet known whether every `aio-radio`-hosted station lacks metadata this way
+or whether it's configurable per station (same "don't assume one instance
+speaks for the whole platform" caveat as Live365 above) - worth checking
+the actual response, not assuming, if another `aio-radio` station comes up.
+
+**Radiojar** - first seen via KKJC (McMinnville, OR), confirmed dead there
+(see the `publishedschedule` write-up in
+`radio-station-published-schedule-notes.md`): `https://proxy.radiojar.com/
+api/stations/{streamName}/now_playing/` returns valid JSON but with every
+field permanently null/empty. No provider was ever built for it as a
+result - not a technical dead end like Live365's gating, just genuinely
+empty metadata.
+
+**Calvary PV Radio (Puerto Vallarta, Mexico)** - investigated 2026-09-24,
+**skipped entirely, not added even via `publishedschedule`.** Larry
+supplied the station's page (`https://calvarypv.com/calvary-pv-radio/`,
+embedding a Radiojar widget, `streamName` `3mwyu51d1neuv`) and its stream
+URL directly. Confirmed the identical dead-metadata shape as KKJC at
+`https://proxy.radiojar.com/api/stations/3mwyu51d1neuv/now_playing/` -
+same all-null response. But this station has a SECOND, independent problem
+KKJC didn't have, and it's the one that actually killed it: **the stream
+itself only resolves to plain HTTP, not HTTPS.** `https://stream.radiojar.
+com/3mwyu51d1neuv` 302-redirects to a short-lived signed URL on a specific
+edge node (confirmed twice, two different edge nodes assigned across two
+separate requests - `http://n0f.radiojar.com/3mwyu51d1neuv?rj-ttl=5&rj-
+tok=...` and `http://n12.radiojar.com/...` - both plain HTTP, not just one
+unlucky edge). That's the same hard mixed-content wall that took down
+KYYR the day before - this site is HTTPS, so an `<audio>` src that
+redirects to HTTP gets silently blocked, regardless of what
+`publishedschedule` would otherwise let us do for the missing metadata.
+**Important: this does NOT mean every Radiojar station is HTTP-only** -
+KKJC's own Radiojar stream (`https://stream.radiojar.com/4q1m6fsb0k8uv`)
+was independently confirmed to resolve to a genuinely HTTPS-capable edge,
+so this is evidently a per-account/per-station Radiojar configuration, not
+a platform-wide limitation - check each one directly rather than assuming
+either way. If this station's Radiojar account is ever reconfigured for
+HTTPS delivery, it's a normal `publishedschedule` candidate at that point -
+schedule not yet transcribed, no logo processed, nothing else done here.
+
 ---
 
 ## Finding stream URLs and endpoints for a brand-new station (any provider)
@@ -1516,6 +1953,16 @@ here's the process that's worked so far, roughly in order of how easy it is:
 5. **Double-check you've got the right station** if the page links to
    "sister stations" - it's easy to accidentally save/paste the wrong
    page's source (see the Icecast gotcha above).
+6. **Never assume a shared hosting platform's stream URL shape carries
+   over unchanged from one station to the next - verify every new
+   station's actual host, not just its ID.** Confirmed 2026-10-03 (see
+   the Radio.co provider section above): KLYT, WAOG-LP, and Simple Truths
+   Radio are all on Radio.co, but use three different stream subdomains
+   (`s5.`, `streaming.`, `stream.`). Swapping in a new station ID on an
+   existing station's known-good URL can produce something that looks
+   right but 403s for real. Get the new station's actual stream host from
+   its own embed/player page or status feed every time, even when adding
+   a station on a platform you've already added several of.
 
 ## Frontend ticker/mini-player behavior (in `index.html`)
 
