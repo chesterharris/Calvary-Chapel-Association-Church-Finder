@@ -3886,12 +3886,207 @@
     return !!l && typeof l.viewCount === 'number' && !isNaN(l.viewCount);
   }
 
+  // Short location tag shown after a church name in the Live Now list -
+  // "(AZ)" for a US state, "(CAN)" Canada, "(MX)" Mexico, "(UK)" United
+  // Kingdom, otherwise the country's ISO code (JP, AU, FR...). Derived
+  // from the church's own citystatezip text at display time; nothing is
+  // ever written back into the church record. Returns '' when it can't
+  // tell - deliberately no guessing, so an unreadable address just shows
+  // the plain name. Foreign countries whose 2-letter ISO code is also a
+  // US state use the 3-letter ISO code instead so "(DE)" always means
+  // Delaware, never Germany (Germany/DEU, India/IND, Colombia/COL,
+  // Panama/PAN, Israel/ISR, Indonesia/IDN, Argentina/ARG and so on - the
+  // third column of the country table below). Canada is "CAN" rather than
+  // "CA" for the same reason (California).
+  //
+  // Check order matters: a valid US state + 5-digit zip wins first (so
+  // Nederland, CO isn't read as the Netherlands), then looser US forms,
+  // then country names, then Canadian/UK postal shapes, then Mexico.
+  function churchLocationCode(citystatezip) {
+    const raw = String(citystatezip || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    const US_STATES = {AL:1,AK:1,AZ:1,AR:1,CA:1,CO:1,CT:1,DE:1,FL:1,GA:1,HI:1,ID:1,IL:1,IN:1,IA:1,KS:1,KY:1,LA:1,ME:1,MD:1,MA:1,MI:1,MN:1,MS:1,MO:1,MT:1,NE:1,NV:1,NH:1,NJ:1,NM:1,NY:1,NC:1,ND:1,OH:1,OK:1,OR:1,PA:1,RI:1,SC:1,SD:1,TN:1,TX:1,UT:1,VT:1,VA:1,WA:1,WV:1,WI:1,WY:1,DC:1,PR:1,GU:1};
+    const CA_PROV = {AB:1,BC:1,MB:1,NB:1,NL:1,NS:1,NT:1,NU:1,ON:1,PE:1,QC:1,SK:1,YT:1};
+    // [pattern, 2-letter code, 3-letter code used only if the 2-letter code is also a US state]
+    const COUNTRIES = [
+      [/\b(united kingdom|england|scott?land|wales|northern ireland)\b|(^|[\s,])uk\b/i, 'UK'],
+      [/\bcanada\b/i, 'CAN'],
+      [/\bm[eé]xico\b/i, 'MX'],
+      [/\bjapan\b|\bprefecture\b|\b(okinawa|saitama)\b/i, 'JP'],
+      [/\bphilippines\b/i, 'PH'],
+      [/\bfrance\b/i, 'FR'],
+      [/\bgermany\b|deutschland/i, 'DE', 'DEU'],
+      [/\baustralia\b/i, 'AU'],
+      [/\bnew zealand\b/i, 'NZ'],
+      [/\bliberia\b/i, 'LR'],
+      [/\bghana\b/i, 'GH'],
+      [/\bnigeria\b/i, 'NG'],
+      [/\bkenya\b/i, 'KE'],
+      [/\buganda\b/i, 'UG'],
+      [/\bindia\b/i, 'IN', 'IND'],
+      [/\bbrazil\b|\bbrasil\b/i, 'BR'],
+      [/\bargentina\b/i, 'AR', 'ARG'],
+      [/\bchile\b/i, 'CL'],
+      [/\bperu\b/i, 'PE'],
+      [/\bcolombia\b/i, 'CO', 'COL'],
+      [/\bpanam[aá]\b/i, 'PA', 'PAN'],
+      [/\bcosta rica\b/i, 'CR'],
+      [/\bhonduras\b/i, 'HN'],
+      [/\bbelize\b/i, 'BZ'],
+      [/\bel salvador\b/i, 'SV'],
+      [/\bguatemala\b/i, 'GT'],
+      [/\bnicaragua\b/i, 'NI'],
+      [/\becuador\b/i, 'EC'],
+      [/\bbolivia\b/i, 'BO'],
+      [/\bvenezuela\b/i, 'VE'],
+      [/\bparaguay\b/i, 'PY'],
+      [/\buruguay\b/i, 'UY'],
+      [/\bdominican republic\b/i, 'DO'],
+      [/\bhaiti\b/i, 'HT'],
+      [/\bjamaica\b/i, 'JM'],
+      [/\bcuba\b/i, 'CU'],
+      [/\bbahamas\b/i, 'BS'],
+      [/\bspain\b|espa[nñ]a/i, 'ES'],
+      [/\bitaly\b|italia/i, 'IT'],
+      [/\bnetherlands\b|holland|\bnederland\b/i, 'NL'],
+      [/\bsweden\b/i, 'SE'],
+      [/\bnorway\b/i, 'NO'],
+      [/\bdenmark\b/i, 'DK'],
+      [/\bfinland\b|suomi/i, 'FI'],
+      [/\bswitzerland\b/i, 'CH'],
+      [/\bireland\b/i, 'IE'],
+      [/\baustria\b|[öo]sterreich/i, 'AT'],
+      [/\bbelgium\b|belgi[eë]/i, 'BE'],
+      [/\bluxembourg\b/i, 'LU'],
+      [/\bhungary\b|magyarorsz/i, 'HU'],
+      [/\bpoland\b/i, 'PL'],
+      [/\bromania\b/i, 'RO'],
+      [/\bukraine\b/i, 'UA'],
+      [/\bgreece\b/i, 'GR'],
+      [/\bcyprus\b/i, 'CY'],
+      [/\bportugal\b/i, 'PT'],
+      [/\bczech\b/i, 'CZ'],
+      [/\bslovakia\b/i, 'SK'],
+      [/\bcroatia\b/i, 'HR'],
+      [/\bserbia\b/i, 'RS'],
+      [/\bbulgaria\b/i, 'BG'],
+      [/\brussia\b/i, 'RU'],
+      [/\bturkey\b|t[üu]rkiye/i, 'TR'],
+      [/\bmoldova\b/i, 'MD', 'MDA'],
+      [/\bmalta\b/i, 'MT', 'MLT'],
+      [/\balbania\b/i, 'AL', 'ALB'],
+      [/\bmontenegro\b/i, 'ME', 'MNE'],
+      [/\bmorocco\b/i, 'MA', 'MAR'],
+      [/\btunisia\b/i, 'TN', 'TUN'],
+      [/\bsudan\b/i, 'SD', 'SDN'],
+      [/\blaos\b/i, 'LA', 'LAO'],
+      [/\bmongolia\b/i, 'MN', 'MNG'],
+      [/\bseychelles\b/i, 'SC', 'SYC'],
+      [/\bisrael\b/i, 'IL', 'ISR'],
+      [/\bindonesia\b/i, 'ID', 'IDN'],
+      [/\bsouth africa\b/i, 'ZA'],
+      [/\bzambia\b/i, 'ZM'],
+      [/\bzimbabwe\b/i, 'ZW'],
+      [/\btanzania\b/i, 'TZ'],
+      [/\bethiopia\b/i, 'ET'],
+      [/\brwanda\b/i, 'RW'],
+      [/\bburundi\b/i, 'BI'],
+      [/\bmalawi\b/i, 'MW'],
+      [/\bmozambique\b/i, 'MZ'],
+      [/\bsierra leone\b/i, 'SL'],
+      [/\bcameroon\b/i, 'CM'],
+      [/\begypt\b/i, 'EG'],
+      [/\blebanon\b/i, 'LB'],
+      [/\bjordan\b/i, 'JO'],
+      [/\bpakistan\b/i, 'PK'],
+      [/\bnepal\b/i, 'NP'],
+      [/\bbangladesh\b/i, 'BD'],
+      [/\bsri lanka\b/i, 'LK'],
+      [/\bvietnam\b/i, 'VN'],
+      [/\bcambodia\b/i, 'KH'],
+      [/\bthailand\b/i, 'TH'],
+      [/\bmalaysia\b/i, 'MY'],
+      [/\bsingapore\b/i, 'SG'],
+      [/\btaiwan\b/i, 'TW'],
+      [/\bhong kong\b/i, 'HK'],
+      [/\bkorea\b/i, 'KR'],
+      [/\bchina\b/i, 'CN']
+    ];
+    // Strongest US signal: valid state code + 5-digit zip at the end. Checked
+    // before the country words so a US town that shares a country's name
+    // (Nederland, CO) isn't misread as that country.
+    const mStrict = raw.match(/(?:^|[\s,])([A-Za-z]{2})\.?,?\s+\d{5}(?:-\d{4})?\??\s*$/);
+    if (mStrict && US_STATES[mStrict[1].toUpperCase()]) return mStrict[1].toUpperCase();
+    // US state: "ST 12345" / "ST, 12345" (zip may be sloppy) or trailing ", ST".
+    const mZip = raw.match(/(?:^|[\s,])([A-Za-z]{2})\.?,?\s+\d{4,6}(?:-\d{4})?\??(?:,?\s*(?:usa|u\.s\.a\.?|united states))?\s*$/i);
+    if (mZip && US_STATES[mZip[1].toUpperCase()]) return mZip[1].toUpperCase();
+    const mEnd = raw.match(/,\s*([A-Za-z]{2})\.?(?:,?\s*(?:usa|u\.s\.a\.?|united states))?\s*$/i);
+    if (mEnd && US_STATES[mEnd[1].toUpperCase()]) return mEnd[1].toUpperCase();
+    const hasUsa = /\b(usa|u\.s\.a\.?|united states)\b/i.test(raw);
+    if (!hasUsa) {
+      for (const [re, code2, code3] of COUNTRIES) {
+        if (re.test(raw)) return (US_STATES[code2] && code3) ? code3 : code2;
+      }
+    }
+    if (/\bC\.A\.?\s+\d{5}/.test(raw)) return 'CA'; // "Bellflower C.A 90706"
+    // Canada: province code with a Canadian postal code, or province name.
+    const mProv = raw.match(/(?:^|[\s,])([A-Za-z]{2})\.?,?\s+[A-Za-z]\d[A-Za-z]\s?\d?[A-Za-z]?\d*\s*$/);
+    if (mProv && CA_PROV[mProv[1].toUpperCase()]) return 'CAN';
+    if (/\b(british columbia|alberta|saskatchewan|manitoba|ontario|quebec|qu[eé]bec|nova scotia|new brunswick|newfoundland|prince edward island)\b/i.test(raw)) return 'CAN';
+    // UK postcode shape (e.g. "BD10 8SA", "NG183FS") at the end of the text.
+    if (/(?:^|[\s,])[A-Za-z]{1,2}\d[A-Za-z\d]?\s?\d[A-Za-z]{2}\s*$/.test(raw)) return 'UK';
+    // Mexico: explicit Baja / Sonora / known-city markers only. (A bare dash where
+    // the state would be is NOT enough on its own - an Italian entry uses it too.)
+    if (/\b(b\.\s?c\.(?:c\.p\.)?|bcn|baja california|sonora|son\.|tijuana|mexicali|tecate|rosarito|ensenada|san felipe|caborca|san quint[ií]n|san luis r[ií]o colorado|los algodones|vizcaino|primo tapia)\b/i.test(raw)) return 'MX';
+    return '';
+  }
+
+  // Hand-picked tags that win over the address parser above: churches whose
+  // address text it can't read (no country or state written in it), plus
+  // names where the plain state code would mislead. Keyed by church id; the
+  // value is the exact tag shown after the name. To retire an entry, put the
+  // country in that church's citystatezip instead (or add a rule above).
+  const LIVE_NOW_TAG_OVERRIDES = {
+    '618': 'Los Angeles', // Core Church LA - "LA" alone reads as Louisiana
+    '635': 'Los Angeles', // Calvary Chapel Coastline LA - same reason
+    '1341': 'DEU', // Calvary Chapel Düsseldorf (Germany)
+    '1368': 'FR',  // Calvary Bourges La Chapelle (France)
+    '1449': 'IT',  // Chiesa Cristiana Evangelica, Frascati (Italy)
+    '1491': 'ISR', // Calvary Chapel Haifa (Israel; ISR because IL = Illinois)
+    '1520': 'MX'   // Semilla Cuernavaca (Mexico)
+  };
+
   // The name actually shown on a card (see the .live-now-channel line in
-  // renderLiveNowList) - author when we have it, else the church's own
-  // name. "Alphabetical" sorts on this, not the bare church record name,
-  // so the sort order matches what a visitor is looking at top-to-bottom.
+  // renderLiveNowList) - the church's own name plus its location tag.
+  // "Alphabetical" sorts on this, so the sort order matches what a
+  // visitor is looking at top-to-bottom.
   function liveEntryDisplayName(l) {
-    return (l && (l.author || l.name)) || '';
+    if (!l) return '';
+    // Always the church's own name from our database (same name the map
+    // popup shows) plus a short location tag - never the YouTube channel
+    // name ("author"), which is whatever the channel owner typed and is
+    // often an unreadable abbreviation (CalvaryCG, CCORL). The church
+    // record is looked up fresh by id so a renamed church shows its new
+    // name immediately; l.name (the name captured when the check ran) is
+    // only the fallback if the record can't be found, and the YouTube
+    // author is the last resort so a card is never blank.
+    const church = findChurchById(l.churchId);
+    const baseName = (church && church.name) || l.name || l.author || '';
+    let code = '';
+    if (church) {
+      // A hand-picked tag wins over the address parser (see the table above);
+      // otherwise read it from the address.
+      code = LIVE_NOW_TAG_OVERRIDES[String(church.id)] || churchLocationCode(church.citystatezip);
+    }
+    if (!code) return baseName;
+    // If the stored name already ends with that same tag - "Calvary Chapel
+    // Tri-Cities (TN)" - don't print it twice.
+    const tail = baseName.match(/[(\[]\s*([^()\[\]]+?)\s*[)\]]\s*$/);
+    if (tail && tail[1].toLowerCase() === code.toLowerCase()) return baseName;
+    // Same for a bare trailing code that is part of the church's name
+    // ("Refuge MN" in St. Cloud, MN) - the name already says it.
+    if (code.length === 2 && baseName.slice(-3).toUpperCase() === ' ' + code) return baseName;
+    return baseName + ' (' + code + ')';
   }
 
   // Case-insensitive compare on that same displayed name - matches the
@@ -4044,7 +4239,7 @@
         actionsHtml +
         thumbHtml +
         '<div class="live-now-info">' +
-          '<div class="live-now-channel">' + escapeHtml(l.author || l.name || '') + '</div>' +
+          '<div class="live-now-channel">' + escapeHtml(liveEntryDisplayName(l)) + '</div>' +
           '<div class="live-now-title">' + escapeHtml(titleText) + '</div>' +
           '<div class="live-now-desc">' + escapeHtml(truncateText(l.description, 120)) + '</div>' +
           '<div class="live-now-meta">' +

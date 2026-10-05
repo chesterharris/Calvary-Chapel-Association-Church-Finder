@@ -246,6 +246,49 @@ the initial page source.
   seconds is plenty; per-second is unnecessary for a "minutes" level of
   precision).
 
+### Update 2026-10-05 - card name is now the KV church name plus a location tag
+
+This supersedes the "Channel name (`author`)" line above. The YouTube
+channel name is whatever the channel owner typed and is often unreadable
+(CalvaryCG, CCORL), so the LIVE NOW card now always shows the church's own
+name from the KV database - the same name as the map popup - followed by a
+short location tag: "Calvary Chapel Casa Grande (AZ)".
+
+- **Where:** LIVE NOW list only. The map popup is deliberately unchanged
+  (it already shows the full address and the pin).
+- **Name source order** (`liveEntryDisplayName` in `public/index.html`):
+  the church record looked up fresh by id (so a rename shows immediately),
+  then `l.name` captured at check time, then the YouTube `author` as a last
+  resort so a card is never blank. "Alphabetical" sorting uses this same
+  displayed name.
+- **Tag format:** parentheses, always. US = state code; Mexico `MX`; United
+  Kingdom `UK`; Canada `CAN` (not `CA`, which is California); every other
+  country = its ISO code (JP, AU, FR, IT...). A foreign country whose
+  2-letter code is also a US state gets the 3-letter code so "(DE)" always
+  means Delaware: Germany `DEU`, Israel `ISR`, Colombia `COL`, Panama `PAN`,
+  India `IND`, Indonesia `IDN`, Argentina `ARG`, and a few small ones.
+- **Computed, never stored:** `churchLocationCode(citystatezip)` reads the
+  church's address text at display time; nothing is written back to KV.
+  Check order matters: strict US "ST + 5-digit zip" first (so Nederland, CO
+  is not the Netherlands), then looser US forms, then country names, then
+  Canadian/UK postal shapes, then Mexico markers (Baja/Sonora/known border
+  cities - a bare dash is not enough, an Italian entry uses one). If it
+  can't tell it returns nothing and the plain name is shown - no guessing.
+  On the 1,462 churches in KV on 2026-10-04 only 5 were unreadable.
+- **Hand-picked overrides** (`LIVE_NOW_TAG_OVERRIDES`, keyed by church id,
+  wins over the parser): 1341 Düsseldorf `DEU`, 1368 Bourges `FR`, 1449
+  Frascati `IT`, 1491 Haifa `ISR`, 1520 Cuernavaca `MX`, and 618 / 635
+  (Core Church LA, Calvary Chapel Coastline LA) `Los Angeles`, because "LA"
+  alone reads as Louisiana. To retire an override, put the country in that
+  church's citystatezip.
+- **No double tag:** if the stored name already ends with the same tag
+  ("Calvary Chapel Tri-Cities (TN)", "Refuge MN") the tag is not added
+  again. Names that only contain the state mid-name ("Calvary Chapel Medford
+  Oregon") still get the tag, so clean those in KV.
+- **KV name cleanup** done by hand from `CCA-KV-name-cleanup-list.xlsx`
+  (names that already carried a state/country, state names in names, and
+  parenthetical "formerly" notes).
+
 ---
 
 ## 4. Open questions / not yet decided
