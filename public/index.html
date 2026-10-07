@@ -1089,6 +1089,88 @@
   #liveDebugPanel {
     width: 520px;
   }
+
+  /* ---- Weekly Program Schedule (admin-only preview) ----
+     Same right-hand drawer as Live Debug on desktop, full-screen takeover on
+     phones (see the 720px block below and body.mobile-schedule-open). */
+  #programSchedulePanel { width: 560px; }
+  .ps-admin-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    background: var(--ember); color: #fff; padding: 2px 6px;
+    border-radius: 3px; margin-left: 8px; vertical-align: middle;
+  }
+  .ps-days { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 12px 16px 2px; font-size: 14px; }
+  .ps-day {
+    background: none; border: none; padding: 3px 0; margin: 0; font: inherit;
+    font-weight: 500; letter-spacing: 0.02em; color: #2c6fb7;
+    text-decoration: underline; cursor: pointer;
+  }
+  .ps-day.active { color: var(--ink); font-weight: 800; text-decoration: none; cursor: default; }
+  .ps-sub { padding: 4px 16px 8px; font-size: 12px; color: var(--ink); opacity: 0.7; }
+  .ps-body { flex: 1; overflow-y: auto; padding: 0 16px 16px; font-size: 14px; }
+  .ps-generic {
+    background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--evergreen);
+    border-radius: 4px; padding: 12px 14px; margin: 6px 0 12px;
+  }
+  .ps-generic strong { display: block; font-size: 15px; margin-bottom: 2px; }
+  .ps-generic span { font-size: 12.5px; opacity: 0.8; }
+  .ps-subhead { font-weight: 700; color: var(--evergreen); font-size: 12.5px; margin: 14px 0 2px; }
+  .ps-head, .ps-row {
+    display: grid; grid-template-columns: 78px minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 3px 12px;
+  }
+  .ps-head {
+    font-weight: 700; font-size: 12px; color: var(--evergreen);
+    border-bottom: 2px solid var(--line); padding: 6px 0;
+  }
+  .ps-row { padding: 9px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .ps-time { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ps-church { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .ps-church a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--brass); cursor: pointer; }
+  .ps-title { min-width: 0; overflow-wrap: anywhere; }
+  .ps-title-input { width: 100%; box-sizing: border-box; font: inherit; padding: 4px 6px; margin-bottom: 4px; }
+  /* New (seen once) and building programs are drawn lighter on purpose so a
+     solid, steady weekly program stands out from one we're still learning. */
+  .ps-row.st-new .ps-time, .ps-row.st-new .ps-church, .ps-row.st-new .ps-title { opacity: 0.5; font-weight: 400; font-style: italic; }
+  .ps-row.st-emerging .ps-time, .ps-row.st-emerging .ps-church, .ps-row.st-emerging .ps-title { opacity: 0.75; }
+  .ps-row.lapsed .ps-time, .ps-row.lapsed .ps-church, .ps-row.lapsed .ps-title { opacity: 0.4; }
+  .ps-row.is-hidden .ps-time, .ps-row.is-hidden .ps-church, .ps-row.is-hidden .ps-title { opacity: 0.35; text-decoration: line-through; }
+  .ps-meta {
+    grid-column: 2 / -1; font-size: 11.5px; color: var(--ink); opacity: 0.85;
+    display: flex; flex-wrap: wrap; gap: 3px 10px; align-items: center;
+  }
+  .ps-pill {
+    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 9px;
+    border: 1px solid; letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .ps-pill.new { color: var(--ember); border-color: var(--ember); }
+  .ps-pill.emerging { color: #8a6d1f; border-color: var(--brass); }
+  .ps-pill.steady { color: var(--evergreen); border-color: var(--evergreen); }
+  .ps-pill.live { color: #fff; background: var(--ember); border-color: var(--ember); }
+  .ps-act { background: none; border: none; padding: 0; font: inherit; font-size: 11.5px; color: #2c6fb7; text-decoration: underline; cursor: pointer; }
+  .ps-warn { color: #b45309; }
+  .ps-empty { padding: 22px 4px; opacity: 0.7; font-size: 13.5px; }
+  .ps-footer { border-top: 1px solid var(--line); padding: 8px 16px 10px; font-size: 11.5px; color: var(--ink); opacity: 0.8; }
+  .ps-footer label { cursor: pointer; }
+  @media (max-width: 600px) {
+    .ps-head, .ps-row { grid-template-columns: 70px minmax(0, 1fr); }
+    .ps-head .ps-h-study { display: none; }
+    .ps-title, .ps-meta { grid-column: 2 / -1; }
+  }
+  @media (max-width: 720px) {
+    #programSchedulePanel {
+      position: fixed; inset: 0; width: 100%; max-width: none;
+      box-shadow: none; z-index: 1700;
+    }
+    #programSchedulePanel .side-panel-header { gap: 10px; }
+    #programSchedulePanel .side-panel-header .btn-close { display: none; }
+    #programSchedulePanel .mobile-panel-back-btn,
+    #programSchedulePanel .mobile-panel-spacer { display: flex; }
+    #programSchedulePanel .side-panel-header h2 {
+      flex: 1; min-width: 0; margin: 0; text-align: center; text-transform: uppercase;
+      font-size: 18px; line-height: 1.25; letter-spacing: 0.04em;
+    }
+  }
   /* Hidden by default (desktop) - see the 720px rule below, where these
      take over from the "x" close button for #radioBrowsePanel,
      #liveNowPanel, #liveDebugPanel and #managePanel, the four panes still
@@ -2353,14 +2435,14 @@
      map, and the desktop mini-player all step aside so nothing competes
      with it for a driver's glance. Each pane's own top bar/close control
      is the only way back. */
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) header,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #conferenceTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #radioTicker,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #mobilePrimaryRow,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #filterBar,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #map,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #countBadge,
-  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-manage-open, .mobile-addloc-open) #radioPlayerBar {
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) header,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #conferenceTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #radioTicker,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #mobilePrimaryRow,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #filterBar,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #map,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #countBadge,
+  body:is(.mobile-picker-open, .mobile-conf-open, .mobile-browse-open, .mobile-livenow-open, .mobile-livedebug-open, .mobile-schedule-open, .mobile-manage-open, .mobile-addloc-open) #radioPlayerBar {
     display: none !important;
   }
   body.mobile-picker-open #mobileRadioPicker {
@@ -2733,6 +2815,7 @@
       <button id="btnRadioBrowse" class="btn btn-outline" title="Browse and search all radio stations">📻 All Stations</button>
       <button id="btnFeedback" class="btn btn-outline" title="Send feedback or report an issue">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
+      <button id="btnProgramSchedule" class="btn btn-outline" style="display:none;" title="Admin-only preview: weekly schedule of recurring church Bible studies and programs">📅 Weekly Schedule</button>
       <span id="adminArea" class="admin-area">
         <a href="#" id="adminSignInLink" class="admin-link">Admin</a>
         <span id="adminBadge" class="admin-badge" style="display:none;">Admin ✓ <a href="#" id="adminSignOutLink" class="admin-link admin-signout">Sign out</a></span>
@@ -2772,6 +2855,10 @@
       <button type="button" id="menuLiveDebugItem" class="hamburger-menu-item" style="display:none;">
         <span class="hamburger-menu-icon" aria-hidden="true">🛠️</span>
         <span class="hamburger-menu-label">Live Debug</span>
+      </button>
+      <button type="button" id="menuProgramScheduleItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">📅</span>
+        <span class="hamburger-menu-label">Weekly Schedule</span>
       </button>
       <button type="button" id="menuManageLocationsItem" class="hamburger-menu-item" style="display:none;">
         <span class="hamburger-menu-icon" aria-hidden="true">🗂️</span>
@@ -3330,6 +3417,22 @@
     </div>
   </div>
   <div id="liveDebugContent" class="live-debug-content">Loading...</div>
+</div>
+
+<div id="programSchedulePanel" class="side-panel" style="display: none;">
+  <!-- Admin-only preview of the weekly program schedule (recurring Bible
+       studies etc. gathered from the live checks). See #liveDebugPanel's
+       identical mobile back button + spacer pair. -->
+  <div class="side-panel-header">
+    <button type="button" id="programScheduleMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <h2>📅 Weekly Schedule <span class="ps-admin-tag">ADMIN PREVIEW</span></h2>
+    <button id="closeProgramScheduleBtn" class="btn-close">×</button>
+    <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
+  </div>
+  <div id="psDays" class="ps-days"></div>
+  <div id="psSub" class="ps-sub"></div>
+  <div id="psBody" class="ps-body">Loading...</div>
+  <div id="psFooter" class="ps-footer"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -4070,8 +4173,14 @@
     // name immediately; l.name (the name captured when the check ran) is
     // only the fallback if the record can't be found, and the YouTube
     // author is the last resort so a card is never blank.
-    const church = findChurchById(l.churchId);
-    const baseName = (church && church.name) || l.name || l.author || '';
+    return churchNameWithTag(findChurchById(l.churchId), l.name || l.author || '');
+  }
+
+  // Church name + location tag, shared by the Live Now cards and the admin
+  // Weekly Schedule so a church reads the same everywhere: "Calvary Chapel
+  // Casa Grande (AZ)".
+  function churchNameWithTag(church, fallbackName) {
+    const baseName = (church && church.name) || fallbackName || '';
     let code = '';
     if (church) {
       // A hand-picked tag wins over the address parser (see the table above);
@@ -5013,6 +5122,222 @@
   // Mobile-only back button (see .mobile-panel-back-btn in <style>) - same
   // close behavior as the "x" above, just a bigger/clearer tap target.
   document.getElementById('liveDebugMobileBackBtn').addEventListener('click', closeLiveDebugPanel);
+
+  // ---- Weekly Program Schedule (admin-only preview) ----
+  //
+  // Reads /api/admin/program-schedule (programs the Worker has learned from
+  // the live checks: church + weekday + typical start time + how often it
+  // repeats) and lays them out as day links across the top with a clean
+  // Time / Church / Study table for the chosen day. Every program arrives
+  // with a real UTC instant for its next occurrence, so day and time are
+  // always shown in the VISITOR's own time zone - a Tuesday-night Pacific
+  // study lands under Wednesday for someone in Europe. Sunday and Wednesday
+  // are never recorded (every church streams those), so those two tabs show
+  // a generic message instead.
+  const programSchedulePanel = document.getElementById('programSchedulePanel');
+  const psDaysEl = document.getElementById('psDays');
+  const psSubEl = document.getElementById('psSub');
+  const psBodyEl = document.getElementById('psBody');
+  const psFooterEl = document.getElementById('psFooter');
+  const PS_DAY_SHORT = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const PS_DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  let psData = null;       // last /api/admin/program-schedule response
+  let psDay = new Date().getDay(); // selected day, 0 = Sunday, visitor's local day
+  let psShowHidden = false;
+  let psEditingKey = null; // key of the row whose title is being edited
+
+  function psFmtTime(d) {
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function psFmtMinutes(min) {
+    const h = Math.floor(min / 60);
+    return ((h % 12) || 12) + ':' + String(min % 60).padStart(2, '0') + (h >= 12 ? 'pm' : 'am');
+  }
+  function psFmtDate(iso) {
+    return new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  function psTimeZoneName() {
+    try {
+      const part = new Intl.DateTimeFormat([], { timeZoneName: 'long' }).formatToParts(new Date()).find(function(x) { return x.type === 'timeZoneName'; });
+      return part ? part.value : '';
+    } catch (err) { return ''; }
+  }
+
+  function openProgramSchedulePanel() {
+    programSchedulePanel.style.display = 'flex';
+    if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-schedule-open');
+    psDay = new Date().getDay(); // always opens on today
+    psEditingKey = null;
+    renderProgramSchedule();
+    loadProgramSchedule();
+  }
+  function closeProgramSchedulePanel() {
+    programSchedulePanel.style.display = 'none';
+    document.body.classList.remove('mobile-schedule-open');
+    map.invalidateSize();
+  }
+
+  async function loadProgramSchedule() {
+    try {
+      const res = await fetch('/api/admin/program-schedule', { credentials: 'include', cache: 'no-store' });
+      if (res.status === 401) {
+        psData = null;
+        psBodyEl.innerHTML = '<div class="ps-empty">Admin sign-in required.</div>';
+        return;
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      psData = await res.json();
+      renderProgramSchedule();
+    } catch (err) {
+      psBodyEl.innerHTML = '<div class="ps-empty">Could not load the schedule (' + escapeHtml(err.message || 'error') + ').</div>';
+    }
+  }
+
+  // Every program placed on the visitor's own calendar, via its next
+  // occurrence instant.
+  function psPlacedPrograms() {
+    return ((psData && psData.programs) || []).filter(function(p) { return !!p.nextStartUtc; }).map(function(p) {
+      const d = new Date(p.nextStartUtc);
+      return { p: p, d: d, day: d.getDay(), minutes: d.getHours() * 60 + d.getMinutes() };
+    });
+  }
+
+  function renderProgramSchedule() {
+    // Day links
+    psDaysEl.innerHTML = PS_DAY_SHORT.map(function(label, i) {
+      return '<button type="button" class="ps-day' + (i === psDay ? ' active' : '') + '" data-day="' + i + '">' + label + '</button>';
+    }).join('');
+
+    const tzName = psTimeZoneName();
+    const isToday = psDay === new Date().getDay();
+    psSubEl.textContent = PS_DAY_LONG[psDay] + (isToday ? ' (today)' : '') + ' • times shown in your time zone' + (tzName ? ' (' + tzName + ')' : '');
+
+    if (!psData) {
+      psBodyEl.innerHTML = '<div class="ps-empty">Loading...</div>';
+      psFooterEl.innerHTML = '';
+      return;
+    }
+
+    const placed = psPlacedPrograms();
+    const hiddenCount = placed.filter(function(x) { return x.p.hidden; }).length;
+    let rows = placed.filter(function(x) { return x.day === psDay && (psShowHidden || !x.p.hidden); });
+    rows.sort(function(a, b) {
+      if (a.minutes !== b.minutes) return a.minutes - b.minutes;
+      return String(a.p.churchName).localeCompare(String(b.p.churchName));
+    });
+
+    let html = '';
+    if (psDay === 0) {
+      html += '<div class="ps-generic"><strong>Live Sunday Services</strong><span>Nearly every church streams its Sunday services live. See who is on air right now in Live Now.</span></div>';
+    } else if (psDay === 3) {
+      html += '<div class="ps-generic"><strong>Live Midweek Services</strong><span>Many churches stream a midweek Bible study. See who is on air right now in Live Now.</span></div>';
+    }
+    if (rows.length) {
+      if (psDay === 0 || psDay === 3) html += '<div class="ps-subhead">Also streaming on this day in your time zone</div>';
+      html += '<div class="ps-head"><div>Time</div><div>Church</div><div class="ps-h-study">Study</div></div>';
+      html += rows.map(psRowHtml).join('');
+    } else if (psDay !== 0 && psDay !== 3) {
+      html += '<div class="ps-empty">No programs recorded for ' + PS_DAY_LONG[psDay] + ' yet.' +
+        (psData.sessionCount ? '' : ' The recorder only just started, so streams will appear here as churches go live.') + '</div>';
+    }
+    psBodyEl.innerHTML = html;
+
+    // Footer: collection status + hidden toggle
+    const since = psData.since ? new Date(psData.since) : null;
+    const days = since ? Math.max(0, Math.floor((Date.now() - since.getTime()) / 86400000)) : 0;
+    const diag = psData.diag || {};
+    psFooterEl.innerHTML =
+      '<div>Collecting since ' + (since ? escapeHtml(since.toLocaleDateString([], { month: 'short', day: 'numeric' })) : '?') +
+      ' (' + days + ' day' + (days === 1 ? '' : 's') + ') • ' + (psData.sessionCount || 0) + ' streams recorded • Sundays and Wednesdays are not recorded.' +
+      ' Lighter rows are new or still building; the quarter-hour time is the typical start rounded (early starts round up).</div>' +
+      (diag.noStartDate ? '<div>' + diag.noStartDate + ' live sightings had no start time and were skipped.</div>' : '') +
+      '<div><label><input type="checkbox" id="psShowHiddenCb"' + (psShowHidden ? ' checked' : '') + '> Show hidden rows (' + hiddenCount + ')</label></div>';
+  }
+
+  function psRowHtml(x) {
+    const p = x.p;
+    const church = findChurchById(p.churchId);
+    const label = churchNameWithTag(church, p.churchName);
+    const editing = psEditingKey === p.key;
+    const isLiveNow = liveChurchIds && liveChurchIds.has(p.churchId) && Math.abs(Date.now() - x.d.getTime()) < 3 * 3600000;
+
+    let titleHtml;
+    if (editing) {
+      titleHtml = '<input type="text" class="ps-title-input" id="psTitleInput" maxlength="200" value="' + escapeHtml(p.title || '') + '" placeholder="Title shown on the schedule">' +
+        '<button type="button" class="ps-act ps-act-save" data-key="' + escapeHtml(p.key) + '">Save</button> ' +
+        '<button type="button" class="ps-act ps-act-cancel">Cancel</button>' +
+        (p.titles && p.titles.length ? '<div class="ps-meta" style="grid-column:auto;margin-top:4px;">Recent: ' + p.titles.map(escapeHtml).join(' • ') + '</div>' : '');
+    } else {
+      titleHtml = escapeHtml(p.title || '—');
+    }
+
+    const pillText = p.status === 'steady' ? 'STEADY ✓' : (p.status === 'emerging' ? 'BUILDING' : 'NEW');
+    let meta = '<span class="ps-pill ' + p.status + '">' + pillText + '</span>';
+    if (isLiveNow) meta += '<span class="ps-pill live">● LIVE NOW</span>';
+    meta += '<span>' + escapeHtml(p.patternLabel) + '</span>';
+    meta += '<span>seen ' + p.occurrences + '×, last ' + escapeHtml(psFmtDate(p.lastSeen)) + '</span>';
+    if (p.pattern && (p.pattern.type === 'monthly' || p.pattern.type === 'biweekly')) {
+      meta += '<span><strong>Next: ' + escapeHtml(psFmtDate(p.nextStartUtc)) + '</strong></span>';
+    }
+    if (p.lapsed) meta += '<span class="ps-warn">not seen recently</span>';
+    if (p.tzGuess) meta += '<span class="ps-warn" title="Church time zone was guessed from its location">time zone guessed</span>';
+    meta += '<span title="Average actual start in the church’s own time (' + escapeHtml(p.tz) + ')">avg start ' + escapeHtml(psFmtMinutes(p.medianMin)) + '</span>';
+    meta += '<button type="button" class="ps-act ps-act-edit" data-key="' + escapeHtml(p.key) + '">Edit title</button>';
+    meta += '<button type="button" class="ps-act ps-act-hide" data-key="' + escapeHtml(p.key) + '" data-hide="' + (p.hidden ? '0' : '1') + '">' + (p.hidden ? 'Unhide' : 'Hide') + '</button>';
+    if (p.titleOverride) meta += '<span title="You edited this title">(edited)</span>';
+
+    return '<div class="ps-row st-' + p.status + (p.lapsed ? ' lapsed' : '') + (p.hidden ? ' is-hidden' : '') + '" data-key="' + escapeHtml(p.key) + '">' +
+      '<div class="ps-time">' + escapeHtml(psFmtTime(x.d)) + '</div>' +
+      '<div class="ps-church"><a data-church-id="' + escapeHtml(p.churchId) + '">' + escapeHtml(label) + '</a></div>' +
+      '<div class="ps-title">' + titleHtml + '</div>' +
+      '<div class="ps-meta">' + meta + '</div>' +
+      '</div>';
+  }
+
+  async function psSaveOverride(key, change) {
+    const p = psData && psData.programs.find(function(x) { return x.key === key; });
+    if (!p) return;
+    const body = Object.assign({ churchId: p.churchId, weekday: p.weekday, slotMin: p.slotMin }, change);
+    try {
+      const res = await fetch('/api/admin/program-schedule/override', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      psEditingKey = null;
+      await loadProgramSchedule();
+    } catch (err) {
+      alert('Could not save that change (' + (err.message || 'error') + ').');
+    }
+  }
+
+  programSchedulePanel.addEventListener('click', function(e) {
+    const dayBtn = e.target.closest('.ps-day');
+    if (dayBtn) { psDay = Number(dayBtn.getAttribute('data-day')); psEditingKey = null; renderProgramSchedule(); return; }
+    const link = e.target.closest('.ps-church a');
+    if (link) {
+      const c = findChurchById(Number(link.getAttribute('data-church-id')));
+      if (c) {
+        const lat = parseFloat(c.lat);
+        const lng = parseFloat(c.lng);
+        if (isMobileHeaderBreakpoint()) closeProgramSchedulePanel();
+        if (!isNaN(lat) && !isNaN(lng)) map.setView([lat, lng], 14);
+      }
+      return;
+    }
+    const editBtn = e.target.closest('.ps-act-edit');
+    if (editBtn) { psEditingKey = editBtn.getAttribute('data-key'); renderProgramSchedule(); const inp = document.getElementById('psTitleInput'); if (inp) inp.focus(); return; }
+    if (e.target.closest('.ps-act-cancel')) { psEditingKey = null; renderProgramSchedule(); return; }
+    const saveBtn = e.target.closest('.ps-act-save');
+    if (saveBtn) { psSaveOverride(saveBtn.getAttribute('data-key'), { title: document.getElementById('psTitleInput').value }); return; }
+    const hideBtn = e.target.closest('.ps-act-hide');
+    if (hideBtn) { psSaveOverride(hideBtn.getAttribute('data-key'), { hidden: hideBtn.getAttribute('data-hide') === '1' }); return; }
+    if (e.target.id === 'psShowHiddenCb') { psShowHidden = e.target.checked; renderProgramSchedule(); }
+  });
+  document.getElementById('btnProgramSchedule').addEventListener('click', openProgramSchedulePanel);
+  document.getElementById('closeProgramScheduleBtn').addEventListener('click', closeProgramSchedulePanel);
+  document.getElementById('programScheduleMobileBackBtn').addEventListener('click', closeProgramSchedulePanel);
   liveDebugRunNowBtn.addEventListener('click', function() {
     setDebugButtonsRunning(true);
     // This request stays open for the ENTIRE cycle duration (seen up to
@@ -6755,7 +7080,7 @@
   // takeovers (see the body:is(...) selector in <style>).
   function isMapHiddenByMobileTakeover() {
     const cl = document.body.classList;
-    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open') || cl.contains('mobile-livenow-open') || cl.contains('mobile-livedebug-open') || cl.contains('mobile-manage-open') || cl.contains('mobile-addloc-open');
+    return cl.contains('mobile-picker-open') || cl.contains('mobile-conf-open') || cl.contains('mobile-browse-open') || cl.contains('mobile-livenow-open') || cl.contains('mobile-livedebug-open') || cl.contains('mobile-schedule-open') || cl.contains('mobile-manage-open') || cl.contains('mobile-addloc-open');
   }
 
   function showMiniPlayer() {
@@ -8141,6 +8466,10 @@
         document.body.classList.remove('mobile-livedebug-open');
         map.invalidateSize();
       }
+      if (document.body.classList.contains('mobile-schedule-open')) {
+        document.body.classList.remove('mobile-schedule-open');
+        map.invalidateSize();
+      }
       if (document.body.classList.contains('mobile-manage-open')) {
         document.body.classList.remove('mobile-manage-open');
         map.invalidateSize();
@@ -8179,6 +8508,10 @@
   document.getElementById('menuLiveDebugItem').addEventListener('click', function() {
     closeHamburgerMenu();
     document.getElementById('btnLiveDebug').click();
+  });
+  document.getElementById('menuProgramScheduleItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnProgramSchedule').click();
   });
   document.getElementById('menuManageLocationsItem').addEventListener('click', function() {
     closeHamburgerMenu();
@@ -8339,10 +8672,12 @@
     adminBadge.style.display = isAdmin ? 'inline' : 'none';
     const debugBtn = document.getElementById('btnLiveDebug');
     if (debugBtn) debugBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    const scheduleBtn = document.getElementById('btnProgramSchedule');
+    if (scheduleBtn) scheduleBtn.style.display = isAdmin ? 'inline-block' : 'none';
     // Mirrors the desktop button above for each of the three admin-only ☰
     // menu rows (Live Debug, Manage Locations, Add Location) - hidden
     // until an admin actually signs in, same as btnLiveDebug itself.
-    ['menuLiveDebugItem', 'menuManageLocationsItem', 'menuAddLocationItem', 'menuManageFeaturedVideoItem'].forEach(function(id) {
+    ['menuLiveDebugItem', 'menuProgramScheduleItem', 'menuManageLocationsItem', 'menuAddLocationItem', 'menuManageFeaturedVideoItem'].forEach(function(id) {
       const item = document.getElementById(id);
       if (item) item.style.display = isAdmin ? 'flex' : 'none';
     });

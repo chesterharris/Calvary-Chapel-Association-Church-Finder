@@ -26,6 +26,18 @@ import { WJCX_SCHEDULE } from './radioSchedules/wjcx.js';
 // see the comment at the end of RADIO_STATIONS. The data file
 // (src/radioSchedules/kyyr.js) is untouched; re-add this import when the
 // station is re-added.
+// Weekly program schedule (admin-only preview) - recorder, time zones and the
+// schedule builder all live in this one pure module; see
+// weekly-program-schedule-notes.md.
+import {
+  PROGRAM_SESSIONS_KV_KEY,
+  PROGRAM_OVERRIDES_KV_KEY,
+  PROGRAM_SNAP_EARLY_GRACE_MIN,
+  emptyProgramStore,
+  recordProgramSessions,
+  buildProgramSchedule,
+  programOverrideKey
+} from './program-schedule.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2421,6 +2433,31 @@ async function checkAllChurchesLive(env) {
       allTimePeak: allTimePeak
     }));
 
+    // Weekly program schedule recorder (admin-only preview for now - see
+    // program-schedule.js and weekly-program-schedule-notes.md). Logs one
+    // "session" per broadcast, keyed by church + YouTube's own start time,
+    // from the same liveOnly array as everything above. Wrapped in its own
+    // try/catch on purpose: this is a data-gathering side feature, and a
+    // problem in it must never be able to fail the live check itself. Only
+    // writes to KV when something actually changed.
+    try {
+      const programRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
+      let programStore = null;
+      if (programRaw) {
+        try { programStore = JSON.parse(programRaw); } catch (parseErr) { programStore = null; }
+      }
+      if (!programStore || typeof programStore !== 'object' || !programStore.sessions) {
+        programStore = emptyProgramStore(Date.now());
+      }
+      const churchesById = {};
+      churches.forEach(function(c) { churchesById[c.id] = c; });
+      if (recordProgramSessions(programStore, liveOnly, churchesById, Date.now())) {
+        await env.CHURCHES_KV.put(PROGRAM_SESSIONS_KV_KEY, JSON.stringify(programStore));
+      }
+    } catch (programErr) {
+      console.log('Program schedule recorder failed (live check unaffected): ' + (programErr && programErr.message));
+    }
+
     // Full admin debug snapshot: every eligible church's result (not just
     // live ones, and not just this cycle's batch), plus a rolling history
     // of recent cycles' summary stats so a trend is visible, not just the
@@ -2609,6 +2646,96 @@ async function handleDebugLiveCheckProgress(request, env) {
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
+}
+
+// ---- Weekly program schedule (admin-only preview) ----
+//
+// Phase one: both endpoints are admin-only, so the recorded data never
+// leaves the Worker for a non-admin (not even visible in the network tab).
+// Going public later is a small, separate step - a read-only endpoint that
+// returns the same builder output minus hidden rows - not a rewrite.
+
+function jsonResponse(body, status) {
+  return new Response(JSON.stringify(body), {
+    status: status || 200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function loadProgramOverrides(env) {
+  const raw = await env.CHURCHES_KV.get(PROGRAM_OVERRIDES_KV_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return (parsed && parsed.overrides && typeof parsed.overrides === 'object') ? parsed.overrides : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+// Admin-only, read-only. Rebuilds the schedule from the recorded sessions on
+// every call (a few thousand small records at most - cheap) so edits and new
+// sightings show up immediately. No YouTube requests happen here.
+async function handleGetProgramSchedule(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+  const storeRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
+  let store = null;
+  if (storeRaw) {
+    try { store = JSON.parse(storeRaw); } catch (err) { store = null; }
+  }
+  const now = Date.now();
+  if (!store || !store.sessions) store = emptyProgramStore(now);
+  const churches = await loadChurches(env);
+  const churchesById = {};
+  churches.forEach(function(c) { churchesById[c.id] = c; });
+  const overrides = await loadProgramOverrides(env);
+  const programs = buildProgramSchedule(store, churchesById, overrides, now);
+  return jsonResponse({
+    generatedAt: new Date(now).toISOString(),
+    since: store.since || null,
+    sessionCount: Object.keys(store.sessions).length,
+    diag: store.diag || null,
+    snapGraceMin: PROGRAM_SNAP_EARLY_GRACE_MIN,
+    programs: programs
+  });
+}
+
+// Admin-only. Hide/unhide a program row, or give it a title of your own
+// (an empty title clears the override and goes back to the recorded one).
+// Keyed church + church-local weekday + snapped slot, the same key the builder
+// puts on every program.
+async function handleSaveProgramOverride(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonResponse({ error: 'Bad request body' }, 400);
+  }
+  const churchId = body && body.churchId;
+  const weekday = body && body.weekday;
+  const slotMin = body && body.slotMin;
+  if (typeof churchId !== 'number' || !isFinite(churchId) ||
+      !Number.isInteger(weekday) || weekday < 0 || weekday > 6 ||
+      !Number.isInteger(slotMin) || slotMin < 0 || slotMin > 1439) {
+    return jsonResponse({ error: 'Missing or invalid churchId/weekday/slotMin' }, 400);
+  }
+  const key = programOverrideKey(churchId, weekday, slotMin);
+  const overrides = await loadProgramOverrides(env);
+  const current = Object.assign({}, overrides[key]);
+  if (typeof body.hidden === 'boolean') current.hidden = body.hidden;
+  if (typeof body.title === 'string') {
+    const t = body.title.trim().slice(0, 200);
+    if (t) current.title = t; else delete current.title;
+  }
+  if (!current.hidden) delete current.hidden;
+  if (current.hidden || current.title) overrides[key] = current; else delete overrides[key];
+  await env.CHURCHES_KV.put(PROGRAM_OVERRIDES_KV_KEY, JSON.stringify({ overrides: overrides, updatedAt: new Date().toISOString() }));
+  return jsonResponse({ success: true, key: key, override: overrides[key] || null });
 }
 
 async function handleConferences(request, ctx) {
@@ -5512,6 +5639,12 @@ export default {
     }
     if (url.pathname === '/api/debug/live-check-progress' && request.method === 'GET') {
       return handleDebugLiveCheckProgress(request, env);
+    }
+    if (url.pathname === '/api/admin/program-schedule' && request.method === 'GET') {
+      return handleGetProgramSchedule(request, env);
+    }
+    if (url.pathname === '/api/admin/program-schedule/override' && request.method === 'POST') {
+      return handleSaveProgramOverride(request, env);
     }
     if (url.pathname === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env);
