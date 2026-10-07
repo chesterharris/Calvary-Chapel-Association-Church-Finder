@@ -1146,7 +1146,7 @@
   .ps-pill.new { color: var(--ember); border-color: var(--ember); }
   .ps-pill.emerging { color: #8a6d1f; border-color: var(--brass); }
   .ps-pill.steady { color: var(--evergreen); border-color: var(--evergreen); }
-  .ps-pill.live { color: #fff; background: var(--ember); border-color: var(--ember); }
+  .ps-live-link, .ps-live-link:hover { text-decoration: none; cursor: pointer; display: inline-flex; }
   .ps-act { background: none; border: none; padding: 0; font: inherit; font-size: 11.5px; color: #2c6fb7; text-decoration: underline; cursor: pointer; }
   .ps-warn { color: #b45309; }
   .ps-empty { padding: 22px 4px; opacity: 0.7; font-size: 13.5px; }
@@ -5273,7 +5273,28 @@
 
     const pillText = p.status === 'steady' ? 'STEADY ✓' : (p.status === 'emerging' ? 'BUILDING' : 'NEW');
     let meta = '<span class="ps-pill ' + p.status + '">' + pillText + '</span>';
-    if (isLiveNow) meta += '<span class="ps-pill live">● LIVE NOW</span>';
+    if (isLiveNow) {
+      // Same pulsing two-tone LIVE/NOW badge as the map popup, and the same
+      // one-click behavior: a real <a target="_blank"> link to YouTube (works
+      // with zero JS), intercepted by the panel click handler to open the
+      // in-page video lightbox when a videoId is known and embedding is not
+      // blocked for this church - the identical rule the popup badge uses.
+      const liveEntry = findLiveEntryForChurch(p.churchId);
+      const liveVideoId = (liveEntry && liveEntry.videoId) ? liveEntry.videoId : '';
+      let liveUrl = 'https://www.youtube.com/watch?v=' + encodeURIComponent(liveVideoId);
+      if (!liveVideoId) liveUrl = (liveEntry && liveEntry.channelUrl) ? liveEntry.channelUrl : '';
+      const liveBadge = '<span class="popup-live-badge" role="status" aria-label="Live now">' +
+        '<span class="popup-live-badge-live"><span class="popup-live-dot" aria-hidden="true"></span>Live</span>' +
+        '<span class="popup-live-badge-now">Now</span></span>';
+      if (liveUrl) {
+        meta += '<a href="' + escapeHtml(liveUrl) + '" target="_blank" rel="noopener" class="ps-live-link"' +
+          ' title="Watch live now"' +
+          ' data-live-video-id="' + escapeHtml(liveVideoId) + '"' +
+          ' data-embed-allowed="' + ((church && church.embedAllowed === false) ? 'false' : 'true') + '">' + liveBadge + '</a>';
+      } else {
+        meta += liveBadge;
+      }
+    }
     meta += '<span>' + escapeHtml(p.patternLabel) + '</span>';
     meta += '<span>seen ' + p.occurrences + '×, last ' + escapeHtml(psFmtDate(p.lastSeen)) + '</span>';
     if (p.pattern && (p.pattern.type === 'monthly' || p.pattern.type === 'biweekly')) {
@@ -5313,6 +5334,16 @@
   }
 
   programSchedulePanel.addEventListener('click', function(e) {
+    const liveLink = e.target.closest('.ps-live-link');
+    if (liveLink) {
+      const liveVideoId = liveLink.getAttribute('data-live-video-id');
+      const liveEmbedAllowed = liveLink.getAttribute('data-embed-allowed') !== 'false';
+      if (liveVideoId && liveEmbedAllowed) {
+        e.preventDefault();
+        openLiveVideoLightbox(liveVideoId);
+      }
+      return;
+    }
     const dayBtn = e.target.closest('.ps-day');
     if (dayBtn) { psDay = Number(dayBtn.getAttribute('data-day')); psEditingKey = null; renderProgramSchedule(); return; }
     const link = e.target.closest('.ps-church a');

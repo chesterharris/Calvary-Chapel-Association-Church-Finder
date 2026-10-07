@@ -147,6 +147,13 @@ check itself - and only writes to KV when something actually changed.
 - Per row (admin): status pill, pattern, "seen N times, last <date>", average
   start in church time, **Edit title** (inline), **Hide/Unhide**; "(edited)" if
   a title override exists; "LIVE NOW" pill when that church is live right now.
+  The pill is the same pulsing two-tone LIVE/NOW badge used in the map popup
+  (`.popup-live-badge`), and it behaves the same way: one click opens the
+  in-page video lightbox (`openLiveVideoLightbox`) when the live entry has a
+  videoId and the church's `embedAllowed` is not false; otherwise it falls
+  through to a normal link that opens the stream on YouTube in a new tab.
+  (Updated 2026-10-07 - it was first a static "● LIVE NOW" text pill that did
+  nothing when clicked.)
 - Footer: collecting-since date, streams recorded, and a "Show hidden rows"
   toggle.
 
