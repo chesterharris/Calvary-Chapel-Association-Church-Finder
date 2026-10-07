@@ -61,7 +61,21 @@ check itself - and only writes to KV when something actually changed.
     `noTimeZone`. Informational only.
 - `program-schedule-overrides`: `{ overrides: { "<churchId>|<weekday>|<slotMin>": {hidden?, title?} }, updatedAt }`
   - `weekday` is the **church-local** weekday (0=Sun...6=Sat); `slotMin` is the
-    snapped local start in minutes since midnight (e.g. 960 = 4:00pm).
+    snapped local start in minutes since midnight (e.g. 960 = 4:00pm). This is
+    the slot the program had when it was edited.
+  - **Edits survive small time shifts** (added 2026-10-07). The builder
+    (`applyProgramOverrides`) first matches overrides to programs by exact key.
+    Each leftover override then goes to the nearest still-unclaimed program for
+    the same church and weekday whose slot is within
+    `PROGRAM_OVERRIDE_MATCH_MIN` (30) minutes - one override per program and
+    one program per override, so two separate programs the same evening never
+    share an edit. So a title saved on a 7:00 program still applies if it
+    later reads 7:15 or 7:30; a program 45+ minutes away is treated as
+    different and shows its own YouTube title. Each program in the builder
+    output carries `overrideSlotMin` (the slot of the matched record, or null);
+    the panel sends that slot back when saving so the same record is updated
+    instead of a second one being created. Saved titles always beat the YouTube
+    title; clear one by saving an empty title.
 
 ## Recorder rules
 

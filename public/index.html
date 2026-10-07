@@ -5318,7 +5318,11 @@
   async function psSaveOverride(key, change) {
     const p = psData && psData.programs.find(function(x) { return x.key === key; });
     if (!p) return;
-    const body = Object.assign({ churchId: p.churchId, weekday: p.weekday, slotMin: p.slotMin }, change);
+    // If a saved edit was matched to this program from a slightly different
+    // quarter-hour slot, save back into that same record (overrideSlotMin)
+    // rather than starting a second one at the program's current slot.
+    const saveSlot = (typeof p.overrideSlotMin === 'number') ? p.overrideSlotMin : p.slotMin;
+    const body = Object.assign({ churchId: p.churchId, weekday: p.weekday, slotMin: saveSlot }, change);
     try {
       const res = await fetch('/api/admin/program-schedule/override', {
         method: 'POST', credentials: 'include',

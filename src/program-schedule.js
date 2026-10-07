@@ -583,6 +583,58 @@ export function programOverrideKey(churchId, weekday, slotMin) {
   return churchId + '|' + weekday + '|' + slotMin;
 }
 
+// A saved override is keyed by church + weekday + the quarter-hour slot the
+// program had when it was edited. A program's slot can shift a little later
+// (a late start, or its average moving across a rounding boundary as more
+// weeks come in), so an override also follows a program of the same church
+// and weekday whose slot is within this many minutes of the original slot.
+export const PROGRAM_OVERRIDE_MATCH_MIN = 30;
+
+// Attaches overrides to programs. Exact key matches win first. Each leftover
+// override then goes to the nearest still-unclaimed program for that church
+// and weekday within PROGRAM_OVERRIDE_MATCH_MIN minutes, one override per
+// program and one program per override, so two separate programs the same
+// evening never share an edit. Sets hidden, titleOverride, title and
+// overrideSlotMin (the slot of the override record that matched, which the
+// admin panel sends back when saving so the same record is updated).
+function applyProgramOverrides(programs, overrides) {
+  const claimedProgs = {};
+  const claimedKeys = {};
+
+  function attach(prog, key) {
+    const ov = overrides[key] || {};
+    prog.hidden = !!ov.hidden;
+    prog.titleOverride = ov.title || '';
+    if (ov.title) prog.title = ov.title;
+    prog.overrideSlotMin = Number(key.split('|')[2]);
+    claimedProgs[prog.key] = true;
+    claimedKeys[key] = true;
+  }
+
+  programs.forEach(function(prog) {
+    if (overrides[prog.key]) attach(prog, prog.key);
+  });
+
+  const pairs = [];
+  Object.keys(overrides).forEach(function(key) {
+    if (claimedKeys[key]) return;
+    const parts = key.split('|');
+    const slot = Number(parts[2]);
+    if (parts.length !== 3 || isNaN(slot)) return;
+    programs.forEach(function(prog) {
+      if (claimedProgs[prog.key]) return;
+      if (String(prog.churchId) !== parts[0] || String(prog.weekday) !== parts[1]) return;
+      const dist = Math.abs(prog.slotMin - slot);
+      if (dist <= PROGRAM_OVERRIDE_MATCH_MIN) pairs.push({ key: key, prog: prog, dist: dist });
+    });
+  });
+  pairs.sort(function(a, b) { return a.dist - b.dist || (a.key < b.key ? -1 : 1); });
+  pairs.forEach(function(pr) {
+    if (claimedKeys[pr.key] || claimedProgs[pr.prog.key]) return;
+    attach(pr.prog, pr.key);
+  });
+}
+
 // Builds the full list of programs (hidden ones included, flagged) from the
 // recorded sessions. churchesById supplies current names; overrides is the
 // admin's hide/rename map ({ key: { hidden, title } }).
@@ -682,16 +734,21 @@ export function buildProgramSchedule(store, churchesById, overrides, nowMs) {
         lastTitle: latest.title,
         titles: titles
       };
-      const ov = overrides[prog.key] || {};
-      prog.hidden = !!ov.hidden;
-      prog.titleOverride = ov.title || '';
-      prog.title = ov.title ? ov.title : latest.title;
+      // Hide/title overrides are applied after every program exists (see
+      // applyProgramOverrides below) so a saved edit can follow a program
+      // whose quarter-hour slot has drifted a little.
+      prog.hidden = false;
+      prog.titleOverride = '';
+      prog.overrideSlotMin = null;
+      prog.title = latest.title;
       const nextMs = nextOccurrenceMs(prog, nowMs);
       prog.nextStartUtc = nextMs == null ? null : new Date(nextMs).toISOString();
       delete prog.lastDay;
       programs.push(prog);
     });
   });
+
+  applyProgramOverrides(programs, overrides);
 
   programs.sort(function(a, b) {
     if (a.weekday !== b.weekday) return a.weekday - b.weekday;
