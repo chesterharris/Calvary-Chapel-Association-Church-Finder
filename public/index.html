@@ -2831,6 +2831,44 @@
     color: #fff;
     font-weight: 700;
   }
+  /* Narrow phones: four buttons no longer fit on one line, so stack them
+     two by two instead of clipping the last one. */
+  @media (max-width: 380px) {
+    .live-now-lang-seg { display: grid; grid-template-columns: 1fr 1fr; }
+    .live-now-lang-seg button:nth-child(even) { border-left: 1px solid var(--line); }
+    .live-now-lang-seg button:nth-child(odd) { border-left: none; }
+    .live-now-lang-seg button:nth-child(n+3) { border-top: 1px solid var(--line); }
+  }
+  .live-now-lang-hint {
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--ink);
+    opacity: 0.65;
+  }
+  .live-now-lang-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--evergreen);
+  }
+  .live-now-lang-tag svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+  .live-now-empty-btn {
+    display: block;
+    margin: 8px auto 0;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--ember);
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+  }
   .live-now-lang-seg button:focus-visible {
     outline: 2px solid var(--ember);
     outline-offset: -2px;
@@ -3381,13 +3419,14 @@
   </div>
   <div id="liveNowFilters" class="live-now-filters">
     <div id="liveNowLanguageRow" class="live-now-lang-row">
-      <span id="liveNowLanguageLabel" class="live-now-lang-label">Language</span>
+      <span id="liveNowLanguageLabel" class="live-now-lang-label">Show services in:</span>
       <div id="liveNowLanguageSeg" class="live-now-lang-seg" role="group" aria-labelledby="liveNowLanguageLabel">
-        <button type="button" data-lang="all" aria-pressed="true">All</button>
+        <button type="button" data-lang="all" aria-pressed="true">All languages</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
         <button type="button" data-lang="es" aria-pressed="false">Español</button>
         <button type="button" data-lang="other" aria-pressed="false">Other languages</button>
       </div>
+      <div id="liveNowLanguageHint" class="live-now-lang-hint">Shows only services held in that language. Nothing is translated.</div>
     </div>
     <label id="liveOnlyFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="liveOnlyFilterCb" disabled>
@@ -4358,7 +4397,49 @@
     if (liveNowLanguageMode === 'es') return codes.indexOf('es') !== -1;
     return codes.some(function(c) { return c !== 'en' && c !== 'es'; }); // 'other'
   }
-  const LIVENOW_LANGUAGE_LABELS = { all: 'All', en: 'English', es: 'Español', other: 'Other languages' };
+  const LIVENOW_LANGUAGE_LABELS = { all: 'All languages', en: 'English', es: 'Español', other: 'Other languages' };
+  // A language's own name for itself ("Español", "Deutsch"), capitalised;
+  // English falls back to the English table when Intl is unavailable.
+  function languageNativeName(code) {
+    if (code === 'en') return 'English';
+    if (code === 'es') return 'Español';
+    try {
+      if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+        const n = new Intl.DisplayNames([code], { type: 'language' }).of(code);
+        if (n && n !== code) return n.charAt(0).toUpperCase() + n.slice(1);
+      }
+    } catch (e) { /* fall through */ }
+    return languageDisplayName(code);
+  }
+  // Small tag for a Live Now card naming the stream's language(s), e.g.
+  // "Español" or "Deutsch + English". Empty for plain English streams -
+  // English is the default, so tagging every card would only add clutter.
+  const LIVE_LANG_TAG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+    '<path d="M5.5 4.5h13a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 3.5V16h-1A1.5 1.5 0 0 1 4 14.5V6a1.5 1.5 0 0 1 1.5-1.5z"/>' +
+    '<path d="M8 8.5h8M8 11.8h5.5"/></svg>';
+  function liveStreamLanguageTagHtml(l) {
+    const codes = liveStreamLanguageCodes(l, findChurchById(l.churchId));
+    if (codes.length === 1 && codes[0] === 'en') return '';
+    const ordered = codes.filter(function(c) { return c !== 'en'; });
+    if (codes.indexOf('en') !== -1) ordered.push('en');
+    const names = ordered.map(languageNativeName).join(' + ');
+    return '<span class="live-now-lang-tag" title="Service language">' + LIVE_LANG_TAG_ICON + escapeHtml(names) + '</span>';
+  }
+  // Would anything be live under the current Featured/Favorites filters if
+  // the language choice were All? Tells the empty state whether the
+  // language choice is the reason the list is empty.
+  function languageChoiceIsWhyEmpty() {
+    const saved = liveNowLanguageMode;
+    liveNowLanguageMode = 'all';
+    let any = false;
+    try { any = liveStatusData.live.some(liveEntryPassesFilter); } finally { liveNowLanguageMode = saved; }
+    return any;
+  }
+  function liveNowEmptyLanguageMessage() {
+    if (liveNowLanguageMode === 'other') return 'No services in other languages are live right now.';
+    return 'No ' + LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode] + ' services are live right now.';
+  }
   function renderLiveNowLanguageControl() {
     document.querySelectorAll('#liveNowLanguageSeg button[data-lang]').forEach(function(b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-lang') === liveNowLanguageMode ? 'true' : 'false');
@@ -4528,7 +4609,12 @@
     }
 
     if (!visible.length) {
-      list.innerHTML = '<div class="live-now-empty">No live streams match your current filters.</div>';
+      if (liveNowLanguageMode !== 'all' && languageChoiceIsWhyEmpty()) {
+        list.innerHTML = '<div class="live-now-empty">' + escapeHtml(liveNowEmptyLanguageMessage()) +
+          '<button type="button" id="liveNowShowAllLanguages" class="live-now-empty-btn">Show all languages</button></div>';
+      } else {
+        list.innerHTML = '<div class="live-now-empty">No live streams match your current filters.</div>';
+      }
       return;
     }
 
@@ -4570,6 +4656,7 @@
           '<div class="live-now-title">' + escapeHtml(titleText) + '</div>' +
           '<div class="live-now-desc">' + escapeHtml(truncateText(l.description, 120)) + '</div>' +
           '<div class="live-now-meta">' +
+            liveStreamLanguageTagHtml(l) +
             '<span class="duration" data-start="' + escapeHtml(l.startDate || '') + '">' + escapeHtml(durationText) + '</span>' +
             (viewsText ? '<span class="views">' + escapeHtml(viewsText) + '</span>' : '') +
           '</div>' +
@@ -5621,6 +5708,13 @@
   });
 
   document.getElementById('liveNowList').addEventListener('click', function(e) {
+    if (e.target.closest('#liveNowShowAllLanguages')) {
+      liveNowLanguageMode = 'all';
+      saveLiveNowLanguageMode('all');
+      renderLiveNowLanguageControl();
+      renderLiveNowList();
+      return;
+    }
     const favBtn = e.target.closest('.church-fav-star');
     if (favBtn) {
       const id = favBtn.getAttribute('data-fav-church-id');
