@@ -605,6 +605,9 @@ function applyProgramOverrides(programs, overrides) {
     const ov = overrides[key] || {};
     prog.hidden = !!ov.hidden;
     prog.titleOverride = ov.title || '';
+    // Admin-set service language(s) for this program, e.g. ["es"]. Empty
+    // means "work it out from the church's tags and the recorded titles".
+    prog.languagesOverride = Array.isArray(ov.languages) ? ov.languages.slice() : [];
     if (ov.title) prog.title = ov.title;
     prog.overrideSlotMin = Number(key.split('|')[2]);
     claimedProgs[prog.key] = true;
@@ -732,13 +735,18 @@ export function buildProgramSchedule(store, churchesById, overrides, nowMs) {
         lastSeen: new Date(latest.startMs).toISOString(),
         lastDay: latest.day,
         lastTitle: latest.title,
-        titles: titles
+        titles: titles,
+        // Recorded title of each occurrence, newest first (up to 12). The
+        // page uses these to work out which language this program is in
+        // (the same title-wording check the Live Now list uses).
+        occTitles: occ.slice().reverse().slice(0, 12).map(function(o) { return o.title || ''; })
       };
       // Hide/title overrides are applied after every program exists (see
       // applyProgramOverrides below) so a saved edit can follow a program
       // whose quarter-hour slot has drifted a little.
       prog.hidden = false;
       prog.titleOverride = '';
+      prog.languagesOverride = [];
       prog.overrideSlotMin = null;
       prog.title = latest.title;
       const nextMs = nextOccurrenceMs(prog, nowMs);

@@ -3420,7 +3420,7 @@
   <div id="liveNowFilters" class="live-now-filters">
     <div id="liveNowLanguageRow" class="live-now-lang-row">
       <span id="liveNowLanguageLabel" class="live-now-lang-label">Show services in:</span>
-      <div id="liveNowLanguageSeg" class="live-now-lang-seg" role="group" aria-labelledby="liveNowLanguageLabel">
+      <div id="liveNowLanguageSeg" class="live-now-lang-seg" data-lang-seg role="group" aria-labelledby="liveNowLanguageLabel">
         <button type="button" data-lang="all" aria-pressed="true">All languages</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
         <button type="button" data-lang="es" aria-pressed="false">Español</button>
@@ -3560,6 +3560,16 @@
   </div>
   <div id="psDays" class="ps-days"></div>
   <div id="psSub" class="ps-sub"></div>
+  <div id="psLanguageRow" class="live-now-lang-row">
+    <span id="psLanguageLabel" class="live-now-lang-label">Show services in:</span>
+    <div id="psLanguageSeg" class="live-now-lang-seg" data-lang-seg role="group" aria-labelledby="psLanguageLabel">
+      <button type="button" data-lang="all" aria-pressed="true">All languages</button>
+      <button type="button" data-lang="en" aria-pressed="false">English</button>
+      <button type="button" data-lang="es" aria-pressed="false">Español</button>
+      <button type="button" data-lang="other" aria-pressed="false">Other languages</button>
+    </div>
+    <div class="live-now-lang-hint">Shows only services held in that language. Nothing is translated. Your choice is shared with Live Now.</div>
+  </div>
   <div id="psBody" class="ps-body">Loading...</div>
   <div id="psFooter" class="ps-footer"></div>
 </div>
@@ -4390,12 +4400,36 @@
     return codes;
   }
   // Does a live entry pass the visitor's current language choice?
-  function liveEntryMatchesLanguage(l) {
+  function languageCodesMatchMode(codes) {
     if (liveNowLanguageMode === 'all') return true;
-    const codes = liveStreamLanguageCodes(l, findChurchById(l.churchId));
     if (liveNowLanguageMode === 'en') return codes.indexOf('en') !== -1;
     if (liveNowLanguageMode === 'es') return codes.indexOf('es') !== -1;
     return codes.some(function(c) { return c !== 'en' && c !== 'es'; }); // 'other'
+  }
+  function liveEntryMatchesLanguage(l) {
+    if (liveNowLanguageMode === 'all') return true;
+    return languageCodesMatchMode(liveStreamLanguageCodes(l, findChurchById(l.churchId)));
+  }
+  // Language codes for a Weekly Schedule program. An admin-set language wins.
+  // Otherwise: untagged church = English; a church tagged English + Spanish is
+  // decided by the wording of the program's recorded titles (majority of the
+  // occurrences that read clearly one way, both if it is a tie or unclear);
+  // any other tag is taken as it stands.
+  function programLanguageCodes(p) {
+    if (p && Array.isArray(p.languagesOverride) && p.languagesOverride.length) return p.languagesOverride;
+    const church = findChurchById(p.churchId);
+    const tagged = churchLanguageCodes(church);
+    if (!tagged.length) return ['en'];
+    if (tagged.indexOf('en') === -1 || tagged.indexOf('es') === -1) return tagged;
+    let es = 0, en = 0;
+    (p.occTitles || []).forEach(function(t) {
+      const codes = liveStreamLanguageCodes({ title: t, description: '' }, church);
+      const hasEs = codes.indexOf('es') !== -1, hasEn = codes.indexOf('en') !== -1;
+      if (hasEs && !hasEn) es++; else if (hasEn && !hasEs) en++;
+    });
+    if (es > en) return tagged.filter(function(c) { return c !== 'en'; });
+    if (en > es) return tagged.filter(function(c) { return c !== 'es'; });
+    return tagged;
   }
   const LIVENOW_LANGUAGE_LABELS = { all: 'All languages', en: 'English', es: 'Español', other: 'Other languages' };
   // A language's own name for itself ("Español", "Deutsch"), capitalised;
@@ -4403,6 +4437,7 @@
   function languageNativeName(code) {
     if (code === 'en') return 'English';
     if (code === 'es') return 'Español';
+    if (code === 'oth') return 'Other language'; // admin-set "some other language"
     try {
       if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
         const n = new Intl.DisplayNames([code], { type: 'language' }).of(code);
@@ -4419,7 +4454,9 @@
     '<path d="M5.5 4.5h13a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 3.5V16h-1A1.5 1.5 0 0 1 4 14.5V6a1.5 1.5 0 0 1 1.5-1.5z"/>' +
     '<path d="M8 8.5h8M8 11.8h5.5"/></svg>';
   function liveStreamLanguageTagHtml(l) {
-    const codes = liveStreamLanguageCodes(l, findChurchById(l.churchId));
+    return languageTagHtmlFromCodes(liveStreamLanguageCodes(l, findChurchById(l.churchId)));
+  }
+  function languageTagHtmlFromCodes(codes) {
     if (codes.length === 1 && codes[0] === 'en') return '';
     const ordered = codes.filter(function(c) { return c !== 'en'; });
     if (codes.indexOf('en') !== -1) ordered.push('en');
@@ -4441,7 +4478,7 @@
     return 'No ' + LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode] + ' services are live right now.';
   }
   function renderLiveNowLanguageControl() {
-    document.querySelectorAll('#liveNowLanguageSeg button[data-lang]').forEach(function(b) {
+    document.querySelectorAll('[data-lang-seg] button[data-lang]').forEach(function(b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-lang') === liveNowLanguageMode ? 'true' : 'false');
     });
   }
@@ -4722,15 +4759,21 @@
   // on this device, narrows only the Live Now list (no map-pin change, so
   // no renderMarkers() call).
   renderLiveNowLanguageControl();
-  document.getElementById('liveNowLanguageSeg').addEventListener('click', function(e) {
-    const btn = e.target.closest('button[data-lang]');
-    if (!btn) return;
-    const mode = btn.getAttribute('data-lang');
+  // One language choice for the whole site: the Live Now list and the Weekly
+  // Schedule both read it, and either panel's buttons change it.
+  function setLanguageChoice(mode) {
     if (LIVENOW_LANGUAGE_MODES.indexOf(mode) === -1 || mode === liveNowLanguageMode) return;
     liveNowLanguageMode = mode;
     saveLiveNowLanguageMode(mode);
     renderLiveNowLanguageControl();
     renderLiveNowList();
+    if (typeof psData !== 'undefined' && psData) renderProgramSchedule();
+  }
+  document.querySelectorAll('[data-lang-seg]').forEach(function(seg) {
+    seg.addEventListener('click', function(e) {
+      const btn = e.target.closest('button[data-lang]');
+      if (btn) setLanguageChoice(btn.getAttribute('data-lang'));
+    });
   });
   // Sort only ever reorders the Live Now list itself - unlike the two
   // filters above, it has no effect on which pins show on the map, so
@@ -5539,7 +5582,9 @@
 
     const placed = psPlacedPrograms();
     const hiddenCount = placed.filter(function(x) { return x.p.hidden; }).length;
-    let rows = placed.filter(function(x) { return x.day === psDay && (psShowHidden || !x.p.hidden); });
+    const dayRows = placed.filter(function(x) { return x.day === psDay && (psShowHidden || !x.p.hidden); });
+    const rows = dayRows.filter(function(x) { return languageCodesMatchMode(programLanguageCodes(x.p)); });
+    const hiddenByLanguage = dayRows.length - rows.length;
     rows.sort(function(a, b) {
       if (a.minutes !== b.minutes) return a.minutes - b.minutes;
       return String(a.p.churchName).localeCompare(String(b.p.churchName));
@@ -5553,8 +5598,19 @@
     }
     if (rows.length) {
       if (psDay === 0 || psDay === 3) html += '<div class="ps-subhead">Also streaming on this day in your time zone</div>';
+      if (hiddenByLanguage > 0) {
+        html += '<div class="live-now-clear-filters-msg" style="display:block;">Showing ' + rows.length + ' of ' + dayRows.length +
+          ' programs (language: ' + escapeHtml(LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode]) + ') &mdash; ' +
+          '<button type="button" class="live-now-clear-filters-link ps-lang-all">Show all languages</button> to see the rest.</div>';
+      }
       html += '<div class="ps-head"><div>Time</div><div>Church</div><div class="ps-h-study">Study</div></div>';
       html += rows.map(psRowHtml).join('');
+    } else if (hiddenByLanguage > 0) {
+      // Something is recorded for this day; the language choice is the only
+      // reason nothing shows, so say so and offer the way back.
+      const what = liveNowLanguageMode === 'other' ? 'programs in other languages' : (LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode] + ' programs');
+      html += '<div class="ps-empty">No ' + escapeHtml(what) + ' recorded for ' + PS_DAY_LONG[psDay] + '.' +
+        '<button type="button" class="live-now-empty-btn ps-lang-all">Show all languages</button></div>';
     } else if (psDay !== 0 && psDay !== 3) {
       html += '<div class="ps-empty">No programs recorded for ' + PS_DAY_LONG[psDay] + ' yet.' +
         (psData.sessionCount ? '' : ' The recorder only just started, so streams will appear here as churches go live.') + '</div>';
@@ -5585,6 +5641,8 @@
       titleHtml = '<input type="text" class="ps-title-input" id="psTitleInput" maxlength="200" value="' + escapeHtml(p.title || '') + '" placeholder="Title shown on the schedule">' +
         '<button type="button" class="ps-act ps-act-save" data-key="' + escapeHtml(p.key) + '">Save</button> ' +
         '<button type="button" class="ps-act ps-act-cancel">Cancel</button>' +
+        '<div class="ps-meta" style="grid-column:auto;margin-top:4px;"><label>Language: <select id="psLangSelect">' +
+          psLanguageSelectOptions(p) + '</select></label></div>' +
         (p.titles && p.titles.length ? '<div class="ps-meta" style="grid-column:auto;margin-top:4px;">Recent: ' + p.titles.map(escapeHtml).join(' • ') + '</div>' : '');
     } else {
       titleHtml = escapeHtml(p.title || '—');
@@ -5614,6 +5672,8 @@
         meta += liveBadge;
       }
     }
+    const langTag = languageTagHtmlFromCodes(programLanguageCodes(p));
+    if (langTag) meta += langTag;
     meta += '<span>' + escapeHtml(p.patternLabel) + '</span>';
     meta += '<span>seen ' + p.occurrences + '×, last ' + escapeHtml(psFmtDate(p.lastSeen)) + '</span>';
     if (p.pattern && (p.pattern.type === 'monthly' || p.pattern.type === 'biweekly')) {
@@ -5622,9 +5682,10 @@
     if (p.lapsed) meta += '<span class="ps-warn">not seen recently</span>';
     if (p.tzGuess) meta += '<span class="ps-warn" title="Church time zone was guessed from its location">time zone guessed</span>';
     meta += '<span title="Average actual start in the church’s own time (' + escapeHtml(p.tz) + ')">avg start ' + escapeHtml(psFmtMinutes(p.medianMin)) + '</span>';
-    meta += '<button type="button" class="ps-act ps-act-edit" data-key="' + escapeHtml(p.key) + '">Edit title</button>';
+    meta += '<button type="button" class="ps-act ps-act-edit" data-key="' + escapeHtml(p.key) + '">Edit title / language</button>';
     meta += '<button type="button" class="ps-act ps-act-hide" data-key="' + escapeHtml(p.key) + '" data-hide="' + (p.hidden ? '0' : '1') + '">' + (p.hidden ? 'Unhide' : 'Hide') + '</button>';
     if (p.titleOverride) meta += '<span title="You edited this title">(edited)</span>';
+    if (p.languagesOverride && p.languagesOverride.length) meta += '<span title="You set this program\'s language">(language set)</span>';
 
     return '<div class="ps-row st-' + p.status + (p.lapsed ? ' lapsed' : '') + (p.hidden ? ' is-hidden' : '') + '" data-key="' + escapeHtml(p.key) + '">' +
       '<div class="ps-time">' + escapeHtml(psFmtTime(x.d)) + '</div>' +
@@ -5634,6 +5695,27 @@
       '</div>';
   }
 
+  // Options for the admin "Language" choice in the edit row. Auto = work it
+  // out from the church's tags and the recorded titles.
+  const PS_LANGUAGE_CHOICES = [
+    { value: '', label: 'Auto', codes: [] },
+    { value: 'en', label: 'English', codes: ['en'] },
+    { value: 'es', label: 'Español', codes: ['es'] },
+    { value: 'en,es', label: 'English + Español', codes: ['en', 'es'] },
+    { value: 'oth', label: 'Other language', codes: ['oth'] }
+  ];
+  function psLanguageSelectOptions(p) {
+    const cur = (p.languagesOverride || []).join(',');
+    return PS_LANGUAGE_CHOICES.map(function(c) {
+      return '<option value="' + c.value + '"' + (c.value === cur ? ' selected' : '') + '>' + escapeHtml(c.label) + '</option>';
+    }).join('');
+  }
+  function psChosenLanguages() {
+    const sel = document.getElementById('psLangSelect');
+    const v = sel ? sel.value : '';
+    const found = PS_LANGUAGE_CHOICES.find(function(c) { return c.value === v; });
+    return found ? found.codes : [];
+  }
   async function psSaveOverride(key, change) {
     const p = psData && psData.programs.find(function(x) { return x.key === key; });
     if (!p) return;
@@ -5684,7 +5766,8 @@
     if (editBtn) { psEditingKey = editBtn.getAttribute('data-key'); renderProgramSchedule(); const inp = document.getElementById('psTitleInput'); if (inp) inp.focus(); return; }
     if (e.target.closest('.ps-act-cancel')) { psEditingKey = null; renderProgramSchedule(); return; }
     const saveBtn = e.target.closest('.ps-act-save');
-    if (saveBtn) { psSaveOverride(saveBtn.getAttribute('data-key'), { title: document.getElementById('psTitleInput').value }); return; }
+    if (saveBtn) { psSaveOverride(saveBtn.getAttribute('data-key'), { title: document.getElementById('psTitleInput').value, languages: psChosenLanguages() }); return; }
+    if (e.target.closest('.ps-lang-all')) { setLanguageChoice('all'); return; }
     const hideBtn = e.target.closest('.ps-act-hide');
     if (hideBtn) { psSaveOverride(hideBtn.getAttribute('data-key'), { hidden: hideBtn.getAttribute('data-hide') === '1' }); return; }
     if (e.target.id === 'psShowHiddenCb') { psShowHidden = e.target.checked; renderProgramSchedule(); }
@@ -5708,13 +5791,7 @@
   });
 
   document.getElementById('liveNowList').addEventListener('click', function(e) {
-    if (e.target.closest('#liveNowShowAllLanguages')) {
-      liveNowLanguageMode = 'all';
-      saveLiveNowLanguageMode('all');
-      renderLiveNowLanguageControl();
-      renderLiveNowList();
-      return;
-    }
+    if (e.target.closest('#liveNowShowAllLanguages')) { setLanguageChoice('all'); return; }
     const favBtn = e.target.closest('.church-fav-star');
     if (favBtn) {
       const id = favBtn.getAttribute('data-fav-church-id');
@@ -5778,9 +5855,7 @@
     saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, false);
     document.getElementById('featuredFilterCb').checked = false;
     document.getElementById('favoritesFilterCb').checked = false;
-    liveNowLanguageMode = 'all';
-    saveLiveNowLanguageMode('all');
-    renderLiveNowLanguageControl();
+    setLanguageChoice('all');
     renderLiveNowList();
     renderMarkers();
   });

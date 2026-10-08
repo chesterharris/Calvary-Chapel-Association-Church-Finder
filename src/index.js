@@ -2815,8 +2815,20 @@ async function handleSaveProgramOverride(request, env) {
     const t = body.title.trim().slice(0, 200);
     if (t) current.title = t; else delete current.title;
   }
+  // Service language(s) for this program: ["es"], ["en"], ["en","es"], or
+  // ["oth"] for some other language. Unlike a church tag, ["en"] IS kept here -
+  // it is how a church tagged English + Spanish says "this program is English".
+  // An empty list clears the override (back to automatic).
+  if (Array.isArray(body.languages)) {
+    const langs = [];
+    body.languages.forEach(function(v) {
+      const code = String(v == null ? '' : v).trim().toLowerCase();
+      if (/^[a-z]{2,3}$/.test(code) && langs.indexOf(code) === -1 && langs.length < 4) langs.push(code);
+    });
+    if (langs.length) current.languages = langs; else delete current.languages;
+  }
   if (!current.hidden) delete current.hidden;
-  if (current.hidden || current.title) overrides[key] = current; else delete overrides[key];
+  if (current.hidden || current.title || (current.languages && current.languages.length)) overrides[key] = current; else delete overrides[key];
   await env.CHURCHES_KV.put(PROGRAM_OVERRIDES_KV_KEY, JSON.stringify({ overrides: overrides, updatedAt: new Date().toISOString() }));
   return jsonResponse({ success: true, key: key, override: overrides[key] || null });
 }
