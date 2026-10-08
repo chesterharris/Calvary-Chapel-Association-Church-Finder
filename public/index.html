@@ -2795,6 +2795,46 @@
   .live-now-filters {
     border-bottom: 1px solid var(--line);
   }
+  .live-now-lang-row {
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-now-lang-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--evergreen);
+    margin-bottom: 5px;
+  }
+  .live-now-lang-seg {
+    display: flex;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .live-now-lang-seg button {
+    flex: 1 1 auto;
+    font: inherit;
+    font-size: 12.5px;
+    padding: 6px 8px;
+    color: var(--ink);
+    background: var(--paper);
+    border: none;
+    border-left: 1px solid var(--line);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .live-now-lang-seg button:first-child { border-left: none; }
+  .live-now-lang-seg button[aria-pressed="true"] {
+    background: var(--evergreen);
+    color: #fff;
+    font-weight: 700;
+  }
+  .live-now-lang-seg button:focus-visible {
+    outline: 2px solid var(--ember);
+    outline-offset: -2px;
+  }
   .live-now-clear-filters-msg {
     padding: 8px 16px;
     font-size: 12px;
@@ -3340,6 +3380,15 @@
     </select>
   </div>
   <div id="liveNowFilters" class="live-now-filters">
+    <div id="liveNowLanguageRow" class="live-now-lang-row">
+      <span id="liveNowLanguageLabel" class="live-now-lang-label">Language</span>
+      <div id="liveNowLanguageSeg" class="live-now-lang-seg" role="group" aria-labelledby="liveNowLanguageLabel">
+        <button type="button" data-lang="all" aria-pressed="true">All</button>
+        <button type="button" data-lang="en" aria-pressed="false">English</button>
+        <button type="button" data-lang="es" aria-pressed="false">Español</button>
+        <button type="button" data-lang="other" aria-pressed="false">Other languages</button>
+      </div>
+    </div>
     <label id="liveOnlyFilterRow" class="live-only-filter-row">
       <input type="checkbox" id="liveOnlyFilterCb" disabled>
       <span class="filter-live-dot" aria-hidden="true"></span>
@@ -3580,6 +3629,23 @@
 
   let featuredFilterActive = loadBoolFlag(LIVENOW_FEATURED_FILTER_KEY);
   let favoritesFilterActive = loadBoolFlag(LIVENOW_FAVORITES_FILTER_KEY);
+
+  // Language filter for the Live Now list (added 2026-10-08): 'all' (the
+  // default for every visitor), 'en', 'es' or 'other'. Unlike Sort, this
+  // one IS remembered on the visitor's device. It narrows only the Live Now
+  // list - not the map pins - and is cleared by "Clear all filters".
+  const LIVENOW_LANGUAGE_KEY = 'ccaFinderLiveNowLanguage';
+  const LIVENOW_LANGUAGE_MODES = ['all', 'en', 'es', 'other'];
+  function loadLiveNowLanguageMode() {
+    try {
+      const v = localStorage.getItem(LIVENOW_LANGUAGE_KEY);
+      return LIVENOW_LANGUAGE_MODES.indexOf(v) !== -1 ? v : 'all';
+    } catch (err) { return 'all'; }
+  }
+  function saveLiveNowLanguageMode(mode) {
+    try { localStorage.setItem(LIVENOW_LANGUAGE_KEY, mode); } catch (err) { /* ignore */ }
+  }
+  let liveNowLanguageMode = loadLiveNowLanguageMode();
 
   let liveNowSortMode = 'freshest';
 
@@ -4233,6 +4299,72 @@
       : names.join(' & '));
   }
 
+  // ---- Which language is a live stream in? (Live Now language filter) ----
+  //
+  // Starts from the church's tag (untagged = English). A church tagged both
+  // English and Spanish usually holds SEPARATE English and Spanish services
+  // (e.g. English Sun 9am, Spanish Sun 10:45am), so for those only, the
+  // stream's own title/description is checked for Spanish or English wording
+  // and the stream is narrowed to the language it is actually in. When the
+  // wording gives no clear answer the stream keeps both languages (it shows
+  // under either filter rather than being hidden wrongly). Every other tag
+  // combination is taken as-is - e.g. German tagged with English means ONE
+  // stream interpreted live, so it belongs to both. Tune the word lists
+  // below as real titles come in.
+  const SPANISH_STRONG_WORDS = new Set((
+    'servicio servicios culto iglesia domingo dominical miercoles jueves viernes sabado estudio biblico biblica ' +
+    'vivo espanol adoracion mensaje predicacion oracion alabanza bienvenidos bienvenida dios senor gracias ' +
+    'reunion juventud jovenes mujeres hombres familia evangelio palabra matutino vespertino transmision noche semana'
+  ).split(' '));
+  const SPANISH_FUNCTION_WORDS = new Set('de del la las los el con para por una un que en es al se su sus'.split(' '));
+  const ENGLISH_WORDS = new Set((
+    'the and of to for with in on at our we you your is are sunday wednesday service services worship welcome ' +
+    'bible study sermon join today morning evening prayer praise week'
+  ).split(' '));
+  function languageTokens(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .split(/[^a-z]+/).filter(Boolean);
+  }
+  function spanishWordScore(tokens) {
+    let s = 0;
+    tokens.forEach(function(t) {
+      if (SPANISH_STRONG_WORDS.has(t)) s += 2; else if (SPANISH_FUNCTION_WORDS.has(t)) s += 1;
+    });
+    return s;
+  }
+  function englishWordScore(tokens) {
+    let s = 0;
+    tokens.forEach(function(t) { if (ENGLISH_WORDS.has(t)) s += 1; });
+    return s;
+  }
+  // The language codes a live entry belongs to (never empty).
+  function liveStreamLanguageCodes(l, church) {
+    let codes = churchLanguageCodes(church);
+    if (!codes.length) return ['en'];
+    if (codes.indexOf('en') !== -1 && codes.indexOf('es') !== -1) {
+      const tokens = languageTokens((l && l.title || '') + ' ' + (l && l.description || ''));
+      const es = spanishWordScore(tokens) >= 2;
+      const en = englishWordScore(tokens) >= 2;
+      if (es && !en) codes = codes.filter(function(c) { return c !== 'en'; });
+      else if (en && !es) codes = codes.filter(function(c) { return c !== 'es'; });
+    }
+    return codes;
+  }
+  // Does a live entry pass the visitor's current language choice?
+  function liveEntryMatchesLanguage(l) {
+    if (liveNowLanguageMode === 'all') return true;
+    const codes = liveStreamLanguageCodes(l, findChurchById(l.churchId));
+    if (liveNowLanguageMode === 'en') return codes.indexOf('en') !== -1;
+    if (liveNowLanguageMode === 'es') return codes.indexOf('es') !== -1;
+    return codes.some(function(c) { return c !== 'en' && c !== 'es'; }); // 'other'
+  }
+  const LIVENOW_LANGUAGE_LABELS = { all: 'All', en: 'English', es: 'Español', other: 'Other languages' };
+  function renderLiveNowLanguageControl() {
+    document.querySelectorAll('#liveNowLanguageSeg button[data-lang]').forEach(function(b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-lang') === liveNowLanguageMode ? 'true' : 'false');
+    });
+  }
+
   const LIVE_NOW_TAG_OVERRIDES = {
     '618': 'Los Angeles', // Core Church LA - "LA" alone reads as Louisiana
     '635': 'Los Angeles', // Calvary Chapel Coastline LA - same reason
@@ -4355,6 +4487,7 @@
   // separate data sources) is only shown when no filter is narrowing the
   // list - can't confirm it matches a filter it might not satisfy.
   function liveEntryPassesFilter(l) {
+    if (!liveEntryMatchesLanguage(l)) return false;
     const church = findChurchById(l.churchId);
     if (!church) return !(featuredFilterActive || favoritesFilterActive);
     return matchesFeaturedOrFavoritesFilter(church);
@@ -4386,7 +4519,8 @@
 
     if (hiddenCount > 0) {
       msgEl.style.display = 'block';
-      msgEl.innerHTML = 'Showing ' + visible.length + ' of ' + totalCount + ' live streams &mdash; ' +
+      const langNote = liveNowLanguageMode === 'all' ? '' : ' (language: ' + escapeHtml(LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode]) + ')';
+      msgEl.innerHTML = 'Showing ' + visible.length + ' of ' + totalCount + ' live streams' + langNote + ' &mdash; ' +
         '<button type="button" id="liveNowClearFiltersLink" class="live-now-clear-filters-link">Clear all filters</button> to see the rest.';
     } else {
       msgEl.style.display = 'none';
@@ -4496,6 +4630,20 @@
     saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, favoritesFilterActive);
     renderLiveNowList();
     renderMarkers();
+  });
+  // Language choice (All / English / Español / Other languages): remembered
+  // on this device, narrows only the Live Now list (no map-pin change, so
+  // no renderMarkers() call).
+  renderLiveNowLanguageControl();
+  document.getElementById('liveNowLanguageSeg').addEventListener('click', function(e) {
+    const btn = e.target.closest('button[data-lang]');
+    if (!btn) return;
+    const mode = btn.getAttribute('data-lang');
+    if (LIVENOW_LANGUAGE_MODES.indexOf(mode) === -1 || mode === liveNowLanguageMode) return;
+    liveNowLanguageMode = mode;
+    saveLiveNowLanguageMode(mode);
+    renderLiveNowLanguageControl();
+    renderLiveNowList();
   });
   // Sort only ever reorders the Live Now list itself - unlike the two
   // filters above, it has no effect on which pins show on the map, so
@@ -5536,6 +5684,9 @@
     saveBoolFlag(LIVENOW_FAVORITES_FILTER_KEY, false);
     document.getElementById('featuredFilterCb').checked = false;
     document.getElementById('favoritesFilterCb').checked = false;
+    liveNowLanguageMode = 'all';
+    saveLiveNowLanguageMode('all');
+    renderLiveNowLanguageControl();
     renderLiveNowList();
     renderMarkers();
   });
