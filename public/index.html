@@ -157,6 +157,11 @@
     color: #8a6d0f;
     font-size: 12px;
   }
+  .popup-languages {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--evergreen);
+  }
   .popup-role-team {
     font-weight: 600;
     color: #8a6d0f;
@@ -792,6 +797,36 @@
     gap: 8px;
   }
   .form-row-split .form-row { flex: 1; }
+  .lang-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 4px 0 8px;
+  }
+  .lang-checks label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--ink);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .lang-checks input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .lang-hint {
+    font-size: 11px;
+    color: var(--ink);
+    opacity: 0.7;
+    margin-top: 4px;
+    line-height: 1.35;
+  }
   .form-row-checkbox {
     display: flex;
     align-items: center;
@@ -2993,6 +3028,12 @@
         </label>
       </div>
       <div class="form-row">
+        <label>Service languages</label>
+        <div class="lang-checks" id="f_languages"></div>
+        <input id="f_languages_other" placeholder="Other language codes, e.g. ko, pt" autocomplete="off">
+        <div class="lang-hint">Leave everything unticked for an English-only church. Tick every language its services are held in (a service with a live translator counts as both).</div>
+      </div>
+      <div class="form-row">
         <label for="f_phone">Phone</label>
         <input id="f_phone">
       </div>
@@ -4149,6 +4190,49 @@
   // names where the plain state code would mislead. Keyed by church id; the
   // value is the exact tag shown after the name. To retire an entry, put the
   // country in that church's citystatezip instead (or add a rule above).
+  // ---- Service languages ----
+  // A church may carry `languages`: lowercase codes for the languages its
+  // services are held in (["es"], ["en","es"], ["de","en"]). No field means
+  // English - only exceptions are tagged. Interpreted services (e.g. German
+  // with a live English translator) are tagged with both codes.
+  const LANGUAGE_FORM_OPTIONS = [
+    ['en', 'English'], ['es', 'Spanish'], ['de', 'German'],
+    ['ja', 'Japanese'], ['fr', 'French'], ['it', 'Italian']
+  ];
+  const LANGUAGE_NAME_FALLBACK = {
+    en: 'English', es: 'Spanish', de: 'German', ja: 'Japanese', fr: 'French', it: 'Italian',
+    pt: 'Portuguese', ko: 'Korean', nl: 'Dutch', he: 'Hebrew', ru: 'Russian', zh: 'Chinese',
+    tl: 'Filipino'
+  };
+  function languageDisplayName(code) {
+    try {
+      if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+        const n = new Intl.DisplayNames(['en'], { type: 'language' }).of(code);
+        if (n && n !== code) return n;
+      }
+    } catch (e) { /* fall through to the table */ }
+    return LANGUAGE_NAME_FALLBACK[code] || code.toUpperCase();
+  }
+  // The church's language codes, or [] when untagged (= English only).
+  function churchLanguageCodes(c) {
+    if (!c || !Array.isArray(c.languages)) return [];
+    const out = [];
+    c.languages.forEach(function(v) {
+      const code = String(v || '').trim().toLowerCase();
+      if (/^[a-z]{2,3}$/.test(code) && out.indexOf(code) === -1) out.push(code);
+    });
+    return (out.length === 1 && out[0] === 'en') ? [] : out;
+  }
+  // "Services in Spanish" / "Services in German & English", or '' when untagged.
+  function churchServiceLanguagesLabel(c) {
+    const codes = churchLanguageCodes(c);
+    if (!codes.length) return '';
+    const names = codes.map(languageDisplayName);
+    return 'Services in ' + (names.length > 2
+      ? names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1]
+      : names.join(' & '));
+  }
+
   const LIVE_NOW_TAG_OVERRIDES = {
     '618': 'Los Angeles', // Core Church LA - "LA" alone reads as Louisiana
     '635': 'Los Angeles', // Calvary Chapel Coastline LA - same reason
@@ -5900,6 +5984,10 @@
         escapeHtml(c.address) + (c.address && c.citystatezip ? '<br>' : '') +
         escapeHtml(c.citystatezip) + '</span></div>';
     }
+    const languagesLabel = churchServiceLanguagesLabel(c);
+    if (languagesLabel) {
+      popup += '<div class="popup-row popup-languages">' + escapeHtml(languagesLabel) + '</div>';
+    }
     if (c.pastor) {
       popup += '<div class="popup-row">' + popupIcon('pastor', 'Pastor') + '<span>' + escapeHtml(c.pastor) + '</span></div>';
     }
@@ -6324,6 +6412,36 @@
     openLocationModalMobileTakeover();
   }
 
+  // Admin form: tick-boxes for the common languages, a free field for any
+  // other 2-3 letter codes. Built once; form.reset() clears it.
+  (function buildLanguageFormChecks() {
+    const box = document.getElementById('f_languages');
+    if (!box) return;
+    box.innerHTML = LANGUAGE_FORM_OPTIONS.map(function(o) {
+      return '<label><input type="checkbox" data-lang="' + o[0] + '"> ' + o[1] + '</label>';
+    }).join('');
+  })();
+  function setLanguageFormValues(codes) {
+    const known = LANGUAGE_FORM_OPTIONS.map(function(o) { return o[0]; });
+    const extra = [];
+    (codes || []).forEach(function(code) {
+      const cb = document.querySelector('#f_languages input[data-lang="' + code + '"]');
+      if (cb) cb.checked = true; else if (known.indexOf(code) === -1) extra.push(code);
+    });
+    document.getElementById('f_languages_other').value = extra.join(', ');
+  }
+  function readLanguageFormValues() {
+    const out = [];
+    document.querySelectorAll('#f_languages input[data-lang]').forEach(function(cb) {
+      if (cb.checked) out.push(cb.getAttribute('data-lang'));
+    });
+    document.getElementById('f_languages_other').value.split(/[\s,;]+/).forEach(function(v) {
+      const code = v.trim().toLowerCase();
+      if (/^[a-z]{2,3}$/.test(code) && out.indexOf(code) === -1) out.push(code);
+    });
+    return out;
+  }
+
   function openEditModal(c) {
     editingId = c.id;
     modalTitle.textContent = 'Edit Location';
@@ -6336,6 +6454,7 @@
     document.getElementById('f_lng').value = c.lng || '';
     document.getElementById('f_youtube').value = c.youtubeUrl || '';
     document.getElementById('f_livestreams').checked = !!c.livestreamsEnabled;
+    setLanguageFormValues(churchLanguageCodes(c));
     document.getElementById('f_phone').value = c.phone || '';
     document.getElementById('f_email').value = c.email || '';
     document.getElementById('f_website').value = c.website || '';
@@ -6499,7 +6618,10 @@
       role: document.getElementById('f_role').value,
       region: document.getElementById('f_region').value.trim(),
       youtubeUrl: document.getElementById('f_youtube').value.trim(),
-      livestreamsEnabled: document.getElementById('f_livestreams').checked
+      livestreamsEnabled: document.getElementById('f_livestreams').checked,
+      // Always sent (an empty list clears the tag on the server, which
+      // treats an untagged church as English).
+      languages: readLanguageFormValues()
     };
     if (editingId) entry.id = editingId;
 

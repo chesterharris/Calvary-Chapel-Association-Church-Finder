@@ -632,10 +632,12 @@ async function handleSaveChurch(request, env) {
       });
     }
     churches[index] = { ...churches[index], ...incoming };
+    applyChurchLanguages(churches[index]);
   } else {
     // Adding a new record - assign the next permanent id ourselves; never
     // trust an id the client might have sent for a "new" record.
     const newChurch = { ...incoming, id: getNextChurchId(churches) };
+    applyChurchLanguages(newChurch);
     churches.push(newChurch);
   }
 
@@ -643,6 +645,87 @@ async function handleSaveChurch(request, env) {
 
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// ---- Church service languages -----
+//
+// A church record may carry `languages`: an array of lowercase language
+// codes for the languages its services are held in, e.g. ["es"], ["en","es"],
+// ["de","en"]. A church with NO `languages` field is treated as English
+// everywhere (so only the exceptions are ever tagged). An empty/invalid list
+// removes the field. A church whose single stream is interpreted live (e.g.
+// German with an English translator) is simply tagged with both codes.
+
+const CHURCH_LANGUAGES_MAX = 6;
+
+function sanitizeChurchLanguages(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  value.forEach(function(v) {
+    const code = String(v == null ? '' : v).trim().toLowerCase();
+    if (/^[a-z]{2,3}$/.test(code) && out.indexOf(code) === -1 && out.length < CHURCH_LANGUAGES_MAX) out.push(code);
+  });
+  // English-only is the default for an untagged church, so ["en"] alone is
+  // not stored (it would mean exactly the same as no field).
+  if (out.length === 1 && out[0] === 'en') return [];
+  return out;
+}
+
+// Normalizes (or removes) `languages` on a church object in place.
+function applyChurchLanguages(church) {
+  if (!church || !Object.prototype.hasOwnProperty.call(church, 'languages')) return;
+  const clean = sanitizeChurchLanguages(church.languages);
+  if (clean.length) church.languages = clean; else delete church.languages;
+}
+
+// Admin-only bulk setter, used once to load an audited list of churches
+// without hand-editing each one. Body: { languages: { "<churchId>": ["es"],
+// ... }, dryRun?: true }. An empty array clears a church's tag. With
+// dryRun the response lists what WOULD change and nothing is written.
+async function handleSaveChurchLanguages(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonResponse({ error: 'Bad request body' }, 400);
+  }
+  const map = body && body.languages;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) {
+    return jsonResponse({ error: 'Body must be { languages: { "<churchId>": ["es", ...] } }' }, 400);
+  }
+  const churches = await loadChurches(env);
+  const byId = {};
+  churches.forEach(function(c) { byId[c.id] = c; });
+  const changed = [];
+  const unchanged = [];
+  const unknownIds = [];
+  const invalid = [];
+  Object.keys(map).forEach(function(k) {
+    const id = Number(k);
+    const church = byId[id];
+    if (!church) { unknownIds.push(k); return; }
+    if (!Array.isArray(map[k])) { invalid.push(k); return; }
+    const next = sanitizeChurchLanguages(map[k]);
+    const prev = Array.isArray(church.languages) ? church.languages : [];
+    if (JSON.stringify(prev) === JSON.stringify(next)) { unchanged.push(id); return; }
+    changed.push({ id: id, name: church.name, from: prev, to: next });
+    if (!body.dryRun) {
+      if (next.length) church.languages = next; else delete church.languages;
+    }
+  });
+  if (!body.dryRun && changed.length) await saveChurches(env, churches);
+  return jsonResponse({
+    success: true,
+    dryRun: !!body.dryRun,
+    changedCount: changed.length,
+    changed: changed,
+    unchanged: unchanged,
+    unknownIds: unknownIds,
+    invalid: invalid
   });
 }
 
@@ -5615,6 +5698,9 @@ export default {
     }
     if (url.pathname === '/api/churches' && request.method === 'DELETE') {
       return handleDeleteChurch(request, env);
+    }
+    if (url.pathname === '/api/admin/church-languages' && request.method === 'POST') {
+      return handleSaveChurchLanguages(request, env);
     }
     if (url.pathname === '/api/featured-video' && request.method === 'GET') {
       return handleGetFeaturedVideo(request, env);
