@@ -5609,7 +5609,7 @@
       // Something is recorded for this day; the language choice is the only
       // reason nothing shows, so say so and offer the way back.
       const what = liveNowLanguageMode === 'other' ? 'programs in other languages' : (LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode] + ' programs');
-      html += '<div class="ps-empty">No ' + escapeHtml(what) + ' recorded for ' + PS_DAY_LONG[psDay] + '.' +
+      html += '<div class="ps-empty">No ' + escapeHtml(what) + ' scheduled for ' + PS_DAY_LONG[psDay] + '.' +
         '<button type="button" class="live-now-empty-btn ps-lang-all">Show all languages</button></div>';
     } else if (psDay !== 0 && psDay !== 3) {
       html += '<div class="ps-empty">No programs recorded for ' + PS_DAY_LONG[psDay] + ' yet.' +
