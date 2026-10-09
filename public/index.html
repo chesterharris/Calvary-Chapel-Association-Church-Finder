@@ -1610,6 +1610,15 @@
     border-bottom: 1px solid var(--line);
     background: rgba(0,0,0,0.03);
   }
+  .live-debug-regions {
+    padding: 4px 16px;
+    font-size: 12px;
+    color: var(--ink);
+    border-bottom: 1px solid var(--line);
+  }
+  .live-debug-regions summary { cursor: pointer; opacity: 0.85; }
+  .live-debug-regions-body { padding: 4px 0 2px 0; line-height: 1.6; }
+  .live-debug-regions-body .lr-row { display: flex; justify-content: space-between; max-width: 260px; }
   .live-debug-visitors .lv-sep { opacity: 0.35; }
   .live-debug-visitors .lv-num { font-weight: 700; }
   .live-debug-visitors .lv-trend { display: inline-flex; align-items: center; gap: 6px; }
@@ -3730,6 +3739,10 @@
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
   <div id="liveDebugVisitors" class="live-debug-visitors">Visitors: loading...</div>
+  <details id="liveDebugRegions" class="live-debug-regions">
+    <summary>Where visitors are from (past 7 days)</summary>
+    <div id="liveDebugRegionsBody" class="live-debug-regions-body">No visits recorded yet.</div>
+  </details>
   <div class="live-debug-toolbar">
     <div class="live-debug-toolbar-status">
       <span id="liveDebugStatusDot" class="live-debug-status-dot"></span>
@@ -5592,6 +5605,16 @@
   // admins and browsers marked ?notrack=1 are not counted, so your own
   // visits never show up here.
   const liveDebugVisitorsEl = document.getElementById('liveDebugVisitors');
+  const liveDebugRegionsBodyEl = document.getElementById('liveDebugRegionsBody');
+  const US_STATE_NAMES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',PR:'Puerto Rico'};
+  const CA_PROVINCE_NAMES = {AB:'Alberta',BC:'British Columbia',MB:'Manitoba',NB:'New Brunswick',NL:'Newfoundland and Labrador',NS:'Nova Scotia',NT:'Northwest Territories',NU:'Nunavut',ON:'Ontario',PE:'Prince Edward Island',QC:'Quebec',SK:'Saskatchewan',YT:'Yukon'};
+  function visitRegionLabel(key) {
+    if (key === 'unknown') return 'Unknown';
+    const parts = key.split('-');
+    if (parts[0] === 'US' && parts[1]) return (US_STATE_NAMES[parts[1]] || parts[1]) + ', USA';
+    if (parts[0] === 'CA' && parts[1]) return (CA_PROVINCE_NAMES[parts[1]] || parts[1]) + ', Canada';
+    try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(parts[0]) || parts[0]; } catch (e) { return parts[0]; }
+  }
   let liveDebugVisitorsTimer = null;
   async function loadVisitorStats() {
     try {
@@ -5600,6 +5623,12 @@
       const d = await res.json();
       const values = (d.days || []).map(function(x) { return x.count; });
       const tip = (d.days || []).map(function(x) { return x.date + ': ' + x.count; }).join('\n');
+      const regions = d.regions || [];
+      liveDebugRegionsBodyEl.innerHTML = regions.length
+        ? regions.map(function(r) {
+            return '<div class="lr-row"><span>' + escapeHtmlDebug(visitRegionLabel(r.key)) + '</span><b>' + r.count + '</b></div>';
+          }).join('') + (d.regionsTotal > regions.length ? '<div style="opacity:.6">+ ' + (d.regionsTotal - regions.length) + ' more places</div>' : '')
+        : 'No visits recorded yet.';
       liveDebugVisitorsEl.innerHTML =
         '<span>Visitors current: <span class="lv-num">' + d.current + '</span></span>' +
         '<span class="lv-sep">|</span>' +
@@ -9770,7 +9799,7 @@
     }
   } catch (e) {}
   // Our own anonymous visitor counter (shown to the admin in Live Debug). The random code lives
-  // only in this tab's sessionStorage; refreshing the page is not a new visit, a new tab is.
+  // only in this tab's sessionStorage (cleared when the tab/browser is closed).
   function randomSid() {
     var chars = 'abcdefghijklmnopqrstuvwxyz0123456789', out = '';
     try {
@@ -9782,14 +9811,19 @@
     return out;
   }
   function startVisitPings() {
-    var sid, counted = false, lastSent = 0;
+    var sid, lastSent = 0, lastSeen = 0, SESSION_GAP_MS = 30 * 60 * 1000;
     try {
       sid = sessionStorage.getItem('ccaVisitSid');
       if (!sid) { sid = randomSid(); sessionStorage.setItem('ccaVisitSid', sid); }
-      counted = sessionStorage.getItem('ccaVisitCounted') === '1';
+      lastSeen = Number(sessionStorage.getItem('ccaVisitLast')) || 0;
     } catch (e) { sid = sid || randomSid(); }
+    // A "visit" = first load in a tab, or coming back after 30+ minutes away (same idea as most
+    // analytics tools). Refreshing, or keeping the tab open, is not a new visit.
+    function nextKind() { return (!lastSeen || Date.now() - lastSeen > SESSION_GAP_MS) ? 'visit' : 'ping'; }
     function send(kind) {
       lastSent = Date.now();
+      lastSeen = lastSent;
+      try { sessionStorage.setItem('ccaVisitLast', String(lastSeen)); } catch (e) {}
       try {
         fetch('/api/hit', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9797,11 +9831,10 @@
         }).catch(function () {});
       } catch (e) {}
     }
-    send(counted ? 'ping' : 'visit');
-    try { sessionStorage.setItem('ccaVisitCounted', '1'); } catch (e) {}
-    setInterval(function () { if (document.visibilityState === 'visible') send('ping'); }, 60000);
+    send(nextKind());
+    setInterval(function () { if (document.visibilityState === 'visible') send(nextKind()); }, 60000);
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible' && Date.now() - lastSent > 30000) send('ping');
+      if (document.visibilityState === 'visible' && Date.now() - lastSent > 30000) send(nextKind());
     });
   }
   window.ccaStartAnalytics = function (isAdmin) {

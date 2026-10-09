@@ -5950,6 +5950,7 @@ async function handleFeedback(request, env) {
 // ---------------------------------------------------------------------------
 const VISITS_DAILY_KV_KEY = 'visits-daily';
 const VISITS_ACTIVE_KV_KEY = 'visits-active';
+const VISITS_REGIONS_KV_KEY = 'visits-regions';
 const VISITS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const VISITS_KEEP_DAYS = 30;
 const VISITS_ACTIVE_MAX = 500;
@@ -5965,7 +5966,7 @@ async function readVisitsJson(env, key) {
   }
 }
 
-async function recordVisitHit(env, sid, wantsNewVisit) {
+async function recordVisitHit(env, sid, wantsNewVisit, regionKey) {
   const now = Date.now();
 
   const active = await readVisitsJson(env, VISITS_ACTIVE_KV_KEY);
@@ -5990,7 +5991,28 @@ async function recordVisitHit(env, sid, wantsNewVisit) {
     const dates = Object.keys(daily).sort();
     dates.slice(0, Math.max(0, dates.length - VISITS_KEEP_DAYS)).forEach(function(d) { delete daily[d]; });
     await env.CHURCHES_KV.put(VISITS_DAILY_KV_KEY, JSON.stringify(daily));
+
+    // Where the visit came from, as a tally only: "US-CA" -> 12. The code comes from Cloudflare's
+    // edge (request.cf), the address itself is never read or stored, and nothing is tied to a sid.
+    const regions = await readVisitsJson(env, VISITS_REGIONS_KV_KEY);
+    const dayRegions = regions[today] && typeof regions[today] === 'object' ? regions[today] : {};
+    dayRegions[regionKey] = (Number(dayRegions[regionKey]) || 0) + 1;
+    regions[today] = dayRegions;
+    const regionDates = Object.keys(regions).sort();
+    regionDates.slice(0, Math.max(0, regionDates.length - VISITS_KEEP_DAYS)).forEach(function(d) { delete regions[d]; });
+    await env.CHURCHES_KV.put(VISITS_REGIONS_KV_KEY, JSON.stringify(regions));
   }
+}
+
+// "US-CA" / "CA-ON" for the United States and Canada (state / province), just the
+// two-letter country code for everywhere else, "unknown" when Cloudflare has nothing.
+function visitRegionKey(request) {
+  const cf = request.cf || {};
+  const country = typeof cf.country === 'string' && /^[A-Z]{2}$/.test(cf.country) ? cf.country : '';
+  if (!country) return 'unknown';
+  const region = typeof cf.regionCode === 'string' && /^[A-Z0-9]{1,3}$/.test(cf.regionCode) ? cf.regionCode : '';
+  if ((country === 'US' || country === 'CA') && region) return country + '-' + region;
+  return country;
 }
 
 async function handleVisitHit(request, env, ctx) {
@@ -6003,7 +6025,7 @@ async function handleVisitHit(request, env, ctx) {
   const ua = request.headers.get('User-Agent') || '';
   if (/bot|crawl|spider|slurp|headless|lighthouse|preview/i.test(ua)) return done;
   ctx.waitUntil(
-    recordVisitHit(env, sid, body.kind === 'visit').catch(function(err) {
+    recordVisitHit(env, sid, body.kind === 'visit', visitRegionKey(request)).catch(function(err) {
       console.error('visit hit failed', err && err.message);
     })
   );
@@ -6019,9 +6041,10 @@ function isoDateMinusDays(isoDate, days) {
 async function handleGetVisitorStats(request, env) {
   if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
   const now = Date.now();
-  const [active, daily] = await Promise.all([
+  const [active, daily, regionsByDay] = await Promise.all([
     readVisitsJson(env, VISITS_ACTIVE_KV_KEY),
-    readVisitsJson(env, VISITS_DAILY_KV_KEY)
+    readVisitsJson(env, VISITS_DAILY_KV_KEY),
+    readVisitsJson(env, VISITS_REGIONS_KV_KEY)
   ]);
   const current = Object.keys(active).filter(function(k) {
     return now - Number(active[k]) <= VISITS_ACTIVE_WINDOW_MS;
@@ -6034,7 +6057,16 @@ async function handleGetVisitorStats(request, env) {
   }
   const todayCount = days[days.length - 1].count;
   const last7 = days.slice(-7).reduce(function(sum, d) { return sum + d.count; }, 0);
-  return jsonResponse({ current: current, today: todayCount, last7: last7, days: days });
+  const regionTotals = {};
+  days.slice(-7).forEach(function(d) {
+    const r = regionsByDay[d.date];
+    if (!r || typeof r !== 'object') return;
+    Object.keys(r).forEach(function(k) { regionTotals[k] = (regionTotals[k] || 0) + (Number(r[k]) || 0); });
+  });
+  const regions = Object.keys(regionTotals)
+    .map(function(k) { return { key: k, count: regionTotals[k] }; })
+    .sort(function(a, b) { return b.count - a.count || (a.key < b.key ? -1 : 1); });
+  return jsonResponse({ current: current, today: todayCount, last7: last7, days: days, regions: regions.slice(0, 8), regionsTotal: regions.length });
 }
 
 export default {
