@@ -1406,8 +1406,10 @@
     #locationModal .modal-header-mobile .mobile-panel-spacer {
       display: flex;
     }
-    /* This header has no side padding of its own, so don't pull the chevron's tap area left. */
+    /* This header has no side padding of its own, so don't pull the chevron's tap area left
+       (its footprint is the full 44px, so the balancing spacer is 44px too). */
     #locationModal .modal-header-mobile .mobile-panel-back-btn { margin-left: 0; }
+    #locationModal .modal-header-mobile .mobile-panel-spacer { width: 44px; }
     #locationModal .modal-header-mobile h2 {
       flex: 1;
       min-width: 0;
@@ -2622,6 +2624,14 @@
      this replaced everywhere (see MOBILE-BUILD-NOTES.md) - both a larger
      font and more padding, since a small "x" being hard to tap on a phone
      was the whole reason for this change. */
+  /* Very small phones (about 320px wide): slightly smaller pane titles so they still fit on one line. */
+  @media (max-width: 340px) {
+    #radioBrowsePanel .side-panel-header h2,
+    #liveNowPanel .side-panel-header h2,
+    #liveDebugPanel .side-panel-header h2,
+    #managePanel .side-panel-header h2,
+    #programSchedulePanel .side-panel-header h2 { font-size: 15px; letter-spacing: 0.02em; }
+  }
   /* Back button = a "<" chevron (same icon as public/chevron-back.svg, drawn inline in the
      button so it takes the header's ink color). 44px square tap area, which is the comfortable
      minimum for a thumb; the negative margins keep that bigger target from making the header
@@ -2681,10 +2691,10 @@
     font-size: 19px;
     letter-spacing: 0.03em;
   }
-  /* The old invisible balancing block that sat opposite "◀ BACK" is gone - with the slim "<"
-     chevron the title gets that room instead, centered in the space that is left. (The elements
-     stay in the markup; !important beats the per-pane display:flex rules above.) */
-  .mp-topbar-spacer, .mobile-panel-spacer { display: none !important; }
+  /* Invisible block opposite the "<" chevron so each title is centered across the full screen
+     width, not just in the space left after the chevron. Its width equals the chevron button's
+     footprint in the header: 44px wide minus the 10px negative left margin = 34px. */
+  .mp-topbar-spacer { width: 34px; flex-shrink: 0; }
   .mp-topbar-title { flex: 1; min-width: 0; text-align: center; }
   .mp-list {
     flex: 1;
