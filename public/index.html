@@ -1406,6 +1406,8 @@
     #locationModal .modal-header-mobile .mobile-panel-spacer {
       display: flex;
     }
+    /* This header has no side padding of its own, so don't pull the chevron's tap area left. */
+    #locationModal .modal-header-mobile .mobile-panel-back-btn { margin-left: 0; }
     #locationModal .modal-header-mobile h2 {
       flex: 1;
       min-width: 0;
@@ -2620,18 +2622,46 @@
      this replaced everywhere (see MOBILE-BUILD-NOTES.md) - both a larger
      font and more padding, since a small "x" being hard to tap on a phone
      was the whole reason for this change. */
+  /* Back button = a "<" chevron (same icon as public/chevron-back.svg, drawn inline in the
+     button so it takes the header's ink color). 44px square tap area, which is the comfortable
+     minimum for a thumb; the negative margins keep that bigger target from making the header
+     taller. The icon nudges left when its pane opens (the animation restarts every time the pane
+     is shown) and shifts left a few px while pressed. Both are switched off for people who have
+     "reduce motion" turned on. */
   .mp-back-btn {
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin: -10px 0 -10px -10px;
+    padding: 0;
     background: none;
     border: none;
+    border-radius: 50%;
     color: var(--ink);
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 17px;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    padding: 10px 12px;
-    margin: -10px -12px;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease;
+  }
+  .mp-back-btn svg {
+    display: block;
+    width: 26px;
+    height: 26px;
+    transition: transform 0.15s ease;
+    animation: ccaBackNudge 0.45s cubic-bezier(0.22, 0.9, 0.3, 1);
+  }
+  .mp-back-btn:active { background: rgba(0, 0, 0, 0.12); }
+  .mp-back-btn:active svg { transform: translateX(-3px); }
+  .mp-back-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+  @keyframes ccaBackNudge {
+    0%   { transform: translateX(7px); opacity: 0.35; }
+    55%  { transform: translateX(-3px); opacity: 1; }
+    100% { transform: translateX(0); opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mp-back-btn svg { animation: none; transition: none; }
   }
   .mp-topbar-title {
     font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -2650,10 +2680,11 @@
     font-size: 19px;
     letter-spacing: 0.03em;
   }
-  /* Balances the back button's width so the title reads as centered.
-     Widened from the old 52px to fit "◀ BACK" at the bigger size above
-     without throwing off the centering. */
-  .mp-topbar-spacer { width: 74px; flex-shrink: 0; }
+  /* The old invisible balancing block that sat opposite "◀ BACK" is gone - with the slim "<"
+     chevron the title gets that room instead, centered in the space that is left. (The elements
+     stay in the markup; !important beats the per-pane display:flex rules above.) */
+  .mp-topbar-spacer, .mobile-panel-spacer { display: none !important; }
+  .mp-topbar-title { flex: 1; min-width: 0; text-align: center; }
   .mp-list {
     flex: 1;
     overflow-y: auto;
@@ -3199,7 +3230,7 @@
          .modal rule there). Above that width this wrapper is inert and the
          modal looks exactly as it always has. -->
     <div class="modal-header-mobile">
-      <button type="button" id="locationModalBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+      <button type="button" id="locationModalBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <h2 id="modalTitle">Add Location</h2>
       <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
     </div>
@@ -3514,7 +3545,7 @@
   <!-- See #liveNowPanel's identical comment re: the mobile-only back
        button + spacer pair. -->
   <div class="side-panel-header">
-    <button type="button" id="manageMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <button type="button" id="manageMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <h2>Manage Locations</h2>
     <button id="closeManageBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
@@ -3571,7 +3602,7 @@
      the "RADIO" ticker label, closed via the "◀ BACK" button below. -->
 <div id="mobileRadioPicker" class="mp-picker">
   <div class="mp-topbar">
-    <button type="button" id="mpBackBtn" class="mp-back-btn">&#9664; BACK</button>
+    <button type="button" id="mpBackBtn" class="mp-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <div class="mp-topbar-title mp-topbar-title-tight">Station Picker</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
@@ -3589,7 +3620,7 @@
      externally - only the generic overview page is now skipped. -->
 <div id="mobileConferencesPane" class="mp-picker">
   <div class="mp-topbar">
-    <button type="button" id="mcBackBtn" class="mp-back-btn">&#9664; BACK</button>
+    <button type="button" id="mcBackBtn" class="mp-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <div class="mp-topbar-title">Conferences</div>
     <div class="mp-topbar-spacer" aria-hidden="true"></div>
   </div>
@@ -3603,7 +3634,7 @@
        close control, unchanged, since it's a perfectly fine mouse target
        there and this is a mobile-only tap-target fix. -->
   <div class="side-panel-header">
-    <button type="button" id="liveNowMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <button type="button" id="liveNowMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <!-- Text is fully owned by updateLiveNowUi() from first load onward -
          this is just a safe default before that first runs. Always shows
          the real count, including 0, rather than hiding the number at
@@ -3701,7 +3732,7 @@
   <!-- See #liveNowPanel's identical comment above re: the mobile-only
        back button + spacer pair. -->
   <div class="side-panel-header">
-    <button type="button" id="radioBrowseMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <button type="button" id="radioBrowseMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <h2 id="radioBrowseTitle">All Radio Stations</h2>
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
@@ -3733,7 +3764,7 @@
   <!-- See #liveNowPanel's identical comment re: the mobile-only back
        button + spacer pair. -->
   <div class="side-panel-header">
-    <button type="button" id="liveDebugMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <button type="button" id="liveDebugMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <h2>🛠️ Live Check Debug</h2>
     <button id="closeLiveDebugBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
@@ -3769,7 +3800,7 @@
        studies etc. gathered from the live checks). See #liveDebugPanel's
        identical mobile back button + spacer pair. -->
   <div class="side-panel-header">
-    <button type="button" id="programScheduleMobileBackBtn" class="mp-back-btn mobile-panel-back-btn">&#9664; BACK</button>
+    <button type="button" id="programScheduleMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <h2>📅 Weekly Schedule <span class="ps-admin-tag">ADMIN PREVIEW</span></h2>
     <button id="closeProgramScheduleBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
