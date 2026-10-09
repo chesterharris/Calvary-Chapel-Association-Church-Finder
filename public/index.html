@@ -1599,6 +1599,21 @@
   }
   .radio-ticker-empty-cta:hover { text-decoration: underline; }
   .radio-ticker-empty-cta svg { width: 15px; height: 15px; }
+  .live-debug-visitors {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--ink);
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.03);
+  }
+  .live-debug-visitors .lv-sep { opacity: 0.35; }
+  .live-debug-visitors .lv-num { font-weight: 700; }
+  .live-debug-visitors .lv-trend { display: inline-flex; align-items: center; gap: 6px; }
+  .live-debug-visitors .lv-trend svg { display: block; width: 84px; height: 18px; }
   .live-debug-toolbar {
     display: flex;
     align-items: center;
@@ -3714,6 +3729,7 @@
     <button id="closeLiveDebugBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
+  <div id="liveDebugVisitors" class="live-debug-visitors">Visitors: loading...</div>
   <div class="live-debug-toolbar">
     <div class="live-debug-toolbar-status">
       <span id="liveDebugStatusDot" class="live-debug-status-dot"></span>
@@ -5571,6 +5587,41 @@
     }
   });
 
+  // One-line visitor summary at the top of the Live Debug pane. Numbers come
+  // from our own anonymous counter (see "Visitor stats" in src/index.js);
+  // admins and browsers marked ?notrack=1 are not counted, so your own
+  // visits never show up here.
+  const liveDebugVisitorsEl = document.getElementById('liveDebugVisitors');
+  let liveDebugVisitorsTimer = null;
+  async function loadVisitorStats() {
+    try {
+      const res = await fetch('/api/admin/visitor-stats', { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) throw new Error('status ' + res.status);
+      const d = await res.json();
+      const values = (d.days || []).map(function(x) { return x.count; });
+      const tip = (d.days || []).map(function(x) { return x.date + ': ' + x.count; }).join('\n');
+      liveDebugVisitorsEl.innerHTML =
+        '<span>Visitors current: <span class="lv-num">' + d.current + '</span></span>' +
+        '<span class="lv-sep">|</span>' +
+        '<span>today: <span class="lv-num">' + d.today + '</span></span>' +
+        '<span class="lv-sep">|</span>' +
+        '<span>past 7 days: <span class="lv-num">' + d.last7 + '</span></span>' +
+        '<span class="lv-sep">|</span>' +
+        '<span class="lv-trend" title="' + escapeHtmlDebug('Daily visits, last 14 days (Pacific time), oldest first:\n' + tip) + '">Trendline: ' +
+        buildSparklineSvg(values, '#a68a4a') + '</span>';
+    } catch (err) {
+      liveDebugVisitorsEl.textContent = 'Visitors: unavailable (' + err.message + ')';
+    }
+  }
+  function startVisitorStatsRefresh() {
+    loadVisitorStats();
+    if (liveDebugVisitorsTimer) clearInterval(liveDebugVisitorsTimer);
+    liveDebugVisitorsTimer = setInterval(loadVisitorStats, 60000);
+  }
+  function stopVisitorStatsRefresh() {
+    if (liveDebugVisitorsTimer) { clearInterval(liveDebugVisitorsTimer); liveDebugVisitorsTimer = null; }
+  }
+
   async function loadLiveDebugStatus() {
     try {
       const res = await fetch('/api/debug/live-check-status', { credentials: 'include', cache: 'no-store' });
@@ -5653,6 +5704,7 @@
     // #btnLiveDebug itself lives in the desktop-only .header-actions row.
     if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-livedebug-open');
     loadLiveDebugStatus();
+    startVisitorStatsRefresh();
     if (liveDebugPollTimer) clearTimeout(liveDebugPollTimer);
     pollProgressAndStatus();
   }
@@ -5660,6 +5712,7 @@
     liveDebugPanel.style.display = 'none';
     document.body.classList.remove('mobile-livedebug-open');
     map.invalidateSize(); // see closeMobileRadioPicker's identical comment above
+    stopVisitorStatsRefresh();
     if (liveDebugPollTimer) {
       clearTimeout(liveDebugPollTimer);
       liveDebugPollTimer = null;
@@ -9682,7 +9735,8 @@
 <!-- Cloudflare Web Analytics (visit counting).
      Counting is skipped when (a) this browser has been marked "don't count" by visiting
      the site once with ?notrack=1 (undo with ?notrack=0), or (b) the visitor is signed in
-     as admin. Nothing personal is stored: only a flag in this browser's own localStorage. -->
+     as admin. Nothing personal is stored: only a flag in this browser's own localStorage.
+     The same rule applies to our own anonymous visitor counter (startVisitPings below). -->
 <script>
 (function () {
   var KEY = 'ccaFinderNoTrack';
@@ -9715,10 +9769,46 @@
       history.replaceState(null, '', u.pathname + u.search + u.hash);
     }
   } catch (e) {}
+  // Our own anonymous visitor counter (shown to the admin in Live Debug). The random code lives
+  // only in this tab's sessionStorage; refreshing the page is not a new visit, a new tab is.
+  function randomSid() {
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789', out = '';
+    try {
+      var a = new Uint8Array(20); crypto.getRandomValues(a);
+      for (var i = 0; i < a.length; i++) out += chars.charAt(a[i] % chars.length);
+    } catch (e) {
+      for (var j = 0; j < 20; j++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return out;
+  }
+  function startVisitPings() {
+    var sid, counted = false, lastSent = 0;
+    try {
+      sid = sessionStorage.getItem('ccaVisitSid');
+      if (!sid) { sid = randomSid(); sessionStorage.setItem('ccaVisitSid', sid); }
+      counted = sessionStorage.getItem('ccaVisitCounted') === '1';
+    } catch (e) { sid = sid || randomSid(); }
+    function send(kind) {
+      lastSent = Date.now();
+      try {
+        fetch('/api/hit', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sid: sid, kind: kind }), keepalive: true, credentials: 'omit'
+        }).catch(function () {});
+      } catch (e) {}
+    }
+    send(counted ? 'ping' : 'visit');
+    try { sessionStorage.setItem('ccaVisitCounted', '1'); } catch (e) {}
+    setInterval(function () { if (document.visibilityState === 'visible') send('ping'); }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && Date.now() - lastSent > 30000) send('ping');
+    });
+  }
   window.ccaStartAnalytics = function (isAdmin) {
     if (started) return;
     started = true;
     if (isAdmin || getFlag()) return;
+    startVisitPings();
     var s = document.createElement('script');
     s.type = 'module';
     s.src = 'https://static.cloudflareinsights.com/beacon.min.js';

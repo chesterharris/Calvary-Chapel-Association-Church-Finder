@@ -5935,6 +5935,108 @@ async function handleFeedback(request, env) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Visitor stats (our own anonymous counter, shown in the admin Live Debug pane)
+//
+// Nothing personal is stored: no IP addresses, no names, no user-agent. Each
+// open browser tab sends a random one-time code (`sid`, lives only in that
+// tab's sessionStorage) - the Worker keeps a short list of codes seen in the
+// last 5 minutes (for "current") and one total per day (for today / 7 days /
+// trend). Admins and browsers marked ?notrack=1 never send anything (see
+// ccaStartAnalytics in public/index.html).
+//
+// Counts are approximate on purpose: read-modify-write on KV can drop a hit
+// when two arrive in the same instant. Fine for a rough gauge.
+// ---------------------------------------------------------------------------
+const VISITS_DAILY_KV_KEY = 'visits-daily';
+const VISITS_ACTIVE_KV_KEY = 'visits-active';
+const VISITS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+const VISITS_KEEP_DAYS = 30;
+const VISITS_ACTIVE_MAX = 500;
+
+async function readVisitsJson(env, key) {
+  const raw = await env.CHURCHES_KV.get(key);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+async function recordVisitHit(env, sid, wantsNewVisit) {
+  const now = Date.now();
+
+  const active = await readVisitsJson(env, VISITS_ACTIVE_KV_KEY);
+  const fresh = {};
+  Object.keys(active).forEach(function(k) {
+    if (now - Number(active[k]) <= VISITS_ACTIVE_WINDOW_MS) fresh[k] = active[k];
+  });
+  // A code already seen in the last 5 minutes is the same visit, never a new one.
+  const alreadySeen = Object.prototype.hasOwnProperty.call(fresh, sid);
+  fresh[sid] = now;
+  let keys = Object.keys(fresh);
+  if (keys.length > VISITS_ACTIVE_MAX) {
+    keys.sort(function(a, b) { return fresh[a] - fresh[b]; });
+    keys.slice(0, keys.length - VISITS_ACTIVE_MAX).forEach(function(k) { delete fresh[k]; });
+  }
+  await env.CHURCHES_KV.put(VISITS_ACTIVE_KV_KEY, JSON.stringify(fresh), { expirationTtl: 900 });
+
+  if (wantsNewVisit && !alreadySeen) {
+    const daily = await readVisitsJson(env, VISITS_DAILY_KV_KEY);
+    const today = pacificDateString(now);
+    daily[today] = (Number(daily[today]) || 0) + 1;
+    const dates = Object.keys(daily).sort();
+    dates.slice(0, Math.max(0, dates.length - VISITS_KEEP_DAYS)).forEach(function(d) { delete daily[d]; });
+    await env.CHURCHES_KV.put(VISITS_DAILY_KV_KEY, JSON.stringify(daily));
+  }
+}
+
+async function handleVisitHit(request, env, ctx) {
+  const done = new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+  if (request.method !== 'POST') return new Response(null, { status: 405 });
+  let body;
+  try { body = await request.json(); } catch (err) { return done; }
+  const sid = body && typeof body.sid === 'string' ? body.sid : '';
+  if (!/^[a-z0-9]{12,32}$/.test(sid)) return done;
+  const ua = request.headers.get('User-Agent') || '';
+  if (/bot|crawl|spider|slurp|headless|lighthouse|preview/i.test(ua)) return done;
+  ctx.waitUntil(
+    recordVisitHit(env, sid, body.kind === 'visit').catch(function(err) {
+      console.error('visit hit failed', err && err.message);
+    })
+  );
+  return done;
+}
+
+function isoDateMinusDays(isoDate, days) {
+  const d = new Date(isoDate + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function handleGetVisitorStats(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const now = Date.now();
+  const [active, daily] = await Promise.all([
+    readVisitsJson(env, VISITS_ACTIVE_KV_KEY),
+    readVisitsJson(env, VISITS_DAILY_KV_KEY)
+  ]);
+  const current = Object.keys(active).filter(function(k) {
+    return now - Number(active[k]) <= VISITS_ACTIVE_WINDOW_MS;
+  }).length;
+  const today = pacificDateString(now);
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const date = isoDateMinusDays(today, i);
+    days.push({ date: date, count: Number(daily[date]) || 0 });
+  }
+  const todayCount = days[days.length - 1].count;
+  const last7 = days.slice(-7).reduce(function(sum, d) { return sum + d.count; }, 0);
+  return jsonResponse({ current: current, today: todayCount, last7: last7, days: days });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -5943,6 +6045,12 @@ export default {
     }
     if (url.pathname === '/radio-now-playing') {
       return handleRadio(request, ctx);
+    }
+    if (url.pathname === '/api/hit') {
+      return handleVisitHit(request, env, ctx);
+    }
+    if (url.pathname === '/api/admin/visitor-stats' && request.method === 'GET') {
+      return handleGetVisitorStats(request, env);
     }
     if (url.pathname === '/api/verify-admin' && request.method === 'POST') {
       return handleVerifyAdmin(request, env);
