@@ -2625,8 +2625,8 @@
   /* Back button = a "<" chevron (same icon as public/chevron-back.svg, drawn inline in the
      button so it takes the header's ink color). 44px square tap area, which is the comfortable
      minimum for a thumb; the negative margins keep that bigger target from making the header
-     taller. The icon nudges left when its pane opens (the animation restarts every time the pane
-     is shown) and shifts left a few px while pressed. Both are switched off for people who have
+     taller. A quarter second after its pane opens the icon nudges 10px left and returns (the
+     animation restarts every time the pane is shown); it shifts left a few px while pressed. Both are switched off for people who have
      "reduce motion" turned on. */
   .mp-back-btn {
     flex-shrink: 0;
@@ -2650,15 +2650,16 @@
     width: 26px;
     height: 26px;
     transition: transform 0.15s ease;
-    animation: ccaBackNudge 0.45s cubic-bezier(0.22, 0.9, 0.3, 1);
+    /* 0.25s delay: the chevron rests in place while the pane settles, then nudges. */
+    animation: ccaBackNudge 0.5s cubic-bezier(0.22, 0.9, 0.3, 1) 0.25s;
   }
   .mp-back-btn:active { background: rgba(0, 0, 0, 0.12); }
   .mp-back-btn:active svg { transform: translateX(-3px); }
   .mp-back-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
   @keyframes ccaBackNudge {
-    0%   { transform: translateX(7px); opacity: 0.35; }
-    55%  { transform: translateX(-3px); opacity: 1; }
-    100% { transform: translateX(0); opacity: 1; }
+    0%   { transform: translateX(0); }
+    40%  { transform: translateX(-10px); }
+    100% { transform: translateX(0); }
   }
   @media (prefers-reduced-motion: reduce) {
     .mp-back-btn svg { animation: none; transition: none; }
