@@ -2833,13 +2833,184 @@ async function handleSaveProgramOverride(request, env) {
   return jsonResponse({ success: true, key: key, override: overrides[key] || null });
 }
 
-async function handleConferences(request, ctx) {
+// ---- Manually added conferences (admin) ----
+//
+// Conferences the admin types in by hand (Site Management > Conferences),
+// shown in the ticker alongside the ones scraped from calvarycca.org. Stored
+// in KV under MANUAL_CONFERENCES_KV_KEY as { nextId, conferences: [ { id,
+// title, church, location, startDate, endDate, linkText, link, createdAt,
+// updatedAt } ] }. Dates are plain YYYY-MM-DD.
+//
+// Cleanup: every time the conference list is built (see handleConferences) and
+// whenever the admin opens the list, any manual conference whose LAST day was
+// yesterday or earlier is deleted from KV for good. "Today" is the date in
+// Pacific time, so a conference is never removed while it is still its last
+// day anywhere in the contiguous US. Nothing is ever removed from the
+// scraped (calvarycca.org) list - that follows its source.
+
+const MANUAL_CONFERENCES_KV_KEY = 'manual-conferences';
+const MANUAL_CONFERENCES_MAX = 50;
+const MANUAL_CONFERENCE_DEFAULT_LINK_TEXT = 'More Info';
+const MONTH_LONG_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Today's date (YYYY-MM-DD) on the Pacific-time calendar.
+function pacificDateString(nowMs) {
+  return new Date(nowMs === undefined ? Date.now() : nowMs).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+
+function isValidIsoDate(str) {
+  if (typeof str !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  const d = new Date(str + 'T00:00:00Z');
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === str;
+}
+
+function ordinalDay(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return n + 'th';
+  switch (n % 10) {
+    case 1: return n + 'st';
+    case 2: return n + 'nd';
+    case 3: return n + 'rd';
+    default: return n + 'th';
+  }
+}
+
+// "February 25th-27th", "February 28th-March 2nd", or "February 25th" - the
+// same wording style as the entries scraped from calvarycca.org.
+function formatConferenceDateRange(startDate, endDate) {
+  const s = new Date(startDate + 'T00:00:00Z');
+  const e = new Date((endDate || startDate) + 'T00:00:00Z');
+  const sMonth = MONTH_LONG_NAMES[s.getUTCMonth()];
+  const sDay = ordinalDay(s.getUTCDate());
+  if (s.getTime() === e.getTime()) return sMonth + ' ' + sDay;
+  const eMonth = MONTH_LONG_NAMES[e.getUTCMonth()];
+  const eDay = ordinalDay(e.getUTCDate());
+  if (s.getUTCMonth() === e.getUTCMonth() && s.getUTCFullYear() === e.getUTCFullYear()) return sMonth + ' ' + sDay + '-' + eDay;
+  return sMonth + ' ' + sDay + '-' + eMonth + ' ' + eDay;
+}
+
+// Validates and cleans one conference submitted by the admin. Returns
+// { error } or { value } (without id/createdAt/updatedAt).
+function sanitizeManualConference(input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const str = function(v, max) { return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : ''; };
+  const title = str(src.title, 120);
+  const church = str(src.church, 80);
+  const location = str(src.location, 60);
+  const startDate = typeof src.startDate === 'string' ? src.startDate.trim() : '';
+  let endDate = typeof src.endDate === 'string' ? src.endDate.trim() : '';
+  const linkText = str(src.linkText, 40) || MANUAL_CONFERENCE_DEFAULT_LINK_TEXT;
+  let link = typeof src.link === 'string' ? src.link.trim().slice(0, 500) : '';
+
+  if (!title) return { error: 'Conference name is required' };
+  if (!isValidIsoDate(startDate)) return { error: 'A valid start date is required' };
+  if (!endDate) endDate = startDate;
+  if (!isValidIsoDate(endDate)) return { error: 'The end date is not valid' };
+  if (endDate < startDate) return { error: 'The end date cannot be before the start date' };
+  if (link) {
+    let parsed;
+    try { parsed = new URL(link); } catch (err) { parsed = null; }
+    if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
+      return { error: 'The link must be a full web address starting with http:// or https://' };
+    }
+    link = parsed.toString();
+  }
+  return { value: { title: title, church: church, location: location, startDate: startDate, endDate: endDate, linkText: linkText, link: link } };
+}
+
+// The ticker entry for a stored manual conference - same shape as the
+// scraped entries (see parseConferences), so the front end treats them
+// identically, countdown and all.
+function buildManualConferenceEntry(rec) {
+  const prefixParts = [];
+  if (rec.church) prefixParts.push('at ' + rec.church);
+  if (rec.location) prefixParts.push(rec.location);
+  const locationPrefix = prefixParts.length ? prefixParts.join(', ') : null;
+  const dates = formatConferenceDateRange(rec.startDate, rec.endDate);
+  return {
+    id: rec.id,
+    title: rec.title,
+    detail: locationPrefix ? (locationPrefix + ', ' + dates) : dates,
+    link: rec.link || null,
+    linkText: rec.link ? (rec.linkText || MANUAL_CONFERENCE_DEFAULT_LINK_TEXT) : null,
+    startDate: rec.startDate,
+    endDate: rec.endDate,
+    locationPrefix: locationPrefix,
+    manual: true
+  };
+}
+
+async function loadManualConferenceStore(env) {
+  const raw = await env.CHURCHES_KV.get(MANUAL_CONFERENCES_KV_KEY);
+  let store = null;
+  if (raw) {
+    try { store = JSON.parse(raw); } catch (err) { store = null; }
+  }
+  if (!store || typeof store !== 'object') store = {};
+  if (!Array.isArray(store.conferences)) store.conferences = [];
+  if (!Number.isInteger(store.nextId) || store.nextId < 1) {
+    store.nextId = store.conferences.reduce(function(m, c) { return Math.max(m, Number(c && c.id) || 0); }, 0) + 1;
+  }
+  return store;
+}
+
+async function saveManualConferenceStore(env, store) {
+  await env.CHURCHES_KV.put(MANUAL_CONFERENCES_KV_KEY, JSON.stringify({ nextId: store.nextId, conferences: store.conferences }));
+}
+
+// Deletes manual conferences whose last day was yesterday or earlier. Writes
+// to KV only when something was actually removed. Returns the store.
+async function pruneManualConferences(env, nowMs) {
+  const store = await loadManualConferenceStore(env);
+  const today = pacificDateString(nowMs);
+  const kept = store.conferences.filter(function(c) {
+    return c && isValidIsoDate(c.endDate) && c.endDate >= today;
+  });
+  if (kept.length !== store.conferences.length) {
+    store.conferences = kept;
+    await saveManualConferenceStore(env, store);
+  }
+  return store;
+}
+
+function sortManualConferences(list) {
+  return list.slice().sort(function(a, b) {
+    if (a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
+    return String(a.title).localeCompare(String(b.title));
+  });
+}
+
+// Puts each manual entry into the scraped list in start-date order WITHOUT
+// reordering the scraped entries: it goes just before the first scraped
+// entry that starts later, or at the end if none does. A manual entry whose
+// title already appears in the scraped list (calvarycca.org has caught up)
+// is left out of the ticker; it stays stored until it expires.
+function mergeManualConferences(scraped, manualEntries) {
+  const list = (scraped || []).slice();
+  // Apostrophes are dropped (not turned into spaces) so a curly and a straight
+  // one - or none - still read as the same title.
+  const norm = function(t) { return String(t || '').toLowerCase().replace(/['\u2018\u2019`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); };
+  const scrapedTitles = {};
+  list.forEach(function(c) { scrapedTitles[norm(c.title)] = true; });
+  manualEntries.forEach(function(m) {
+    if (scrapedTitles[norm(m.title)]) return;
+    const idx = list.findIndex(function(c) { return c.startDate && c.startDate > m.startDate; });
+    if (idx === -1) list.push(m); else list.splice(idx, 0, m);
+  });
+  return list;
+}
+
+// Scraped (calvarycca.org) conferences, edge-cached for CACHE_SECONDS.
+// Returns { conferences, source, fetchedAt, error? }.
+async function getScrapedConferences(request, ctx) {
   const cache = caches.default;
   const cacheUrl = new URL(request.url);
   cacheUrl.searchParams.set('cacheVersion', String(CACHE_VERSION));
   const cacheKey = new Request(cacheUrl.toString(), request);
   const cached = await cache.match(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    try { return await cached.json(); } catch (err) { /* fall through and re-scrape */ }
+  }
 
   const jsonHeaders = {
     'Content-Type': 'application/json',
@@ -2857,23 +3028,103 @@ async function handleConferences(request, ctx) {
     const conferences = parseConferences(html);
     if (!conferences.length) throw new Error('Parsed zero conference entries');
 
-    const body = JSON.stringify({
+    const data = {
       conferences: conferences,
       source: SOURCE_URL,
       fetchedAt: new Date().toISOString()
-    });
-    const response = new Response(body, { headers: jsonHeaders });
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-    return response;
+    };
+    ctx.waitUntil(cache.put(cacheKey, new Response(JSON.stringify(data), { headers: jsonHeaders })));
+    return data;
   } catch (err) {
-    const body = JSON.stringify({
+    return {
       conferences: [],
       error: err.message,
       source: SOURCE_URL,
       fetchedAt: new Date().toISOString()
-    });
-    return new Response(body, { headers: jsonHeaders });
+    };
   }
+}
+
+async function handleConferences(request, ctx, env) {
+  const scraped = await getScrapedConferences(request, ctx);
+  let manualEntries = [];
+  try {
+    const store = await pruneManualConferences(env);
+    manualEntries = sortManualConferences(store.conferences).map(buildManualConferenceEntry);
+  } catch (err) {
+    manualEntries = []; // a KV hiccup must never take the ticker down
+  }
+  const body = Object.assign({}, scraped, {
+    conferences: mergeManualConferences(scraped.conferences, manualEntries)
+  });
+  return new Response(JSON.stringify(body), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      // The scraped part is edge-cached above; the merged result is not,
+      // so a conference the admin just added or deleted shows right away.
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+// Admin: list the manually added conferences (also prunes the expired ones).
+async function handleGetManualConferences(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const store = await pruneManualConferences(env);
+  return jsonResponse({
+    today: pacificDateString(),
+    conferences: sortManualConferences(store.conferences).map(function(c) {
+      return Object.assign({}, c, { detail: buildManualConferenceEntry(c).detail });
+    })
+  });
+}
+
+// Admin: add (no id) or edit (id) a manual conference.
+async function handleSaveManualConference(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  let body;
+  try { body = await request.json(); } catch (err) { return jsonResponse({ error: 'Bad request body' }, 400); }
+  const result = sanitizeManualConference(body);
+  if (result.error) return jsonResponse({ error: result.error }, 400);
+  const value = result.value;
+  if (value.endDate < pacificDateString()) {
+    return jsonResponse({ error: 'That conference has already ended, so it would be removed right away' }, 400);
+  }
+  const store = await pruneManualConferences(env);
+  const now = new Date().toISOString();
+  const id = body && body.id !== undefined && body.id !== null ? Number(body.id) : null;
+  let saved;
+  if (id !== null) {
+    const idx = store.conferences.findIndex(function(c) { return c.id === id; });
+    if (idx === -1) return jsonResponse({ error: 'That conference was not found (it may have already been removed)' }, 404);
+    saved = Object.assign({}, store.conferences[idx], value, { updatedAt: now });
+    store.conferences[idx] = saved;
+  } else {
+    if (store.conferences.length >= MANUAL_CONFERENCES_MAX) {
+      return jsonResponse({ error: 'Too many manual conferences (limit ' + MANUAL_CONFERENCES_MAX + ')' }, 400);
+    }
+    saved = Object.assign({ id: store.nextId, createdAt: now, updatedAt: now }, value);
+    store.nextId += 1;
+    store.conferences.push(saved);
+  }
+  await saveManualConferenceStore(env, store);
+  return jsonResponse({ success: true, conference: Object.assign({}, saved, { detail: buildManualConferenceEntry(saved).detail }) });
+}
+
+// Admin: delete a manual conference now (before it would expire).
+async function handleDeleteManualConference(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  let body;
+  try { body = await request.json(); } catch (err) { return jsonResponse({ error: 'Bad request body' }, 400); }
+  const id = body && body.id !== undefined && body.id !== null ? Number(body.id) : NaN;
+  if (!Number.isInteger(id)) return jsonResponse({ error: 'Missing conference id' }, 400);
+  const store = await loadManualConferenceStore(env);
+  const kept = store.conferences.filter(function(c) { return c.id !== id; });
+  if (kept.length === store.conferences.length) return jsonResponse({ error: 'That conference was not found' }, 404);
+  store.conferences = kept;
+  await saveManualConferenceStore(env, store);
+  return jsonResponse({ success: true });
 }
 
 // ---- Radio "Now Playing" ticker ----
@@ -5688,7 +5939,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/conferences') {
-      return handleConferences(request, ctx);
+      return handleConferences(request, ctx, env);
     }
     if (url.pathname === '/radio-now-playing') {
       return handleRadio(request, ctx);
@@ -5710,6 +5961,11 @@ export default {
     }
     if (url.pathname === '/api/churches' && request.method === 'DELETE') {
       return handleDeleteChurch(request, env);
+    }
+    if (url.pathname === '/api/admin/conferences') {
+      if (request.method === 'GET') return handleGetManualConferences(request, env);
+      if (request.method === 'POST') return handleSaveManualConference(request, env);
+      if (request.method === 'DELETE') return handleDeleteManualConference(request, env);
     }
     if (url.pathname === '/api/admin/church-languages' && request.method === 'POST') {
       return handleSaveChurchLanguages(request, env);

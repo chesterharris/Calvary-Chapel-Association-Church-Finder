@@ -906,6 +906,67 @@
     font-size: 11px;
     color: #888;
   }
+  .legacy-admin-btn { display: none !important; }
+  .sm-cards { display: grid; gap: 10px; margin-top: 8px; }
+  .sm-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    padding: 12px 14px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .sm-card:hover { border-color: var(--evergreen); background: rgba(47,75,60,0.06); }
+  .sm-card:focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+  .sm-card strong { display: block; color: var(--evergreen); font-size: 15px; margin-bottom: 2px; }
+  .sm-card span { font-size: 12.5px; opacity: 0.75; }
+  .cm-modal { max-width: 560px; }
+  .cm-list { margin-bottom: 4px; }
+  .cm-empty { font-size: 13px; opacity: 0.65; padding: 2px 0 8px; }
+  .cm-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .cm-item-title { font-weight: 700; }
+  .cm-item-detail { opacity: 0.8; }
+  .cm-item-note { font-size: 11.5px; opacity: 0.6; margin-top: 2px; }
+  .cm-item-actions { flex-shrink: 0; display: flex; gap: 6px; }
+  .cm-act {
+    font: inherit;
+    font-size: 12px;
+    background: none;
+    border: none;
+    color: var(--ember);
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 2px 0;
+  }
+  .cm-act.is-confirm { color: #b91c1c; font-weight: 700; }
+  .cm-preview-label { font-size: 11.5px; font-weight: 700; opacity: 0.7; margin-top: 4px; }
+  .cm-preview {
+    font-size: 13px;
+    background: var(--evergreen);
+    color: var(--paper);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 3px;
+    min-height: 18px;
+    overflow-wrap: anywhere;
+  }
+  .cm-preview .cm-preview-link { text-decoration: underline; }
+  .cm-status { font-size: 12.5px; min-height: 16px; margin-top: 8px; color: #b91c1c; }
+  .cm-status.is-ok { color: var(--evergreen); }
   .form-actions {
     display: flex;
     align-items: center;
@@ -2957,8 +3018,12 @@
            and visibility from the first load onward, across all three
            states (live / upcoming countdown / no streams yet). -->
       <button id="btnAddLocation" class="btn btn-ember" title="Admin-only: add a new church location">+ Add Location</button>
-      <button id="btnManageLocations" class="btn btn-outline" title="Admin-only: edit or remove existing church locations">Manage Locations</button>
-      <button id="btnManageFeaturedVideo" class="btn btn-outline" title="Admin-only: set the featured video link shown on the map">Manage Featured Video</button>
+      <button id="btnSiteManagement" class="btn btn-outline" style="display:none;" title="Admin-only: manage locations, the featured video and conferences">Site Management</button>
+      <!-- The two buttons below are kept (permanently hidden) because the Site
+           Management popup and the other admin code open their screens by
+           clicking them - see .legacy-admin-btn in <style>. -->
+      <button id="btnManageLocations" class="btn btn-outline legacy-admin-btn" title="Admin-only: edit or remove existing church locations">Manage Locations</button>
+      <button id="btnManageFeaturedVideo" class="btn btn-outline legacy-admin-btn" title="Admin-only: set the featured video link shown on the map">Manage Featured Video</button>
       <button id="btnRadioBrowse" class="btn btn-outline" title="Browse and search all radio stations">📻 All Stations</button>
       <button id="btnFeedback" class="btn btn-outline" title="Send feedback or report an issue">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
@@ -3007,7 +3072,11 @@
         <span class="hamburger-menu-icon" aria-hidden="true">📅</span>
         <span class="hamburger-menu-label">Weekly Schedule</span>
       </button>
-      <button type="button" id="menuManageLocationsItem" class="hamburger-menu-item" style="display:none;">
+      <button type="button" id="menuSiteManagementItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">⚙️</span>
+        <span class="hamburger-menu-label">Site Management</span>
+      </button>
+      <button type="button" id="menuManageLocationsItem" class="hamburger-menu-item legacy-admin-btn" style="display:none;">
         <span class="hamburger-menu-icon" aria-hidden="true">🗂️</span>
         <span class="hamburger-menu-label">Manage Locations</span>
       </button>
@@ -3015,7 +3084,7 @@
         <span class="hamburger-menu-icon" aria-hidden="true">➕</span>
         <span class="hamburger-menu-label">Add Location</span>
       </button>
-      <button type="button" id="menuManageFeaturedVideoItem" class="hamburger-menu-item" style="display:none;">
+      <button type="button" id="menuManageFeaturedVideoItem" class="hamburger-menu-item legacy-admin-btn" style="display:none;">
         <span class="hamburger-menu-icon" aria-hidden="true">🎬</span>
         <span class="hamburger-menu-label">Manage Featured Video</span>
       </button>
@@ -3052,10 +3121,10 @@
     <button type="button" id="featuredVideoDismissBtn" class="fv-dismiss" aria-label="Dismiss featured video">&times;</button>
   </div>
   <div id="conferenceTicker" class="ticker-bar ticker-loading">
-    <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">CCA Conferences</a>
+    <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">Conferences</a>
     <div class="ticker-track-wrap">
       <div id="tickerTrack" class="ticker-track">
-        <span class="ticker-item">Loading upcoming CCA conferences…</span>
+        <span class="ticker-item">Loading upcoming conferences…</span>
       </div>
     </div>
     <button type="button" id="tickerDismissBtn" class="ticker-dismiss" title="Hide conference ticker">×</button>
@@ -3186,6 +3255,86 @@
       <div class="form-actions">
         <button type="button" id="cancelModalBtn" class="btn btn-outline">Cancel</button>
         <button type="submit" class="btn btn-ember" id="saveLocationBtn">Save Location</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="siteMgmtModal" class="modal-overlay" style="display: none;">
+  <div class="modal admin-modal">
+    <h2>Site Management</h2>
+    <p class="admin-modal-copy">What would you like to update?</p>
+    <div class="sm-cards">
+      <button type="button" id="smCardLocations" class="sm-card">
+        <strong>Locations</strong>
+        <span>Edit or remove church locations.</span>
+      </button>
+      <button type="button" id="smCardFeaturedVideo" class="sm-card">
+        <strong>Featured Video</strong>
+        <span>Set the video link shown on the map, and what plays next.</span>
+      </button>
+      <button type="button" id="smCardConferences" class="sm-card">
+        <strong>Conferences</strong>
+        <span>Add a conference to the ticker by hand. It is removed automatically after it ends.</span>
+      </button>
+    </div>
+    <div class="form-actions">
+      <button type="button" id="smCloseBtn" class="btn btn-outline">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="confMgmtModal" class="modal-overlay" style="display: none;">
+  <div class="modal admin-modal cm-modal">
+    <h2>Manage Conferences</h2>
+    <p class="admin-modal-copy">Conferences you add here appear in the ticker with the ones from calvarycca.org. Each is deleted automatically the day after its last day.</p>
+    <div class="fv-slot-heading">Added by you</div>
+    <div id="cmList" class="cm-list"></div>
+    <form id="cmForm" novalidate>
+      <div id="cmFormHeading" class="fv-slot-heading fv-slot-heading-upnext">Add a conference</div>
+      <div class="form-row">
+        <label for="cm_title">Conference name *</label>
+        <input id="cm_title" maxlength="120" placeholder="e.g. 2027 Southeast Children’s Ministry Conference">
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="cm_church">Church</label>
+          <input id="cm_church" maxlength="80" placeholder="e.g. CC Gwinnett">
+        </div>
+        <div class="form-row">
+          <label for="cm_location">City, State</label>
+          <input id="cm_location" maxlength="60" placeholder="e.g. Lawrenceville, GA">
+        </div>
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="cm_start">Start date *</label>
+          <input id="cm_start" type="date">
+        </div>
+        <div class="form-row">
+          <label for="cm_end">End date (if more than one day)</label>
+          <input id="cm_end" type="date">
+        </div>
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="cm_linktext">Link text</label>
+          <input id="cm_linktext" maxlength="40" placeholder="More Info">
+        </div>
+        <div class="form-row">
+          <label for="cm_url">Link URL</label>
+          <input id="cm_url" inputmode="url" maxlength="500" placeholder="https://...">
+        </div>
+      </div>
+      <div class="cm-preview-label">How it will read in the ticker</div>
+      <div id="cmPreview" class="cm-preview"></div>
+      <div id="cmStatus" class="cm-status" role="status"></div>
+      <div class="form-actions left-align">
+        <button type="button" id="cmBackBtn" class="btn btn-outline">Back</button>
+        <span>
+          <button type="button" id="cmCancelEditBtn" class="btn btn-outline" style="display:none;">Cancel edit</button>
+          <button type="submit" id="cmSaveBtn" class="btn btn-ember">Add Conference</button>
+        </span>
       </div>
     </form>
   </div>
@@ -7561,6 +7710,236 @@
 
   loadTicker();
 
+  // ---- Site Management (admin) ----
+  // One header button (and one ☰ row on phones) that opens a small popup with
+  // three choices. Locations and Featured Video open their existing screens by
+  // clicking the (hidden) original buttons, the same way the ☰ menu does;
+  // Conferences opens the manual-conference list and form below.
+  const siteMgmtModal = document.getElementById('siteMgmtModal');
+  function openSiteMgmt() { siteMgmtModal.style.display = 'flex'; }
+  function closeSiteMgmt() { siteMgmtModal.style.display = 'none'; }
+  document.getElementById('btnSiteManagement').addEventListener('click', openSiteMgmt);
+  document.getElementById('smCloseBtn').addEventListener('click', closeSiteMgmt);
+  siteMgmtModal.addEventListener('click', function(e) { if (e.target === siteMgmtModal) closeSiteMgmt(); });
+  document.getElementById('smCardLocations').addEventListener('click', function() {
+    closeSiteMgmt();
+    document.getElementById('btnManageLocations').click();
+  });
+  document.getElementById('smCardFeaturedVideo').addEventListener('click', function() {
+    closeSiteMgmt();
+    document.getElementById('btnManageFeaturedVideo').click();
+  });
+  document.getElementById('smCardConferences').addEventListener('click', function() {
+    closeSiteMgmt();
+    openConferenceMgmt();
+  });
+
+  // ---- Manually added conferences (admin) ----
+  // Talks to /api/admin/conferences. The server turns each one into a ticker
+  // entry (same shape as the scraped ones) and deletes it the day after its
+  // last day; here the admin can add, edit and delete them early.
+  const cmModal = document.getElementById('confMgmtModal');
+  const cmListEl = document.getElementById('cmList');
+  const cmForm = document.getElementById('cmForm');
+  const cmStatusEl = document.getElementById('cmStatus');
+  const cmFields = {
+    title: document.getElementById('cm_title'), church: document.getElementById('cm_church'),
+    location: document.getElementById('cm_location'), start: document.getElementById('cm_start'),
+    end: document.getElementById('cm_end'), linkText: document.getElementById('cm_linktext'),
+    url: document.getElementById('cm_url')
+  };
+  let cmItems = [];
+  let cmEditingId = null;
+  let cmConfirmDeleteId = null;
+  const CM_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function cmOrdinal(n) {
+    const v = n % 100;
+    if (v >= 11 && v <= 13) return n + 'th';
+    return n + (['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+  }
+  // Same wording the server builds: "February 25th-27th".
+  function cmFormatDates(start, end) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '')) return '';
+    const s = new Date(start + 'T00:00:00Z');
+    const e = new Date((end || start) + 'T00:00:00Z');
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return '';
+    const sPart = CM_MONTHS[s.getUTCMonth()] + ' ' + cmOrdinal(s.getUTCDate());
+    if (s.getTime() === e.getTime()) return sPart;
+    if (e.getTime() < s.getTime()) return sPart;
+    if (s.getUTCMonth() === e.getUTCMonth() && s.getUTCFullYear() === e.getUTCFullYear()) return sPart + '-' + cmOrdinal(e.getUTCDate());
+    return sPart + '-' + CM_MONTHS[e.getUTCMonth()] + ' ' + cmOrdinal(e.getUTCDate());
+  }
+  function cmShortDate(iso) {
+    const d = new Date(iso + 'T00:00:00Z');
+    return isNaN(d.getTime()) ? iso : CM_MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + d.getUTCDate();
+  }
+  function cmSetStatus(msg, ok) {
+    cmStatusEl.textContent = msg || '';
+    cmStatusEl.classList.toggle('is-ok', !!ok);
+  }
+
+  function cmUpdatePreview() {
+    const title = cmFields.title.value.trim();
+    const church = cmFields.church.value.trim();
+    const location = cmFields.location.value.trim();
+    const dates = cmFormatDates(cmFields.start.value, cmFields.end.value);
+    const parts = [];
+    if (church) parts.push('at ' + church);
+    if (location) parts.push(location);
+    if (dates) parts.push(dates);
+    const url = cmFields.url.value.trim();
+    let html = escapeHtml(title || 'Conference name');
+    html += ': ' + escapeHtml(parts.length ? parts.join(', ') : 'dates');
+    if (url) html += ' - <span class="cm-preview-link">' + escapeHtml(cmFields.linkText.value.trim() || 'More Info') + '</span>';
+    document.getElementById('cmPreview').innerHTML = html;
+  }
+
+  function cmRenderList() {
+    if (!cmItems.length) {
+      cmListEl.innerHTML = '<div class="cm-empty">None yet.</div>';
+      return;
+    }
+    cmListEl.innerHTML = cmItems.map(function(c) {
+      const confirming = cmConfirmDeleteId === c.id;
+      return '<div class="cm-item" data-id="' + c.id + '">' +
+        '<div><div class="cm-item-title">' + escapeHtml(c.title) + '</div>' +
+        '<div class="cm-item-detail">' + escapeHtml(c.detail) + (c.link ? ' - ' + escapeHtml(c.linkText || 'More Info') : '') + '</div>' +
+        '<div class="cm-item-note">Removed automatically after ' + escapeHtml(cmShortDate(c.endDate)) + '</div></div>' +
+        '<div class="cm-item-actions">' +
+          '<button type="button" class="cm-act cm-act-edit" data-id="' + c.id + '">Edit</button>' +
+          '<button type="button" class="cm-act cm-act-delete' + (confirming ? ' is-confirm' : '') + '" data-id="' + c.id + '">' + (confirming ? 'Confirm delete' : 'Delete') + '</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function cmResetForm() {
+    cmEditingId = null;
+    cmForm.reset();
+    document.getElementById('cmFormHeading').textContent = 'Add a conference';
+    document.getElementById('cmSaveBtn').textContent = 'Add Conference';
+    document.getElementById('cmCancelEditBtn').style.display = 'none';
+    cmUpdatePreview();
+  }
+
+  async function cmLoad() {
+    try {
+      const res = await fetch('/api/admin/conferences', { credentials: 'include', cache: 'no-store' });
+      if (res.status === 401) { cmListEl.innerHTML = '<div class="cm-empty">Admin sign-in required.</div>'; return; }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      cmItems = Array.isArray(data.conferences) ? data.conferences : [];
+      cmRenderList();
+    } catch (err) {
+      cmListEl.innerHTML = '<div class="cm-empty">Could not load the list (' + escapeHtml(err.message || 'error') + ').</div>';
+    }
+  }
+
+  function openConferenceMgmt() {
+    cmConfirmDeleteId = null;
+    cmSetStatus('');
+    cmResetForm();
+    cmListEl.innerHTML = '<div class="cm-empty">Loading...</div>';
+    cmModal.style.display = 'flex';
+    cmLoad();
+  }
+  function closeConferenceMgmt() { cmModal.style.display = 'none'; }
+
+  ['input', 'change'].forEach(function(evt) {
+    cmForm.addEventListener(evt, cmUpdatePreview);
+  });
+  document.getElementById('cmBackBtn').addEventListener('click', function() { closeConferenceMgmt(); openSiteMgmt(); });
+  document.getElementById('cmCancelEditBtn').addEventListener('click', function() { cmSetStatus(''); cmResetForm(); });
+  cmModal.addEventListener('click', function(e) { if (e.target === cmModal) closeConferenceMgmt(); });
+
+  cmListEl.addEventListener('click', async function(e) {
+    const editBtn = e.target.closest('.cm-act-edit');
+    if (editBtn) {
+      const c = cmItems.find(function(x) { return x.id === Number(editBtn.getAttribute('data-id')); });
+      if (!c) return;
+      cmEditingId = c.id;
+      cmFields.title.value = c.title || '';
+      cmFields.church.value = c.church || '';
+      cmFields.location.value = c.location || '';
+      cmFields.start.value = c.startDate || '';
+      cmFields.end.value = (c.endDate && c.endDate !== c.startDate) ? c.endDate : '';
+      cmFields.linkText.value = (c.linkText && c.linkText !== 'More Info') ? c.linkText : '';
+      cmFields.url.value = c.link || '';
+      document.getElementById('cmFormHeading').textContent = 'Edit conference';
+      document.getElementById('cmSaveBtn').textContent = 'Save Changes';
+      document.getElementById('cmCancelEditBtn').style.display = 'inline-block';
+      cmSetStatus('');
+      cmUpdatePreview();
+      cmFields.title.focus();
+      return;
+    }
+    const delBtn = e.target.closest('.cm-act-delete');
+    if (delBtn) {
+      const id = Number(delBtn.getAttribute('data-id'));
+      if (cmConfirmDeleteId !== id) {
+        cmConfirmDeleteId = id; // first click asks, second click deletes
+        cmRenderList();
+        return;
+      }
+      try {
+        const res = await fetch('/api/admin/conferences', {
+          method: 'DELETE', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id })
+        });
+        if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+        cmConfirmDeleteId = null;
+        if (cmEditingId === id) cmResetForm();
+        cmSetStatus('Deleted.', true);
+        await cmLoad();
+        loadTicker();
+      } catch (err) {
+        cmSetStatus('Could not delete (' + (err.message || 'error') + ').');
+      }
+    }
+  });
+
+  cmForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const title = cmFields.title.value.trim();
+    const start = cmFields.start.value;
+    const end = cmFields.end.value;
+    const url = cmFields.url.value.trim();
+    if (!title) { cmSetStatus('Please enter the conference name.'); cmFields.title.focus(); return; }
+    if (!start) { cmSetStatus('Please pick a start date.'); cmFields.start.focus(); return; }
+    if (end && end < start) { cmSetStatus('The end date cannot be before the start date.'); cmFields.end.focus(); return; }
+    if (url && !/^https?:\/\//i.test(url)) { cmSetStatus('The link must start with http:// or https://'); cmFields.url.focus(); return; }
+    const payload = {
+      title: title, church: cmFields.church.value.trim(), location: cmFields.location.value.trim(),
+      startDate: start, endDate: end || start,
+      linkText: cmFields.linkText.value.trim(), link: url
+    };
+    if (cmEditingId !== null) payload.id = cmEditingId;
+    const saveBtn = document.getElementById('cmSaveBtn');
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch('/api/admin/conferences', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      let data = null;
+      try { data = await res.json(); } catch (err2) { data = null; }
+      if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+      const wasEdit = cmEditingId !== null;
+      cmConfirmDeleteId = null;
+      cmResetForm();
+      cmSetStatus(wasEdit ? 'Changes saved.' : 'Conference added.', true);
+      await cmLoad();
+      loadTicker();
+    } catch (err) {
+      cmSetStatus(err.message || 'Could not save.');
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+  cmUpdatePreview();
+
   // The conference list itself is only fetched once (see loadTicker above -
   // unlike radio/live-status, it isn't polled), but a days-granularity
   // countdown still drifts by a full day at midnight even with no new
@@ -9030,6 +9409,10 @@
     closeHamburgerMenu();
     document.getElementById('btnProgramSchedule').click();
   });
+  document.getElementById('menuSiteManagementItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    document.getElementById('btnSiteManagement').click();
+  });
   document.getElementById('menuManageLocationsItem').addEventListener('click', function() {
     closeHamburgerMenu();
     document.getElementById('btnManageLocations').click();
@@ -9191,10 +9574,12 @@
     if (debugBtn) debugBtn.style.display = isAdmin ? 'inline-block' : 'none';
     const scheduleBtn = document.getElementById('btnProgramSchedule');
     if (scheduleBtn) scheduleBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    const siteMgmtBtn = document.getElementById('btnSiteManagement');
+    if (siteMgmtBtn) siteMgmtBtn.style.display = isAdmin ? 'inline-block' : 'none';
     // Mirrors the desktop button above for each of the three admin-only ☰
     // menu rows (Live Debug, Manage Locations, Add Location) - hidden
     // until an admin actually signs in, same as btnLiveDebug itself.
-    ['menuLiveDebugItem', 'menuProgramScheduleItem', 'menuManageLocationsItem', 'menuAddLocationItem', 'menuManageFeaturedVideoItem'].forEach(function(id) {
+    ['menuLiveDebugItem', 'menuProgramScheduleItem', 'menuSiteManagementItem', 'menuManageLocationsItem', 'menuAddLocationItem', 'menuManageFeaturedVideoItem'].forEach(function(id) {
       const item = document.getElementById(id);
       if (item) item.style.display = isAdmin ? 'flex' : 'none';
     });
