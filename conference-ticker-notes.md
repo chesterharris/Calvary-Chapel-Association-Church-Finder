@@ -9,7 +9,8 @@ with manual conferences (built 2026-10-09).
    page only when a visitor loads the site and the stored copy is older than 6 hours
    (`CACHE_SECONDS`). There is no scheduled conference refresh - the every-2-minutes
    Worker job is only the live-stream check. Nothing is ever removed from this list
-   because of a past date; it follows the source.
+   because of a past date in the scrape itself - it follows the source - but since
+   2026-10-11 expired entries are left out of the ticker (see "Automatic cleanup").
 2. **Manually added conferences** (new). Stored in KV key `manual-conferences`:
    `{ nextId, conferences: [ { id, title, church, location, startDate, endDate,
    linkText, link, createdAt, updatedAt } ] }`. Dates are plain YYYY-MM-DD. Ids are
@@ -40,14 +41,35 @@ Built to match the scraped entries, e.g.
 - The label on the ticker bar now reads "Conferences" (was "CCA Conferences"); it
   still links to calvarycca.org/conferences.
 
-## Automatic cleanup
+## Automatic cleanup (rule changed 2026-10-11)
 
-Every time the list is built, and whenever the admin opens the Conferences screen,
-any manual conference whose last day was yesterday or earlier is deleted from KV
-for good (`pruneManualConferences`). "Today" is the date in Pacific time, so a
-conference is not removed while it is still its last day anywhere in the contiguous
-US. KV is written only when something was removed. The admin cannot save a
-conference that has already ended.
+One rule for BOTH kinds (manual and calvarycca.org): a conference stays in the ticker
+for 4 full days after its last day and is removed on the 5th day (last day Oct 10 ->
+shown through Oct 14, gone Oct 15). The point is to keep it visible while its YouTube
+sessions are being found. The number is `CONFERENCE_KEEP_DAYS_AFTER_END` in
+`src/index.js`; `isConferenceExpired(endDate, today)` is the test. "Today" is the date
+in Pacific time.
+
+- **Manual conferences:** deleted from KV for good (`pruneManualConferences`) every time
+  the list is built and whenever the admin opens the Conferences screen. KV is written
+  only when something was removed. The admin list shows "Removed automatically after
+  <last day shown>" (`removeAfter` = end + 4 days). The admin cannot save a conference
+  that has already ended.
+- **calvarycca.org conferences:** left out of the `/conferences` response on every
+  request (`handleConferences`), after the 6-hour edge cache, so the cutoff is always
+  today's date. The scrape itself and its cache are untouched.
+- **No dates = never removed.** A scraped entry whose dates the parser could not read
+  (`startDate`/`endDate` null) cannot expire. Fix it with an entry in
+  `CONFERENCE_DATE_OVERRIDES` (give it real dates). Put the YEAR in `titleMatch` for
+  a one-off so it cannot touch next year's entry. The 2026 Northwest Washington Puget
+  Sound Conference ("September 17th & 19th") is handled this way; the 2027 one will
+  fall through to the generic "Puget Sound" suppress rule and needs its own dated
+  override once its dates are known.
+- **Wording after it ends:** the ticker shows "N days ago" (e.g. "at CC Philly - 2 days
+  ago") where "in N days" / "Day X of Y" normally goes. The hamburger badge and menu
+  countdown ignore ended conferences. Known quirk: the front end counts days on the
+  UTC calendar (same as the existing countdown), so the label can flip a few hours
+  before midnight Pacific on a conference's last day.
 
 ## Admin routes (all admin-only; non-admin gets 401)
 
@@ -70,6 +92,14 @@ conference that has already ended.
   second click, and "Removed automatically after <date>"), the add/edit form, and a
   live "How it will read in the ticker" preview. Back returns to the Site Management
   popup. Saving or deleting refreshes the ticker.
+
+## Tested (2026-10-11, new removal rule)
+
+30 Node checks run against the real server and front-end code: the 4-day boundary
+(last day, +1 and +4 kept, +5 removed), the Pacific midnight edge, leap-year and
+year-end date math, manual deletion, the scraped filter on a cached list, undated
+entries kept, the Puget Sound overrides, "N days ago" wording, and the badge/menu
+ignoring ended conferences. Not yet run on the live site.
 
 ## Tested (2026-10-09)
 

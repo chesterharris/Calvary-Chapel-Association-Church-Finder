@@ -198,7 +198,7 @@ function handleLogout() {
 // The cache key includes this version, so a fix is never masked by an old
 // cached response sitting around from before the fix - it's a brand new
 // cache key, not a hit against the stale one.
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 const ENTITY_MAP = {
   '&amp;': '&', '&nbsp;': ' ', '&quot;': '"', '&#039;': "'", '&apos;': "'",
@@ -474,6 +474,15 @@ const CONFERENCE_DATE_OVERRIDES = [
   // forces this entry to always show its plain detail text instead of any
   // computed date - matches this file's "safer to discard than guess"
   // rule everywhere else. Update the titleMatch text if that name changes.
+  //
+  // 2026 edition: its dates are all in the past, so it gets real dates (end
+  // Sep 19) purely so the "remove 4 days after the last day" rule can clear
+  // it from the ticker - no one will ever see a Day-X-of-3 countdown for it.
+  // The year is part of this titleMatch, so it can never touch the 2027
+  // entry, which falls through to the generic suppress rule below (and,
+  // having no dates, will not be removed automatically - give it a dated
+  // override here once its dates are known).
+  { titleMatch: '2026 Northwest Washington Puget Sound', startDate: '2026-09-17', endDate: '2026-09-19' },
   { titleMatch: 'Puget Sound', suppress: true },
 ];
 
@@ -2841,21 +2850,40 @@ async function handleSaveProgramOverride(request, env) {
 // title, church, location, startDate, endDate, linkText, link, createdAt,
 // updatedAt } ] }. Dates are plain YYYY-MM-DD.
 //
-// Cleanup: every time the conference list is built (see handleConferences) and
-// whenever the admin opens the list, any manual conference whose LAST day was
-// yesterday or earlier is deleted from KV for good. "Today" is the date in
-// Pacific time, so a conference is never removed while it is still its last
-// day anywhere in the contiguous US. Nothing is ever removed from the
-// scraped (calvarycca.org) list - that follows its source.
+// Cleanup: a conference - manual OR scraped from calvarycca.org - stays in
+// the ticker for CONFERENCE_KEEP_DAYS_AFTER_END full days after its last day
+// (so on-demand sessions can be found), and is removed on the next day. Every
+// time the conference list is built (see handleConferences) and whenever the
+// admin opens the list, expired manual conferences are deleted from KV for
+// good; expired scraped ones are simply left out of the response (the scrape
+// itself is untouched). "Today" is the date in Pacific time. A scraped entry
+// whose dates could not be read (null/null) can never expire this way.
 
 const MANUAL_CONFERENCES_KV_KEY = 'manual-conferences';
 const MANUAL_CONFERENCES_MAX = 50;
 const MANUAL_CONFERENCE_DEFAULT_LINK_TEXT = 'More Info';
+// How many full days after its last day a conference stays in the ticker
+// (last day Oct 10 -> shown through Oct 14, gone on Oct 15).
+const CONFERENCE_KEEP_DAYS_AFTER_END = 4;
 const MONTH_LONG_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 // Today's date (YYYY-MM-DD) on the Pacific-time calendar.
 function pacificDateString(nowMs) {
   return new Date(nowMs === undefined ? Date.now() : nowMs).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+
+// YYYY-MM-DD plus n days (n may be negative), as YYYY-MM-DD.
+function addDaysToIsoDate(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// True once a conference's last day is more than CONFERENCE_KEEP_DAYS_AFTER_END
+// days before `today` (both YYYY-MM-DD). Missing/invalid end dates never expire.
+function isConferenceExpired(endDate, today) {
+  if (!isValidIsoDate(endDate)) return false;
+  return addDaysToIsoDate(endDate, CONFERENCE_KEEP_DAYS_AFTER_END) < today;
 }
 
 function isValidIsoDate(str) {
@@ -2958,13 +2986,14 @@ async function saveManualConferenceStore(env, store) {
   await env.CHURCHES_KV.put(MANUAL_CONFERENCES_KV_KEY, JSON.stringify({ nextId: store.nextId, conferences: store.conferences }));
 }
 
-// Deletes manual conferences whose last day was yesterday or earlier. Writes
-// to KV only when something was actually removed. Returns the store.
+// Deletes manual conferences past their keep window (see
+// CONFERENCE_KEEP_DAYS_AFTER_END). Writes to KV only when something was
+// actually removed. Returns the store.
 async function pruneManualConferences(env, nowMs) {
   const store = await loadManualConferenceStore(env);
   const today = pacificDateString(nowMs);
   const kept = store.conferences.filter(function(c) {
-    return c && isValidIsoDate(c.endDate) && c.endDate >= today;
+    return c && isValidIsoDate(c.endDate) && !isConferenceExpired(c.endDate, today);
   });
   if (kept.length !== store.conferences.length) {
     store.conferences = kept;
@@ -3047,6 +3076,12 @@ async function getScrapedConferences(request, ctx) {
 
 async function handleConferences(request, ctx, env) {
   const scraped = await getScrapedConferences(request, ctx);
+  // Drop scraped entries past their keep window. Done here, on every request,
+  // not inside the edge-cached scrape, so the cutoff is always today's date.
+  const todayPacific = pacificDateString();
+  const scrapedKept = (scraped.conferences || []).filter(function(c) {
+    return !(c && isConferenceExpired(c.endDate, todayPacific));
+  });
   let manualEntries = [];
   try {
     const store = await pruneManualConferences(env);
@@ -3055,7 +3090,7 @@ async function handleConferences(request, ctx, env) {
     manualEntries = []; // a KV hiccup must never take the ticker down
   }
   const body = Object.assign({}, scraped, {
-    conferences: mergeManualConferences(scraped.conferences, manualEntries)
+    conferences: mergeManualConferences(scrapedKept, manualEntries)
   });
   return new Response(JSON.stringify(body), {
     headers: {
@@ -3075,7 +3110,11 @@ async function handleGetManualConferences(request, env) {
   return jsonResponse({
     today: pacificDateString(),
     conferences: sortManualConferences(store.conferences).map(function(c) {
-      return Object.assign({}, c, { detail: buildManualConferenceEntry(c).detail });
+      return Object.assign({}, c, {
+        detail: buildManualConferenceEntry(c).detail,
+        // Last day this conference is still shown; it is deleted after that.
+        removeAfter: addDaysToIsoDate(c.endDate, CONFERENCE_KEEP_DAYS_AFTER_END)
+      });
     })
   });
 }

@@ -3341,7 +3341,7 @@
       </button>
       <button type="button" id="smCardConferences" class="sm-card">
         <strong>Conferences</strong>
-        <span>Add a conference to the ticker by hand. It is removed automatically after it ends.</span>
+        <span>Add a conference to the ticker by hand. It is removed automatically 4 days after it ends.</span>
       </button>
     </div>
     <div class="form-actions">
@@ -3353,7 +3353,7 @@
 <div id="confMgmtModal" class="modal-overlay" style="display: none;">
   <div class="modal admin-modal cm-modal">
     <h2>Manage Conferences</h2>
-    <p class="admin-modal-copy">Conferences you add here appear in the ticker with the ones from calvarycca.org. Each is deleted automatically the day after its last day.</p>
+    <p class="admin-modal-copy">Conferences you add here appear in the ticker with the ones from calvarycca.org. Each is removed automatically 4 days after its last day.</p>
     <div class="fv-slot-heading">Added by you</div>
     <div id="cmList" class="cm-list"></div>
     <form id="cmForm" novalidate>
@@ -7664,7 +7664,12 @@
     const startUTC = dateOnlyUTC(start);
     const endUTC = dateOnlyUTC(end);
     const MS_PER_DAY = 86400000;
-    if (todayUTC > endUTC) return null; // already over - nothing to show
+    if (todayUTC > endUTC) {
+      // Already over. The server keeps it in the list for a few more days
+      // (CONFERENCE_KEEP_DAYS_AFTER_END) so on-demand sessions can be found;
+      // show how long ago it ended ("2 days ago").
+      return { status: 'ended', daysAgo: Math.round((todayUTC - endUTC) / 86400000) };
+    }
     if (todayUTC >= startUTC) {
       const totalDays = Math.round((endUTC - startUTC) / MS_PER_DAY) + 1;
       const dayNum = Math.round((todayUTC - startUTC) / MS_PER_DAY) + 1;
@@ -7687,6 +7692,9 @@
     if (!countdown) return null;
     if (countdown.status === 'underway') {
       return 'Day ' + countdown.day + ' of ' + countdown.total;
+    }
+    if (countdown.status === 'ended') {
+      return countdown.daysAgo + (countdown.daysAgo === 1 ? ' day ago' : ' days ago');
     }
     if (countdown.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) {
       // "in 5 days," not bare "5 days" - the latter reads as a duration
@@ -7730,7 +7738,7 @@
     const upcomingSoon = [];
     (conferences || []).forEach(function(c) {
       const cd = getConferenceCountdown(c, now);
-      if (!cd) return;
+      if (!cd || cd.status === 'ended') return;
       if (cd.status === 'underway') underwayCount++;
       else if (cd.daysUntil <= CONFERENCE_COUNTDOWN_WINDOW_DAYS) upcomingSoon.push(cd.daysUntil);
     });
@@ -7747,7 +7755,7 @@
     let best = null; // {sortKey, text}
     (conferences || []).forEach(function(c) {
       const cd = getConferenceCountdown(c, now);
-      if (!cd) return;
+      if (!cd || cd.status === 'ended') return;
       if (cd.status === 'upcoming' && cd.daysUntil > CONFERENCE_COUNTDOWN_WINDOW_DAYS) return;
       const sortKey = cd.status === 'underway' ? -1 : cd.daysUntil;
       const text = computeConferenceCountdownText(c, now);
@@ -7860,7 +7868,7 @@
 
   // ---- Manually added conferences (admin) ----
   // Talks to /api/admin/conferences. The server turns each one into a ticker
-  // entry (same shape as the scraped ones) and deletes it the day after its
+  // entry (same shape as the scraped ones) and deletes it 4 days after its
   // last day; here the admin can add, edit and delete them early.
   const cmModal = document.getElementById('confMgmtModal');
   const cmListEl = document.getElementById('cmList');
@@ -7929,7 +7937,7 @@
       return '<div class="cm-item" data-id="' + c.id + '">' +
         '<div><div class="cm-item-title">' + escapeHtml(c.title) + '</div>' +
         '<div class="cm-item-detail">' + escapeHtml(c.detail) + (c.link ? ' - ' + escapeHtml(c.linkText || 'More Info') : '') + '</div>' +
-        '<div class="cm-item-note">Removed automatically after ' + escapeHtml(cmShortDate(c.endDate)) + '</div></div>' +
+        '<div class="cm-item-note">Removed automatically after ' + escapeHtml(cmShortDate(c.removeAfter || c.endDate)) + '</div></div>' +
         '<div class="cm-item-actions">' +
           '<button type="button" class="cm-act cm-act-edit" data-id="' + c.id + '">Edit</button>' +
           '<button type="button" class="cm-act cm-act-delete' + (confirming ? ' is-confirm' : '') + '" data-id="' + c.id + '">' + (confirming ? 'Confirm delete' : 'Delete') + '</button>' +
