@@ -3791,6 +3791,15 @@ const RADIO_STATIONS = [
     streamUrl: 'https://stream.radio.co/s6b48fcaa7/listen'
   },
   {
+    id: 'radiocalvario',
+    displayName: 'Radio Calvario (Español)',
+    cityState: 'Oxnard, CA',
+    homePage: 'https://calvaryoxnard.org/radio',
+    provider: 'radioco',
+    stationId: 'se1a2c45d4',
+    streamUrl: 'https://s2.radio.co/se1a2c45d4/listen'
+  },
+  {
     id: 'kqip',
     displayName: 'KQIP',
     cityState: 'Chico, CA',
