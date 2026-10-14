@@ -318,9 +318,11 @@ short location tag: "Calvary Chapel Casa Grande (AZ)".
   characters, adjustable)
 - [ ] Exact endpoint name/shape for the cron job and the public
   read-cached-status endpoint
-- [ ] How to normalize whatever URL format an admin pastes in
-  (`@handle`, `@handle/streams`, `/channel/UC.../`) into the correct
-  `/live` URL to check
+- [x] ~~How to normalize whatever URL format an admin pastes in~~ →
+  `buildLiveCheckUrl` strips a trailing /streams, /videos etc. and adds
+  /live. NOTE: a `/channel/UC.../` address normalizes fine but is BLOCKED
+  by YouTube when the Worker asks for it - always save the @handle (see
+  section 6)
 - [ ] Exact visual style for the pulsing pin animation
 - [ ] Exact copy/style for the header trigger (e.g. "🔴 3 churches live
   now" vs. some other wording)
@@ -344,3 +346,63 @@ short location tag: "Calvary Chapel Casa Grande (AZ)".
   out - worth keeping in mind, though a single missed cycle just means
   the cached data is up to ~20 minutes stale instead of ~10, not a
   serious failure mode for this feature.
+
+---
+
+## 6. Save the @handle, NOT the /channel/UC... Channel ID (confirmed 2026-10-14)
+
+**Rule: the YouTube field of a church must hold its `@handle` address
+(e.g. `https://www.youtube.com/@LighthouseTwin`). Never a `/channel/UC...`
+Channel ID address.**
+
+What happened: a pilot converted 21 churches' YouTube addresses from @handles
+to `/channel/UC...` (the idea: a Channel ID never changes, a handle can). In
+Live Debug, all 14 of those that are live-checked errored with "Live page
+fetch failed with status 429" on EVERY cycle, in the same batches every
+time (a fixed set, not random throttling), while the 811 @handle churches
+and the 9 older-style `/user/...` and `/c/...` ones had 0 errors in the same
+cycles. The converted churches were stuck on stale data (could not show as
+live). The 14 were changed back to their @handles by hand and the bulk
+conversion (about 800 churches) was not done.
+
+Why: from the Worker, YouTube answers every `/channel/UC...` page with a
+redirect to `https://www.google.com/sorry/index` (Google's "unusual
+traffic" block page, HTTP 429). The same addresses load normally in a
+regular browser (they have all the live/not-live markers), so the address
+and the ID were correct - it is the Worker's egress IP that is refused for
+that path. Tested with the read-only probe (below): `/channel/UC.../live`,
+`/streams`, no suffix, no `www`, `m.youtube.com`, a consent cookie and
+`?hl=en` ALL got the block page, while church 1's normal @handle address
+(the control) returned 200 with the full page. The one thing that was not
+blocked, `https://www.youtube.com/embed/live_stream?channel=UC...`, returns
+200 but its HTML is only a script shell - fetched for a live, a waiting and
+a not-live channel, the pages were essentially identical (live status is
+decided later by the player's JavaScript, which a Worker cannot run), so it
+cannot be used for the live check.
+
+Older address shapes are fine (confirmed working): `@handle`,
+`/user/NAME`, `/c/NAME` and `m.youtube.com/@handle` (all had 0 errors in
+the Oct 14 cycles).
+Prefer the plain `www` @handle form for new entries.
+
+Accepted trade-off (owner's decision): a handle CAN change (it happened once,
+Grace Calvary San Antonio - its old handle started returning 404). That shows
+up in Live Debug as "Live page fetch failed with status 404" for that church
+and is a quick manual fix: find the church's current @handle on its channel
+page and paste it into the YouTube field. No fallback code, no separate
+Channel ID field and no warning logic was built, on purpose.
+
+Diagnostic left in place: `GET /api/debug/probe-youtube?churchId=<id>` (or
+`?channelId=UC...`), admin-only and read-only. It asks YouTube about one
+channel from the Worker in eight address forms plus a control and reports
+status, final address, size and live markers for each (one channel per call,
+~9 requests with gaps). Use it if YouTube's behavior changes and Channel ID
+addresses are worth retrying; if the control also fails, YouTube is blocking
+the Worker in general and the other rows mean little.
+
+Side benefit of the pilot: reading every church's YouTube channel (1,091
+addresses) exposed many data problems (dead handles, duplicate listings
+sharing one channel, an event link and a Vimeo link saved as YouTube
+addresses, channel names that do not match the church). The review
+spreadsheet `CCA-YouTube-channel-ID-review.xlsx` is the record of that; the
+Channel IDs in it are a reference only, they are not stored on the site.
