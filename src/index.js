@@ -2720,6 +2720,95 @@ async function handleDebugLiveCheckStatus(request, env) {
   });
 }
 
+// Admin-only, read-only DIAGNOSTIC (added 2026-10-14). Churches saved with a
+// /channel/UC... YouTube address all came back "429" from the live check,
+// while @handle addresses (811 of them) came back clean - even though the very
+// same addresses load fine in a normal browser. This tries several different
+// ways of asking YouTube about ONE channel, from the Worker itself (the only
+// place the 429 shows up), and reports what each one returned, so we can see
+// whether any Channel-ID address form works. Writes nothing, changes nothing
+// the live check uses, and is capped (one channel per call, ~10 requests, a gap
+// between each) so it cannot cause a rate-limit problem of its own.
+//
+// Use: signed in as admin, open
+//   /api/debug/probe-youtube?churchId=39
+// or  /api/debug/probe-youtube?channelId=UC...  (24 characters, starts "UC")
+// A control (church 1's normal @handle address) is always tried too: if the
+// control also fails, YouTube is blocking the Worker in general right now and
+// the other results mean little.
+async function handleDebugProbeYoutube(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const params = new URL(request.url).searchParams;
+  const churches = await loadChurches(env);
+  let channelId = (params.get('channelId') || '').trim();
+  let churchName = null;
+  if (!channelId) {
+    const id = Number(params.get('churchId'));
+    const church = churches.find(function(c) { return c && c.id === id; });
+    if (!church) return jsonResponse({ error: 'Give ?churchId=<id> or ?channelId=UC...' }, 400);
+    churchName = church.name;
+    const m = String(church.youtubeUrl || '').match(/\/channel\/(UC[\w-]{22})(?![\w-])/);
+    if (!m) return jsonResponse({ error: 'That church does not have a /channel/UC... address saved', saved: church.youtubeUrl || null }, 400);
+    channelId = m[1];
+  }
+  if (!/^UC[\w-]{22}$/.test(channelId)) return jsonResponse({ error: 'channelId must be UC followed by 22 characters' }, 400);
+
+  const control = churches.find(function(c) { return c && c.id === 1 && /youtube\.com\/@/i.test(c.youtubeUrl || ''); });
+  const chPath = 'https://www.youtube.com/channel/' + channelId;
+  const variants = [
+    { key: 'current', note: 'What the live check does today', url: chPath + '/live' },
+    { key: 'streams', note: '/streams tab', url: chPath + '/streams' },
+    { key: 'channel-page', note: 'channel home, no suffix', url: chPath },
+    { key: 'no-www', note: 'youtube.com without www', url: 'https://youtube.com/channel/' + channelId + '/live' },
+    { key: 'mobile', note: 'm.youtube.com', url: 'https://m.youtube.com/channel/' + channelId + '/live' },
+    { key: 'embed', note: 'embed live_stream endpoint', url: 'https://www.youtube.com/embed/live_stream?channel=' + channelId },
+    { key: 'consent-cookie', note: 'current address plus a consent cookie', url: chPath + '/live', cookie: 'SOCS=CAI; CONSENT=YES+1' },
+    { key: 'hl-en', note: 'current address with ?hl=en', url: chPath + '/live?hl=en' }
+  ];
+  if (control) variants.push({ key: 'control-handle', note: 'Control: church 1 normal @handle address', url: buildLiveCheckUrl(control.youtubeUrl) });
+
+  const results = [];
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    const started = Date.now();
+    const row = { key: v.key, note: v.note };
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(function() { controller.abort(); }, LIVE_CHECK_FETCH_TIMEOUT_MS);
+      try {
+        const headers = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
+        };
+        if (v.cookie) headers['Cookie'] = v.cookie;
+        const response = await fetch(v.url, { headers: headers, signal: controller.signal });
+        const text = await response.text();
+        row.status = response.status;
+        row.finalUrl = (response.url || '').split('?')[0].slice(0, 120);
+        row.bytes = text.length;
+        row.canonical = ((text.match(/<link rel="canonical" href="([^"]+)"/) || [])[1] || '').slice(0, 120) || null;
+        row.hasVideoDetails = text.indexOf('"videoDetails"') !== -1;
+        row.isLiveTrue = /"isLive":true/.test(text);
+        row.looksLikeBlockPage = response.status === 429 || /unusual traffic|detected unusual|captcha/i.test(text.slice(0, 20000));
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      row.error = err && err.name === 'AbortError' ? 'timed out' : String(err && err.message || err).slice(0, 160);
+    }
+    row.ms = Date.now() - started;
+    results.push(row);
+    if (i < variants.length - 1) await sleep(1200);
+  }
+  return jsonResponse({ channelId: channelId, church: churchName, ranAt: new Date().toISOString(), results: results });
+}
+
 // Admin-only, read-only - returns the live in-progress snapshot written
 // DURING a cycle (see writeProgress() inside checkAllChurchesLive), so the
 // debug panel can show a real progress bar/ETA instead of a simulated one.
@@ -6178,6 +6267,9 @@ export default {
     }
     if (url.pathname === '/api/debug/live-check-status' && request.method === 'GET') {
       return handleDebugLiveCheckStatus(request, env);
+    }
+    if (url.pathname === '/api/debug/probe-youtube' && request.method === 'GET') {
+      return handleDebugProbeYoutube(request, env);
     }
     if (url.pathname === '/api/debug/live-check-progress' && request.method === 'GET') {
       return handleDebugLiveCheckProgress(request, env);
