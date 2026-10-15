@@ -1062,6 +1062,17 @@
     font-size: 16px;
     margin: 0;
   }
+  /* Radio station list title: radio tower picture + "60 RADIO STATIONS".
+     20px on desktop so it reads larger than the station names below (16px).
+     The phone rules for this title further down still win there. */
+  #radioBrowseTitle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 20px;
+    text-transform: uppercase;
+  }
+  #radioBrowseTitle .tower-img { height: 22px; width: auto; }
   .btn-close {
     background: none;
     border: none;
@@ -1381,6 +1392,12 @@
          exactly the part truncation was cutting off, which is the one
          piece of information on this header actually worth keeping. */
     }
+    /* The radio station title is a picture + text row (see #radioBrowseTitle):
+       keep the pair centered like the other pane titles, and let the text
+       shrink/wrap rather than push the picture off. */
+    #radioBrowsePanel .side-panel-header h2 { justify-content: center; }
+    #radioBrowsePanel .side-panel-header h2 span { min-width: 0; }
+    #radioBrowsePanel .side-panel-header h2 .tower-img { height: 20px; }
     /* "+Add Location" (and Edit, which reuses the same modal) is the one
        admin destination built as a centered .modal-overlay dialog rather
        than a .side-panel - same full-screen-takeover treatment applied to
@@ -1603,6 +1620,7 @@
   }
   .radio-ticker-empty-cta:hover { text-decoration: underline; }
   .radio-ticker-empty-cta svg { width: 15px; height: 15px; }
+  .radio-ticker-empty-cta .tower-img { height: 17px; width: auto; }
   .live-debug-visitors {
     display: flex;
     flex-wrap: wrap;
@@ -2217,12 +2235,16 @@
   @media (max-width: 600px) {
     .ticker-label-full { display: none; }
     #radioTickerLabel .ticker-label-short {
-      display: inline;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       color: #f6f4ee;
       font-size: 13px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      text-transform: none;
     }
+    #radioTickerLabel .ticker-label-short .tower-img { height: 15px; width: auto; }
   }
   .ticker-track-wrap {
     flex: 1;
@@ -2321,6 +2343,21 @@
     height: 15px;
     display: block;
   }
+  /* The radio tower picture (public/RadioTower*.svg) used as the ticker's
+     separator between stations. Tall and narrow (285 x 451), so only the
+     height is set. */
+  .radio-ticker-sep .tower-img {
+    height: 17px;
+    width: auto;
+    display: block;
+  }
+  /* Radio tower pictures used inside buttons / menu rows / pane titles.
+     Height is set per place; width follows the picture's own proportions. */
+  .tower-img { display: block; flex-shrink: 0; }
+  .btn-with-tower { display: inline-flex; align-items: center; gap: 6px; }
+  .btn-with-tower .tower-img { height: 15px; width: auto; }
+  .hamburger-menu-icon-tower { display: inline-flex; align-items: center; justify-content: center; width: 20px; }
+  .hamburger-menu-icon-tower .tower-img { height: 18px; width: auto; }
   .ticker-dismiss {
     flex-shrink: 0;
     background: none;
@@ -3090,7 +3127,7 @@
            clicking them - see .legacy-admin-btn in <style>. -->
       <button id="btnManageLocations" class="btn btn-outline legacy-admin-btn" title="Admin-only: edit or remove existing church locations">Manage Locations</button>
       <button id="btnManageFeaturedVideo" class="btn btn-outline legacy-admin-btn" title="Admin-only: set the featured video link shown on the map">Manage Featured Video</button>
-      <button id="btnRadioBrowse" class="btn btn-outline" title="Browse and search all radio stations">📻 All Stations</button>
+      <button id="btnRadioBrowse" class="btn btn-outline btn-with-tower" title="Browse and search all radio stations"><img class="tower-img" src="/RadioTower-white.svg" alt="" width="9" height="14">Radio</button>
       <button id="btnFeedback" class="btn btn-outline" title="Send feedback or report an issue">Feedback</button>
       <button id="btnLiveDebug" class="btn btn-outline" style="display:none;" title="Admin-only: live-check diagnostics">🛠️ Live Debug</button>
       <button id="btnProgramSchedule" class="btn btn-outline" style="display:none;" title="Admin-only preview: weekly schedule of recurring church Bible studies and programs">📅 Weekly Schedule</button>
@@ -3116,8 +3153,8 @@
         <span id="menuConferencesCountdown" class="hamburger-menu-countdown"></span>
       </button>
       <button type="button" id="menuAllStationsItem" class="hamburger-menu-item">
-        <span class="hamburger-menu-icon" aria-hidden="true">📻</span>
-        <span class="hamburger-menu-label">All Stations</span>
+        <span class="hamburger-menu-icon hamburger-menu-icon-tower" aria-hidden="true"><img class="tower-img" src="/RadioTower.svg" alt="" width="11" height="17"></span>
+        <span class="hamburger-menu-label">Radio Stations</span>
       </button>
       <button type="button" id="menuFeedbackItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">💬</span>
@@ -3206,7 +3243,7 @@
   <div id="radioTicker" class="ticker-bar ticker-loading">
     <button type="button" id="radioTickerLabel" class="ticker-label ticker-label-btn">
       <span class="ticker-label-full">RADIO STATIONS</span>
-      <span class="ticker-label-short">RADIO</span>
+      <span class="ticker-label-short"><img class="tower-img" src="/RadioTower-yellow.svg" alt="" width="9" height="14">Radio</span>
     </button>
     <div class="ticker-track-wrap">
       <div id="radioTickerTrack" class="ticker-track">
@@ -3744,7 +3781,7 @@
        back button + spacer pair. -->
   <div class="side-panel-header">
     <button type="button" id="radioBrowseMobileBackBtn" class="mp-back-btn mobile-panel-back-btn" aria-label="Back"><svg viewBox="0 0 512 512" aria-hidden="true" focusable="false"><polyline points="328 112 184 256 328 400" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <h2 id="radioBrowseTitle">All Radio Stations</h2>
+    <h2 id="radioBrowseTitle"><img class="tower-img" src="/RadioTower.svg" alt="" width="13" height="20"><span>Radio Stations</span></h2>
     <button id="closeRadioBrowseBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
@@ -8155,20 +8192,13 @@
   // start every minute). We only rebuild when something really changed.
   let lastRadioSignature = null;
 
-  // Broadcast tower separator used between stations in the radio ticker only
-  // (the Conference ticker keeps its plain bullet). currentColor picks up
-  // the gold set via .radio-ticker-sep (same #f2c76e as the Conference
-  // ticker's "more info" link), so it stays theme-consistent without
-  // hardcoding a hex value here. Split into a bare icon constant plus the
-  // separator wrapper so the same icon can be reused standalone in the
-  // empty-favorites CTA below.
-  const RADIO_TICKER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M5.5 8.5a6.5 6.5 0 0 1 13 0"/>' +
-    '<path d="M8 8.5a4 4 0 0 1 8 0"/>' +
-    '<circle cx="12" cy="8.5" r="1.4" fill="currentColor" stroke="none"/>' +
-    '<line x1="12" y1="9.8" x2="12" y2="20"/>' +
-    '</svg>';
-  const RADIO_TICKER_SEP = '<span class="radio-ticker-sep" aria-hidden="true">' + RADIO_TICKER_ICON_SVG + '</span>';
+  // Radio tower separator used between stations in the radio ticker only
+  // (the Conference ticker keeps its plain bullet): public/RadioTower-yellow.svg,
+  // filled with #f2c76e, the same gold as the Conference ticker's "in N days".
+  // Split into a bare icon constant plus the separator wrapper so the same
+  // icon can be reused standalone in the empty-favorites CTA below.
+  const RADIO_TICKER_ICON_HTML = '<img class="tower-img" src="/RadioTower-yellow.svg" alt="" width="11" height="17">';
+  const RADIO_TICKER_SEP = '<span class="radio-ticker-sep" aria-hidden="true">' + RADIO_TICKER_ICON_HTML + '</span>';
 
   // Favorites live entirely client-side (no visitor accounts exist) - a
   // plain array of station IDs in localStorage. Keyed by station.id (a
@@ -8317,7 +8347,7 @@
       // to marquee through.
       radioTickerBar.classList.add('radio-ticker-static');
       radioTickerTrack.innerHTML = '<span class="radio-ticker-empty-cta" id="radioTickerEmptyCta" role="button" tabindex="0">' +
-        RADIO_TICKER_ICON_SVG + 'Pick your favorite stations →</span>';
+        RADIO_TICKER_ICON_HTML + 'Pick your favorite stations →</span>';
       const cta = document.getElementById('radioTickerEmptyCta');
       if (cta) {
         cta.addEventListener('click', openRadioBrowsePanel);
@@ -9006,6 +9036,8 @@
     showRadioBrowseStarterMsg(mode === 'merge' ? 'Added the starter stations to your list.' : 'Replaced your list with the starter selection.');
   }
 
+  const RADIO_BROWSE_TITLE_ICON = '<img class="tower-img" src="/RadioTower.svg" alt="" width="13" height="20">';
+
   function renderRadioBrowsePanel() {
     const listEl = document.getElementById('radioBrowseList');
     const favCountEl = document.getElementById('radioBrowseFavCount');
@@ -9013,13 +9045,13 @@
     if (!radioStations || !radioStations.length) {
       listEl.innerHTML = '<div class="radio-browse-empty">Loading stations...</div>';
       favCountEl.textContent = '';
-      if (titleEl) titleEl.textContent = 'All Radio Stations';
+      if (titleEl) titleEl.innerHTML = RADIO_BROWSE_TITLE_ICON + '<span>Radio Stations</span>';
       return;
     }
 
-    // No icon prefix here (unlike the other panes' headers) - it wasn't
-    // visible against this header's brass background.
-    if (titleEl) titleEl.textContent = 'All ' + radioStations.length + ' Radio Stations';
+    // The black radio tower (public/RadioTower.svg) reads fine on this
+    // header's brass background (the old emoji did not).
+    if (titleEl) titleEl.innerHTML = RADIO_BROWSE_TITLE_ICON + '<span>' + radioStations.length + ' Radio Stations</span>';
 
     const favorites = getFavoriteStationIds();
     favCountEl.textContent = favorites.length

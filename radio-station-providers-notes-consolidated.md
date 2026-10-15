@@ -2023,12 +2023,20 @@ Worth knowing even though it rarely needs touching per-station:
   deferral logic above - there's no marquee animation in the mini player to
   protect from a jarring restart, so this updates every poll, not just at a
   lap boundary.
-- **Visual separators:** the radio ticker uses a small gold (`#f2c76e`)
-  broadcast-tower SVG between station entries (`RADIO_TICKER_SEP`); the
+- **Visual separators:** the radio ticker uses the gold (`#f2c76e`) radio
+  tower picture `public/RadioTower-yellow.svg` between station entries
+  (`RADIO_TICKER_SEP`, built from `RADIO_TICKER_ICON_HTML`; ~17px tall); the
   Conference ticker (unrelated to radio, but shares the same marquee
   mechanism) uses a white dove SVG (`TICKER_DOVE_SEP`) instead of a plain
-  bullet. Both are inline SVG strings baked into the JS, not separate image
-  files.
+  bullet. The dove is an inline SVG string in the JS; the tower is a real
+  file in `public/`. (Changed 2026-10-15; the old inline stroke-drawn
+  "palm tree" icon and the 📻 emoji are gone everywhere.)
+- **Radio tower pictures** (all from the one original `public/RadioTower.svg`,
+  black; the other two are the same drawing recolored): `RadioTower.svg`
+  (black) on the brass pane title ("60 RADIO STATIONS") and in the ☰ menu's
+  "Radio Stations" row; `RadioTower-white.svg` in the desktop header "Radio"
+  button; `RadioTower-yellow.svg` (`#f2c76e`) in the ticker separators, the
+  zero-favorites prompt and the phone "Radio" button.
 
 ---
 
@@ -2048,7 +2056,9 @@ during a normal glance), the ticker's whole display model changed:
   silently un-favorites it for anyone who already picked it under the old
   name (acceptable/expected, not a bug - just something to know before
   doing a bulk rename).
-- **The Browse Panel** ("📻 All Stations" button) lists every configured
+- **The Browse Panel** (the "Radio" button in the desktop header, or "Radio
+  Stations" in the phone ☰ menu; titled "60 RADIO STATIONS", the 60 being the
+  live station count) lists every configured
   station with its now-playing text, a search box, and a star toggle per
   station. Toggling a star updates the header ticker immediately (bypasses
   the ticker's normal deferred-swap logic entirely, since this is a
@@ -2056,7 +2066,7 @@ during a normal glance), the ticker's whole display model changed:
   background poll - see the ticker rebuild logic above for why that
   distinction matters).
 - **Zero-favorites state is a real, inviting CTA in the ticker itself**
-  ("📻 Pick your favorite stations →"), not blank space - this doubles as
+  (yellow radio tower + "Pick your favorite stations →"), not blank space - this doubles as
   the primary discovery path for the whole feature, so it's styled like a
   real call-to-action and is directly clickable to open the panel.
 - **A "starter pack"** (`RADIO_STARTER_PACK_NAMES` in `index.html`) lets
