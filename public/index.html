@@ -5897,6 +5897,22 @@
     const h = Math.floor(min / 60);
     return ((h % 12) || 12) + ':' + String(min % 60).padStart(2, '0') + (h >= 12 ? 'pm' : 'am');
   }
+  // Short name for a church's own time zone, for the "church time (ET)" label
+  // next to a program's average start. 'shortGeneric' gives ET / CT / MT / PT
+  // for the US zones (no EDT-vs-EST confusion) and a country or city name for
+  // most others (e.g. "Japan Time" -> "Japan"). Always US-English so the label
+  // reads the same for every viewer. Falls back to the raw zone name.
+  function psChurchZoneLabel(zone, whenIso) {
+    try {
+      const when = whenIso ? new Date(whenIso) : new Date();
+      const part = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'shortGeneric' })
+        .formatToParts(isNaN(when.getTime()) ? new Date() : when)
+        .find(function(x) { return x.type === 'timeZoneName'; });
+      return part && part.value ? part.value.replace(/ Time$/, '') : zone;
+    } catch (err) {
+      return zone;
+    }
+  }
   function psFmtDate(iso) {
     return new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
@@ -6064,7 +6080,7 @@
     }
     if (p.lapsed) meta += '<span class="ps-warn">not seen recently</span>';
     if (p.tzGuess) meta += '<span class="ps-warn" title="Church time zone was guessed from its location">time zone guessed</span>';
-    meta += '<span title="Average actual start in the church’s own time (' + escapeHtml(p.tz) + ')">avg start ' + escapeHtml(psFmtMinutes(p.medianMin)) + '</span>';
+    meta += '<span title="Average actual start in the church’s own time (' + escapeHtml(p.tz) + ')">avg start ' + escapeHtml(psFmtMinutes(p.medianMin)) + ' church time (' + escapeHtml(psChurchZoneLabel(p.tz, p.nextStartUtc)) + ')</span>';
     meta += '<button type="button" class="ps-act ps-act-edit" data-key="' + escapeHtml(p.key) + '">Edit title / language</button>';
     meta += '<button type="button" class="ps-act ps-act-hide" data-key="' + escapeHtml(p.key) + '" data-hide="' + (p.hidden ? '0' : '1') + '">' + (p.hidden ? 'Unhide' : 'Hide') + '</button>';
     if (p.titleOverride) meta += '<span title="You edited this title">(edited)</span>';

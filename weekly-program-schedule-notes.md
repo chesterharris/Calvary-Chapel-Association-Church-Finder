@@ -168,6 +168,15 @@ check itself - and only writes to KV when something actually changed.
   through to a normal link that opens the stream on YouTube in a new tab.
   (Updated 2026-10-07 - it was first a static "● LIVE NOW" text pill that did
   nothing when clicked.)
+- The **Time column** is in the viewer's own time zone; the row's **"avg start"**
+  is in the church's own time zone, so the two normally differ. The label reads
+  "avg start 7:57am church time (ET)" (changed 2026-10-17; before that it was
+  just "avg start 7:57am", which looked like a mismatch - e.g. Greer, SC showing
+  5:00 AM in the Time column and 7:57am as the average start, for a Pacific
+  viewer). The zone name comes from `psChurchZoneLabel`: `Intl` `shortGeneric`,
+  US-English, which gives ET / CT / MT / PT for US zones and a country or city
+  name elsewhere ("Japan", "Germany"), falling back to the raw zone name. The
+  hover tooltip with the full zone (e.g. America/New_York) is unchanged.
 - Footer: collecting-since date, streams recorded, and a "Show hidden rows"
   toggle.
 
@@ -200,3 +209,19 @@ and phone widths.
   builder output minus hidden rows (and likely only STEADY/BUILDING rows), plus
   moving the day-link table out of the admin-only gating.
 - No approve/publish flag yet beyond hide - add when the page goes public.
+- **Public version (decided 2026-10-17): "avg start" stays admin-only.** It is a
+  tuning number for the quarter-hour snap, and two different times in the same
+  row confuse visitors. The public endpoint must not SEND the admin-only fields
+  (avg start, "seen N times", status pill, Edit/Hide) - hiding them with CSS
+  would still expose them in the page's data. Visitors keep: time in their own
+  zone, church, title, language tag, and the pattern label with "Next:" for
+  monthly/every-other-week programs.
+- **Retention left as is (decided 2026-10-17):** recorded streams are still
+  purged after 70 days, and hide/title/language flags are NOT purged with them
+  (a leftover hide flag can attach to a later program at the same church and
+  weekday within 30 minutes). Ideas discussed but deliberately not built, to be
+  revisited after the schedule has run for a few months: dropping dormant
+  programs sooner (about 3 weeks weekly, 35 days every other week, 75 days
+  monthly, about 6 weeks for a program seen once) and clearing the hide/title/
+  language record when its streams are gone, guarded so an unreadable store can
+  never wipe the overrides.
