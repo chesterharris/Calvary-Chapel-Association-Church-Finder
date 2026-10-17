@@ -177,6 +177,22 @@ check itself - and only writes to KV when something actually changed.
   US-English, which gives ET / CT / MT / PT for US zones and a country or city
   name elsewhere ("Japan", "Germany"), falling back to the raw zone name. The
   hover tooltip with the full zone (e.g. America/New_York) is unchanged.
+- **Auto-scroll on open (added 2026-10-17).** When the panel opens, the list
+  scrolls so the right row is at the top (just under the header): on today's
+  tab, the EARLIEST row that is live now; if nothing is live, the first row at
+  or after the current time rounded back to the previous quarter hour (if every
+  row is earlier than that, the end of the list). Any other day starts at the
+  top. "Live now" is the same rule as the LIVE NOW badge (`psRowIsLiveNow`:
+  church is live and the program is within 3 hours of now), so the row scrolled
+  to always shows the badge. The scroll happens only (a) on open, once the
+  fresh schedule has loaded, and (b) when a day tab is clicked - never when a
+  row is hidden/edited, the language filter changes or "Show hidden rows" is
+  toggled, so the list doesn't jump. If live status hasn't arrived yet when
+  the panel opens, the scroll waits for it (`liveStatusReady`,
+  `psAutoScrollWaitingForLive`). The "Time / Church / Study" header row is
+  pinned (`position: sticky`) so it stays visible after scrolling. Past rows
+  are NOT dimmed (decided against; the new/building/lapsed dimming already
+  carries meaning).
 - Footer: collecting-since date, streams recorded, and a "Show hidden rows"
   toggle.
 

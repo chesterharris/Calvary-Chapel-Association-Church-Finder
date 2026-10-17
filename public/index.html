@@ -1295,6 +1295,9 @@
   .ps-head {
     font-weight: 700; font-size: 12px; color: var(--evergreen);
     border-bottom: 2px solid var(--line); padding: 6px 0;
+    /* Pinned to the top of the scrolling list so "Time / Church / Study"
+       stays visible after the schedule auto-scrolls to the current time. */
+    position: sticky; top: 0; z-index: 2; background: var(--paper);
   }
   .ps-row { padding: 9px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .ps-time { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -4126,6 +4129,12 @@
   // hammering the endpoint. Same pattern as RADIO_POLL_MS above.
   const LIVE_STATUS_POLL_MS = 120000; // 2 min
 
+  // True once the first live-status request has finished (success or not).
+  // The Weekly Schedule's auto-scroll to "what is live now" waits for this -
+  // see renderProgramSchedule/psApplyAutoScroll.
+  let liveStatusReady = false;
+  let psAutoScrollWaitingForLive = false;
+
   async function loadLiveStatus() {
     try {
       const res = await fetch('/api/live-status', { cache: 'no-store' });
@@ -4143,7 +4152,16 @@
       return (a.name || '').localeCompare(b.name || '');
     });
     liveChurchIds = new Set(liveStatusData.live.map(function(l) { return l.churchId; }));
+    liveStatusReady = true;
     updateLiveNowUi();
+    // The Weekly Schedule was opened before live status had arrived: now that
+    // it has, do the scroll that had to wait.
+    if (psAutoScrollWaitingForLive) {
+      psAutoScrollWaitingForLive = false;
+      if (typeof psData !== 'undefined' && psData && programSchedulePanel.style.display !== 'none') {
+        renderProgramSchedule({ autoScroll: true });
+      }
+    }
   }
 
   // ---- Live Stream Activity charts (Today / Last 7 Days) - see
@@ -5889,6 +5907,10 @@
   let psDay = new Date().getDay(); // selected day, 0 = Sunday, visitor's local day
   let psShowHidden = false;
   let psEditingKey = null; // key of the row whose title is being edited
+  // Set when the panel opens; consumed by the first render that has FRESH
+  // schedule data (see loadProgramSchedule), so the auto-scroll happens once
+  // per open and never again when a row is hidden/edited and the list redraws.
+  let psAutoScrollPending = false;
 
   function psFmtTime(d) {
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -5928,6 +5950,7 @@
     if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-schedule-open');
     psDay = new Date().getDay(); // always opens on today
     psEditingKey = null;
+    psAutoScrollPending = true;
     renderProgramSchedule();
     loadProgramSchedule();
   }
@@ -5947,8 +5970,11 @@
       }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       psData = await res.json();
-      renderProgramSchedule();
+      const wantAutoScroll = psAutoScrollPending;
+      psAutoScrollPending = false;
+      renderProgramSchedule({ autoScroll: wantAutoScroll });
     } catch (err) {
+      psAutoScrollPending = false;
       psBodyEl.innerHTML = '<div class="ps-empty">Could not load the schedule (' + escapeHtml(err.message || 'error') + ').</div>';
     }
   }
@@ -5962,7 +5988,54 @@
     });
   }
 
-  function renderProgramSchedule() {
+  // One rule for "is this program on air right now": the church is live AND
+  // the program is within 3 hours of now. Used for the LIVE NOW badge and for
+  // the auto-scroll, so the row the page scrolls to always shows the badge.
+  function psRowIsLiveNow(x) {
+    return !!(liveChurchIds && liveChurchIds.has(x.p.churchId) && Math.abs(Date.now() - x.d.getTime()) < 3 * 3600000);
+  }
+
+  // Scrolls the schedule list. Today's tab: to the earliest row that is live
+  // now; if none is live, to the first row at or after the current time
+  // rounded back to the previous quarter hour (or the end of the list if every
+  // row is earlier than that). Any other day: back to the top. Rows are in
+  // the same order as `rows`, and the pinned header's height is subtracted so
+  // the target row sits just below it.
+  function psApplyAutoScroll(rows) {
+    if (psDay !== new Date().getDay()) {
+      psBodyEl.scrollTop = 0;
+      return;
+    }
+    if (!rows.length) return;
+    if (!liveStatusReady) {
+      // Live status hasn't arrived yet - loadLiveStatus will re-run this.
+      psAutoScrollWaitingForLive = true;
+      return;
+    }
+    let idx = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (psRowIsLiveNow(rows[i])) { idx = i; break; }
+    }
+    if (idx === -1) {
+      const now = new Date();
+      const slotNow = Math.floor((now.getHours() * 60 + now.getMinutes()) / 15) * 15;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].minutes >= slotNow) { idx = i; break; }
+      }
+    }
+    const rowEls = psBodyEl.querySelectorAll('.ps-row');
+    if (idx === -1) {
+      psBodyEl.scrollTop = psBodyEl.scrollHeight;
+      return;
+    }
+    const rowEl = rowEls[idx];
+    if (!rowEl) return;
+    const headEl = psBodyEl.querySelector('.ps-head');
+    const headH = headEl ? headEl.getBoundingClientRect().height : 0;
+    psBodyEl.scrollTop += rowEl.getBoundingClientRect().top - psBodyEl.getBoundingClientRect().top - headH;
+  }
+
+  function renderProgramSchedule(opts) {
     // Day links
     psDaysEl.innerHTML = PS_DAY_SHORT.map(function(label, i) {
       return '<button type="button" class="ps-day' + (i === psDay ? ' active' : '') + '" data-day="' + i + '">' + label + '</button>';
@@ -6014,6 +6087,7 @@
         (psData.sessionCount ? '' : ' The recorder only just started, so streams will appear here as churches go live.') + '</div>';
     }
     psBodyEl.innerHTML = html;
+    if (opts && opts.autoScroll) psApplyAutoScroll(rows);
 
     // Footer: collection status + hidden toggle
     const since = psData.since ? new Date(psData.since) : null;
@@ -6032,7 +6106,7 @@
     const church = findChurchById(p.churchId);
     const label = churchNameWithTag(church, p.churchName);
     const editing = psEditingKey === p.key;
-    const isLiveNow = liveChurchIds && liveChurchIds.has(p.churchId) && Math.abs(Date.now() - x.d.getTime()) < 3 * 3600000;
+    const isLiveNow = psRowIsLiveNow(x);
 
     let titleHtml;
     if (editing) {
@@ -6149,7 +6223,7 @@
       return;
     }
     const dayBtn = e.target.closest('.ps-day');
-    if (dayBtn) { psDay = Number(dayBtn.getAttribute('data-day')); psEditingKey = null; renderProgramSchedule(); return; }
+    if (dayBtn) { psDay = Number(dayBtn.getAttribute('data-day')); psEditingKey = null; renderProgramSchedule({ autoScroll: true }); return; }
     const link = e.target.closest('.ps-church a');
     if (link) {
       const c = findChurchById(Number(link.getAttribute('data-church-id')));
