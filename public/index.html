@@ -705,10 +705,43 @@
   }
   .video-lightbox-header {
     flex: 0 0 40px;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     background: #000;
+  }
+  /* Church name (with its state tag, e.g. "Calvary Chapel Bend (OR)") so a
+     viewer can always tell which church they are watching. Absolutely
+     positioned across the header's FULL width - not placed in the flex row
+     next to the close button - so the text centers on the whole lightbox
+     rather than on the space left over beside the X (which would look
+     off-center). The equal left/right padding is wider than the close
+     button, so a long name truncates with an ellipsis before it could run
+     under the X, and stays centered while doing so. pointer-events:none
+     keeps this text from ever intercepting a click meant for the close
+     button. #747475 is a site-new gray: soft enough not to compete with
+     the video, still readable on the black strip. */
+  .video-lightbox-title {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 0 52px;
+    /* A plain block box (not flex) so text-overflow:ellipsis actually
+       applies to a long name; line-height equals the header's 40px height
+       to center it vertically. */
+    display: block;
+    text-align: center;
+    pointer-events: none;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 15px;
+    line-height: 40px;
+    color: #747475;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .video-lightbox-video-area {
     position: relative;
@@ -3536,6 +3569,7 @@
 <div id="videoLightboxOverlay" class="modal-overlay video-lightbox-overlay" style="display: none;">
   <div class="video-lightbox-box">
     <div class="video-lightbox-header">
+      <div id="videoLightboxTitle" class="video-lightbox-title"></div>
       <button type="button" id="videoLightboxCloseBtn" class="btn-close video-lightbox-close" title="Close" aria-label="Close video">&times;</button>
     </div>
     <div class="video-lightbox-video-area">
@@ -6015,6 +6049,7 @@
         meta += '<a href="' + escapeHtml(liveUrl) + '" target="_blank" rel="noopener" class="ps-live-link"' +
           ' title="Watch live now"' +
           ' data-live-video-id="' + escapeHtml(liveVideoId) + '"' +
+          ' data-church-id="' + escapeHtml(p.churchId) + '"' +
           ' data-embed-allowed="' + ((church && church.embedAllowed === false) ? 'false' : 'true') + '">' + liveBadge + '</a>';
       } else {
         meta += liveBadge;
@@ -6093,7 +6128,7 @@
       const liveEmbedAllowed = liveLink.getAttribute('data-embed-allowed') !== 'false';
       if (liveVideoId && liveEmbedAllowed) {
         e.preventDefault();
-        openLiveVideoLightbox(liveVideoId);
+        openLiveVideoLightbox(liveVideoId, null, liveLink.getAttribute('data-church-id'));
       }
       return;
     }
@@ -6179,7 +6214,7 @@
     // falls back correctly via handleLightboxPlayerError's onError
     // handling (error 101/150) rather than sitting on a dead black box.
     if (videoId && (!c || c.embedAllowed !== false)) {
-      openLiveVideoLightbox(videoId);
+      openLiveVideoLightbox(videoId, null, churchId);
       return;
     }
     closeLiveNowPanel();
@@ -6363,11 +6398,24 @@
   // contexts. Harmless belt-and-suspenders here either way.
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-  function openLiveVideoLightbox(videoId, playlistId) {
+  // Header text for the lightbox: the church's name plus its location tag,
+  // exactly as the Live Now cards show it. Empty when there is no church
+  // (e.g. the admin-set Featured Video banner, which isn't tied to one).
+  function lightboxTitleForChurch(churchId) {
+    if (churchId === null || churchId === undefined || churchId === '') return '';
+    const church = findChurchById(churchId);
+    return church ? churchNameWithTag(church, '') : '';
+  }
+
+  function openLiveVideoLightbox(videoId, playlistId, churchId) {
     // Made visible BEFORE any player work below - createLightboxPlayer's
     // first-ever call depends on the container already being visible at
     // that point (see the comment on createLightboxPlayer above).
     document.getElementById('videoLightboxOverlay').style.display = 'flex';
+    // Set (or cleared) on every open, so a previous church's name can never
+    // linger on a video that has no church attached.
+    const lightboxTitleEl = document.getElementById('videoLightboxTitle');
+    lightboxTitleEl.textContent = lightboxTitleForChurch(churchId);
     currentLightboxVideoId = videoId || null;
     currentLightboxPlaylistId = playlistId || null;
     if (!ytApiReady) {
@@ -6392,6 +6440,7 @@
 
   function closeVideoLightbox() {
     document.getElementById('videoLightboxOverlay').style.display = 'none';
+    document.getElementById('videoLightboxTitle').textContent = '';
     pendingLightboxVideoId = null;
     pendingLightboxPlaylistId = null;
     currentLightboxVideoId = null;
@@ -6714,6 +6763,7 @@
         popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') +
           '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener" class="popup-live-lightbox-link"' +
           ' data-live-video-id="' + escapeHtml(liveVideoId) + '"' +
+          ' data-church-id="' + escapeHtml(c.id) + '"' +
           ' data-embed-allowed="' + (c.embedAllowed === false ? 'false' : 'true') + '">' + ytLabel + '</a></div>';
       } else {
         popup += '<div class="popup-row">' + popupIcon('youtube', 'YouTube') + '<a href="' + escapeHtml(ytUrl) + '" target="_blank" rel="noopener">' + ytLabel + '</a></div>';
@@ -6940,7 +6990,7 @@
         const embedAllowed = liveLightboxLink.getAttribute('data-embed-allowed') !== 'false';
         if (videoId && embedAllowed) {
           e.preventDefault();
-          openLiveVideoLightbox(videoId);
+          openLiveVideoLightbox(videoId, null, liveLightboxLink.getAttribute('data-church-id'));
         }
       });
     }
