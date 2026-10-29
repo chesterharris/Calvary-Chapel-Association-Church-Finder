@@ -1418,6 +1418,18 @@ const LIVE_CHECK_FETCH_TIMEOUT_MS = 10000;
 // be different from ~50 under real live-heavy load.
 const LIVE_CHECK_BATCH_SIZE = 50;
 
+// How often a cycle saves its progress record (what the Live Debug panel's
+// progress bar and "checking <church>" text read). It used to be saved after
+// EVERY church - about 50 KV writes per 2-minute cycle, which was most of the
+// account's KV writes and pushed the monthly total past the 1M included
+// (2026-10: 1.16M, a $5.00 overage). Now it is saved at the start, after every
+// Nth church, and at the end - about 6 writes per cycle. The start and end
+// writes (the running:true / running:false markers the overlap guard and the
+// "stalled cycle" check rely on) are unchanged; if a cycle throws, the finally
+// block still saves the exact count it reached. Set to 1 to restore the old
+// every-church behavior.
+const LIVE_CHECK_PROGRESS_WRITE_EVERY = 10;
+
 // If a previous cycle's progress record still says running:true and was
 // started more recently than this, a new cron tick skips its run rather
 // than starting a second, overlapping invocation on top of it. There is
@@ -2243,6 +2255,13 @@ async function checkAllChurchesLive(env) {
     }
   }
 
+  // True after church index i (0-based) when its progress should be saved:
+  // every LIVE_CHECK_PROGRESS_WRITE_EVERY-th church, but never the last one -
+  // the end-of-cycle write below already records that.
+  function shouldWriteProgressAfter(i) {
+    return (i + 1) % LIVE_CHECK_PROGRESS_WRITE_EVERY === 0 && (i + 1) < batchCandidates.length;
+  }
+
   await writeProgress(0, batchCandidates.length ? batchCandidates[0].name : null, true);
 
   let erroredCount = 0;
@@ -2283,7 +2302,7 @@ async function checkAllChurchesLive(env) {
           usedStaleData: !!prior,
           notChecked: true
         });
-        await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+        if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
         lastCompletedCount = i + 1;
         continue;
       }
@@ -2390,7 +2409,7 @@ async function checkAllChurchesLive(env) {
         }
       }
 
-      await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+      if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
       lastCompletedCount = i + 1;
 
       // Stagger requests to YouTube instead of firing them all at once.

@@ -406,3 +406,38 @@ sharing one channel, an event link and a Vimeo link saved as YouTube
 addresses, channel names that do not match the church). The review
 spreadsheet `CCA-YouTube-channel-ID-review.xlsx` is the record of that; the
 Channel IDs in it are a reference only, they are not stored on the site.
+
+---
+
+## 7. KV write cost: the progress record is saved every 10 churches (2026-10-30)
+
+Cloudflare's usage page showed KV Write Operations at 1.16M for the Sep 22 -
+Oct 21 billing cycle against 1M included: 159.27k billable, charged $5.00 (it
+looks like overage is billed in whole-million blocks, so any overage costs the
+full $5). Almost all of those writes came from `writeProgress()` in
+`checkAllChurchesLive`, which saved the `live-check-progress` record after
+EVERY church - about 52 writes per 2-minute cycle (57 including the cycle's
+other saves).
+
+Change: the progress record is now saved at the start of the cycle, after every
+10th church (`LIVE_CHECK_PROGRESS_WRITE_EVERY = 10`, never after the last one)
+and at the end - 6 writes instead of 52 per full batch. Measured with a
+simulated cycle (mock KV, 120 churches, batches of 50/50/20): total writes per
+cycle 57 -> 11 (-81%), progress writes 52 -> 6. Expected monthly total roughly
+0.2M-0.25M instead of about 1.1M.
+
+What did NOT change: the `running:true` write at the start and the
+`running:false` write at the end (the overlap guard and the stalled-cycle check
+depend on them); the `finally` block still saves the exact count reached if a
+cycle throws (`lastCompletedCount` is still updated after every church); the
+live-status, merged-results, debug and batch-state saves; everything visitors
+see.
+
+What the admin sees in Live Debug: the progress bar moves in about 5 steps per
+cycle instead of 50, and "checking <church>" can lag by up to 9 churches. To go
+back to the old behavior set `LIVE_CHECK_PROGRESS_WRITE_EVERY` to 1.
+
+Also noted from the same usage page: Workers requests were 97.86k and CPU
+6.19M ms for the cycle (limits 10M and 30M), so the Dec 1 Cloudflare
+Observability pricing change (50 GB of logs included) is not a concern at this
+size.
