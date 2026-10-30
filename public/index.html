@@ -3153,6 +3153,85 @@
     border-radius: 12px;
     padding: 1px 2px;
   }
+
+  /* ---- Feature spotlights (optional "what's new" tour) ----
+     A full-page layer with (1) a transparent blocker that swallows clicks
+     while the tour is open, (2) a "hole" box around the target whose huge
+     box-shadow is what dims everything else, and (3) the bubble. A step
+     that points at nothing ("none") dims through the blocker instead and
+     centers the bubble. z-index sits above every modal and the video
+     lightbox so nothing can end up on top of it. See the "Feature
+     spotlights" section in the script for behavior and
+     feature-spotlight-notes.md for how to configure one. */
+  #spotlightLayer { position: fixed; inset: 0; z-index: 3200; display: none; }
+  #spotlightLayer.is-open { display: block; }
+  .sp-blocker { position: absolute; inset: 0; background: transparent; }
+  #spotlightLayer.is-centered .sp-blocker { background: rgba(28,43,36,0.62); }
+  .sp-hole {
+    position: absolute;
+    border-radius: 8px;
+    pointer-events: none;
+    box-shadow: 0 0 0 2px var(--brass), 0 0 0 9999px rgba(28,43,36,0.62);
+    transition: left .22s ease, top .22s ease, width .22s ease, height .22s ease;
+  }
+  #spotlightLayer.is-centered .sp-hole { display: none; }
+  .sp-bubble {
+    position: absolute;
+    box-sizing: border-box;
+    width: 300px;
+    max-width: calc(100vw - 24px);
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .sp-arrow {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    transform: rotate(45deg);
+  }
+  .sp-arrow.is-up { top: -7px; border-right: none; border-bottom: none; }
+  .sp-arrow.is-down { bottom: -7px; border-left: none; border-top: none; }
+  #spotlightLayer.is-centered .sp-arrow { display: none; }
+  .sp-title { font-size: 15px; font-weight: 700; color: var(--evergreen); margin: 0 0 5px; overflow-wrap: anywhere; }
+  .sp-text { font-size: 13.5px; line-height: 1.45; margin: 0 0 12px; white-space: pre-line; overflow-wrap: anywhere; }
+  .sp-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sp-count { font-size: 11.5px; opacity: 0.65; }
+  .sp-actions { display: flex; align-items: center; gap: 6px; }
+  .sp-skip {
+    font: inherit; font-size: 12.5px; background: none; border: none; color: var(--ink);
+    opacity: 0.65; text-decoration: underline; cursor: pointer; padding: 6px 8px;
+  }
+  .sp-btn {
+    font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--evergreen); background: transparent; color: var(--evergreen);
+  }
+  .sp-btn.is-primary { background: var(--ember); border-color: var(--ember); color: var(--paper); }
+  .sp-btn:focus-visible, .sp-skip:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+  .sp-btn.is-primary:focus-visible { outline-color: var(--evergreen); }
+  @media (prefers-reduced-motion: reduce) { .sp-hole { transition: none; } }
+
+  /* Manage Feature Spotlights (admin) - reuses the .cm-* list look from
+     Manage Conferences; only the step editor and status words are new. */
+  .sp-chip { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 6px; }
+  .sp-chip.is-active { color: #15803D; }
+  .sp-chip.is-scheduled { color: var(--brass); }
+  .sp-chip.is-expired { color: #888; }
+  .sp-step-block { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px 2px; margin-bottom: 10px; background: #fff; }
+  .sp-step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .sp-step-num { font-size: 12px; font-weight: 700; color: var(--evergreen); text-transform: uppercase; letter-spacing: 0.03em; }
+  .sp-step-block select, .sp-step-block textarea {
+    width: 100%; box-sizing: border-box; padding: 7px 8px; font-size: 13px; border: 1px solid var(--line);
+    border-radius: 3px; background: #fff; color: var(--ink); font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .sp-step-block textarea { min-height: 64px; resize: vertical; }
+  .sp-hint { font-size: 11.5px; opacity: 0.7; line-height: 1.4; margin: 0 0 10px; }
 </style>
 </head>
 <body class="">
@@ -3433,6 +3512,10 @@
         <strong>Conferences</strong>
         <span>Add a conference to the ticker by hand. It is removed automatically 4 days after it ends.</span>
       </button>
+      <button type="button" id="smCardSpotlights" class="sm-card">
+        <strong>Feature Spotlights</strong>
+        <span>Point out something new to visitors with a short guided tour. Each visitor sees it once.</span>
+      </button>
     </div>
     <div class="form-actions">
       <button type="button" id="smCloseBtn" class="btn btn-outline">Close</button>
@@ -3576,6 +3659,70 @@
       <div class="form-actions">
         <button type="button" id="cancelFeaturedVideoBtn" class="btn btn-outline">Cancel</button>
         <button type="submit" class="btn btn-ember" id="saveFeaturedVideoBtn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Feature spotlight layer - empty and hidden until a spotlight runs
+     (see the "Feature spotlights" script section). -->
+<div id="spotlightLayer" aria-hidden="true">
+  <div class="sp-blocker"></div>
+  <div class="sp-hole"></div>
+  <div class="sp-bubble" role="dialog" aria-modal="true" aria-labelledby="spTitle" aria-describedby="spText">
+    <div class="sp-arrow is-up"></div>
+    <h3 class="sp-title" id="spTitle"></h3>
+    <p class="sp-text" id="spText"></p>
+    <div class="sp-footer">
+      <span class="sp-count" id="spCount"></span>
+      <span class="sp-actions">
+        <button type="button" class="sp-skip" id="spSkip">Skip</button>
+        <button type="button" class="sp-btn" id="spBack">Back</button>
+        <button type="button" class="sp-btn is-primary" id="spNext">Next</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div id="spotlightMgmtModal" class="modal-overlay" style="display: none;">
+  <div class="modal admin-modal cm-modal">
+    <h2>Manage Feature Spotlights</h2>
+    <div id="spListView">
+      <p class="sp-hint">A spotlight is a short guided tour that points at parts of the page. Each visitor sees a spotlight once while it is online. If you change its wording, everyone sees it again.</p>
+      <div id="spList" class="cm-list"></div>
+      <div class="form-actions left-align">
+        <button type="button" id="spBackBtn" class="btn btn-outline">Back</button>
+        <button type="button" id="spNewBtn" class="btn btn-ember">+ New spotlight</button>
+      </div>
+    </div>
+    <form id="spForm" novalidate style="display:none;">
+      <div id="spFormHeading" class="fv-slot-heading">New spotlight</div>
+      <div class="form-row">
+        <label for="sp_name">Name (only you see this) *</label>
+        <input id="sp_name" maxlength="60" placeholder="e.g. Weekly Schedule launch">
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="sp_online">Online date (optional)</label>
+          <input id="sp_online" type="date">
+        </div>
+        <div class="form-row">
+          <label for="sp_offline">Offline date *</label>
+          <input id="sp_offline" type="date">
+        </div>
+      </div>
+      <div class="fv-slot-heading fv-slot-heading-upnext">Steps</div>
+      <div id="spSteps"></div>
+      <div class="form-row">
+        <button type="button" id="spAddStepBtn" class="btn btn-danger">+ Add a step</button>
+      </div>
+      <div id="spStatus" class="cm-status" role="status"></div>
+      <div class="form-actions left-align">
+        <button type="button" id="spCancelBtn" class="btn btn-outline">Back to list</button>
+        <span>
+          <button type="button" id="spPreviewBtn" class="btn btn-outline">Preview</button>
+          <button type="submit" id="spSaveBtn" class="btn btn-ember">Save</button>
+        </span>
       </div>
     </form>
   </div>
@@ -7529,6 +7676,251 @@
     });
   })();
 
+  // ---- Feature spotlights (public tour engine) ----
+  //
+  // Optional, admin-configured "what's new" tours - see the comment above
+  // FEATURE_SPOTLIGHTS_KV_KEY in index.js for how they are stored and
+  // versioned, and feature-spotlight-notes.md for the how-to. Behavior:
+  //  - Active spotlights come from /api/feature-spotlights, oldest first.
+  //  - Each one is shown once per browser: {id: version} is remembered in
+  //    localStorage (SEEN_KEY). It is marked seen the moment it is first
+  //    shown, so skipping, finishing or even closing the tab all count.
+  //  - Nothing starts until the page has settled and no modal, panel or
+  //    full-screen mobile pane is open (waitForQuiet), so a spotlight never
+  //    lands on top of someone's video or the admin's edit form.
+  //  - A step whose target is not on screen right now (a desktop-only
+  //    button on a phone, the Weekly Schedule for non-admins, a hidden
+  //    ticker) is skipped quietly; if none of a spotlight's steps can be
+  //    shown, it is skipped without being marked seen.
+  //  - No admin bypass: admins see spotlights like everyone else. The admin
+  //    form's Preview button runs the same engine without marking anything
+  //    seen.
+  // SPOTLIGHT_TARGET_SELECTORS maps each target key (the list lives in
+  // FEATURE_SPOTLIGHT_TARGETS in index.js) to the element(s) it points at.
+  // The first one that is actually visible wins; "requires" names an
+  // element that must be shown for a fallback to apply (e.g. point at the
+  // ☰ button only when the matching ☰ menu row exists for this visitor).
+  (function() {
+    var SEEN_KEY = 'cca-feature-spotlights-seen';
+    var SPOTLIGHT_TARGET_SELECTORS = {
+      'search': ['#searchInput'],
+      'live-now': ['#btnLiveNow'],
+      'radio': ['#btnRadioBrowse', '#radioTickerLabel'],
+      'radio-ticker': ['#radioTicker'],
+      'conference-ticker': ['#conferenceTicker', { sel: '#hamburgerBtn', requires: '#menuConferencesItem' }],
+      'featured-video': ['#featuredVideoBanner'],
+      'feedback': ['#btnFeedback', { sel: '#hamburgerBtn', requires: '#menuFeedbackItem' }],
+      'weekly-schedule': ['#btnProgramSchedule', { sel: '#hamburgerBtn', requires: '#menuProgramScheduleItem' }],
+      'menu': ['#hamburgerBtn']
+    };
+
+    var layer = document.getElementById('spotlightLayer');
+    var hole = layer.querySelector('.sp-hole');
+    var bubble = layer.querySelector('.sp-bubble');
+    var arrow = layer.querySelector('.sp-arrow');
+    var titleEl = document.getElementById('spTitle');
+    var textEl = document.getElementById('spText');
+    var countEl = document.getElementById('spCount');
+    var skipBtn = document.getElementById('spSkip');
+    var backBtn = document.getElementById('spBack');
+    var nextBtn = document.getElementById('spNext');
+
+    var running = null; // { steps: [{step, el}], index, onDone, preview }
+
+    function readSeen() {
+      try {
+        var parsed = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (err) { return {}; }
+    }
+    function markSeen(id, version) {
+      try {
+        var seen = readSeen();
+        seen[id] = version;
+        localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+      } catch (err) { /* nothing to persist - it may show again next visit */ }
+    }
+
+    function isShown(el) {
+      if (!el) return false;
+      var r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) return false;
+      var cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+      return r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
+    }
+    function resolveTarget(key) {
+      var list = SPOTLIGHT_TARGET_SELECTORS[key] || [];
+      for (var i = 0; i < list.length; i++) {
+        var entry = list[i];
+        var sel = typeof entry === 'string' ? entry : entry.sel;
+        if (entry.requires) {
+          var req = document.querySelector(entry.requires);
+          if (!req || req.style.display === 'none') continue;
+        }
+        var el = document.querySelector(sel);
+        if (isShown(el)) return el;
+      }
+      return null;
+    }
+
+    function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
+    function position() {
+      if (!running) return;
+      var item = running.steps[running.index];
+      var el = item.key === 'none' ? null : resolveTarget(item.key);
+      var vw = window.innerWidth, vh = window.innerHeight, margin = 12;
+      bubble.style.width = Math.min(300, vw - 2 * margin) + 'px';
+      var bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+      if (!el) {
+        // "Nothing" step (or the target went away after a resize): a
+        // centered message over a plain dim backdrop.
+        layer.classList.add('is-centered');
+        bubble.style.left = Math.round(clamp((vw - bw) / 2, margin, vw)) + 'px';
+        bubble.style.top = Math.round(clamp((vh - bh) / 2, margin, vh)) + 'px';
+        return;
+      }
+      layer.classList.remove('is-centered');
+      var rect = el.getBoundingClientRect();
+      var pad = 6, gap = 14;
+      hole.style.left = Math.round(rect.left - pad) + 'px';
+      hole.style.top = Math.round(rect.top - pad) + 'px';
+      hole.style.width = Math.round(rect.width + 2 * pad) + 'px';
+      hole.style.height = Math.round(rect.height + 2 * pad) + 'px';
+      var fitsBelow = rect.bottom + pad + gap + bh <= vh - margin;
+      var fitsAbove = rect.top - pad - gap - bh >= margin;
+      var below = fitsBelow || !fitsAbove;
+      var top = below ? rect.bottom + pad + gap : rect.top - pad - gap - bh;
+      top = clamp(top, margin, Math.max(margin, vh - bh - margin));
+      var cx = rect.left + rect.width / 2;
+      var left = clamp(cx - bw / 2, margin, Math.max(margin, vw - bw - margin));
+      bubble.style.left = Math.round(left) + 'px';
+      bubble.style.top = Math.round(top) + 'px';
+      arrow.className = 'sp-arrow ' + (below ? 'is-up' : 'is-down');
+      arrow.style.left = Math.round(clamp(cx - left - 6, 14, bw - 26)) + 'px';
+    }
+
+    function render() {
+      var item = running.steps[running.index];
+      var total = running.steps.length;
+      titleEl.textContent = item.step.title;
+      textEl.textContent = item.step.text;
+      countEl.textContent = total > 1 ? ((running.index + 1) + ' of ' + total) : '';
+      backBtn.style.display = running.index > 0 ? '' : 'none';
+      var last = running.index === total - 1;
+      nextBtn.textContent = last ? 'Got it' : 'Next';
+      position();
+      nextBtn.focus();
+    }
+
+    function finish() {
+      if (!running) return;
+      var done = running.onDone;
+      running = null;
+      layer.classList.remove('is-open', 'is-centered');
+      layer.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', position);
+      window.removeEventListener('orientationchange', position);
+      if (typeof done === 'function') done();
+    }
+    function next() {
+      if (!running) return;
+      if (running.index >= running.steps.length - 1) { finish(); return; }
+      running.index++;
+      render();
+    }
+    function back() {
+      if (!running || running.index === 0) return;
+      running.index--;
+      render();
+    }
+    function onKey(e) {
+      if (!running) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
+      else if (e.key === 'Tab') {
+        // Keep keyboard focus inside the bubble while it is open.
+        var focusables = [skipBtn, backBtn, nextBtn].filter(function(b) { return b.style.display !== 'none'; });
+        var idx = focusables.indexOf(document.activeElement);
+        e.preventDefault();
+        var nextIdx = e.shiftKey ? (idx <= 0 ? focusables.length - 1 : idx - 1) : (idx + 1) % focusables.length;
+        focusables[nextIdx].focus();
+      }
+    }
+    skipBtn.addEventListener('click', finish);
+    nextBtn.addEventListener('click', next);
+    backBtn.addEventListener('click', back);
+
+    // Shows one spotlight. opts: { preview: bool (never marks seen),
+    // onDone: fn }. Returns false (and calls onDone) if none of its steps
+    // can be shown on this screen right now.
+    function showSpotlight(sp, opts) {
+      opts = opts || {};
+      var steps = [];
+      (sp.steps || []).forEach(function(step) {
+        if (step.target === 'none' || resolveTarget(step.target)) steps.push({ step: step, key: step.target });
+      });
+      if (!steps.length) {
+        if (typeof opts.onDone === 'function') opts.onDone();
+        return false;
+      }
+      if (!opts.preview) markSeen(sp.id, sp.version);
+      running = { steps: steps, index: 0, onDone: opts.onDone, preview: !!opts.preview };
+      layer.classList.add('is-open');
+      layer.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', onKey, true);
+      window.addEventListener('resize', position);
+      window.addEventListener('orientationchange', position);
+      render();
+      return true;
+    }
+
+    function runQueue(list) {
+      if (!list.length) return;
+      var sp = list.shift();
+      showSpotlight(sp, { onDone: function() { setTimeout(function() { runQueue(list); }, 300); } });
+    }
+
+    // True while anything else is on screen that a tour should not land on.
+    function somethingElseIsOpen() {
+      var overlays = document.querySelectorAll('.modal-overlay, .side-panel, .video-lightbox-overlay, .mp-picker');
+      for (var i = 0; i < overlays.length; i++) {
+        if (overlays[i].id === 'spotlightLayer') continue;
+        if (window.getComputedStyle(overlays[i]).display !== 'none') return true;
+      }
+      var menu = document.getElementById('hamburgerMenu');
+      if (menu && menu.style.display !== 'none') return true;
+      return /\bmobile-[a-z]+-open\b/.test(document.body.className);
+    }
+    function waitForQuiet(cb) {
+      var started = Date.now();
+      var quietChecks = 0;
+      (function poll() {
+        var ready = document.readyState === 'complete' && Date.now() - started >= 2500;
+        quietChecks = (ready && !somethingElseIsOpen()) ? quietChecks + 1 : 0;
+        if (quietChecks >= 2) { cb(); return; }
+        if (Date.now() - started > 90000) return; // give up for this visit
+        setTimeout(poll, 1000);
+      })();
+    }
+
+    window.CCASpotlight = { show: showSpotlight, isRunning: function() { return !!running; } };
+
+    fetch('/api/feature-spotlights', { cache: 'no-store' })
+      .then(function(res) { return res.ok ? res.json() : []; })
+      .then(function(list) {
+        if (!Array.isArray(list) || !list.length) return;
+        var seen = readSeen();
+        var pending = list.filter(function(sp) { return seen[sp.id] !== sp.version; });
+        if (!pending.length) return;
+        waitForQuiet(function() { runQueue(pending); });
+      })
+      .catch(function() { /* no spotlight is fine */ });
+  })();
+
   // ---- Manage Featured Video (admin) ----
   // Two slots: "Now Showing" (fv_*, required - same fields the form has
   // always had) and "Up Next" (fv2_*, entirely optional). Up Next either
@@ -8059,6 +8451,244 @@
     closeSiteMgmt();
     openConferenceMgmt();
   });
+
+  // ---- Manage Feature Spotlights (admin) ----
+  // List view (existing spotlights) + form view (one spotlight with up to
+  // maxSteps steps). Talks to /api/admin/feature-spotlights. Preview runs
+  // the visitor engine (window.CCASpotlight) on the unsaved form contents
+  // without marking anything as seen; the modal steps aside while it runs.
+  (function() {
+    var modal = document.getElementById('spotlightMgmtModal');
+    var listView = document.getElementById('spListView');
+    var listEl = document.getElementById('spList');
+    var form = document.getElementById('spForm');
+    var stepsEl = document.getElementById('spSteps');
+    var statusEl = document.getElementById('spStatus');
+    var nameInput = document.getElementById('sp_name');
+    var onlineInput = document.getElementById('sp_online');
+    var offlineInput = document.getElementById('sp_offline');
+    var addStepBtn = document.getElementById('spAddStepBtn');
+    var saveBtn = document.getElementById('spSaveBtn');
+    var items = [];
+    var targets = [];
+    var maxSteps = 6;
+    var editingId = null;
+    var confirmDeleteId = null;
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function setStatus(msg, ok) {
+      statusEl.textContent = msg || '';
+      statusEl.classList.toggle('is-ok', !!ok);
+    }
+    function shortDate(iso) {
+      var d = new Date(iso + 'T00:00:00Z');
+      return isNaN(d.getTime()) ? iso : MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear();
+    }
+    function targetLabel(key) {
+      var t = targets.find(function(x) { return x.key === key; });
+      return t ? t.label : key;
+    }
+    function showList() {
+      form.style.display = 'none';
+      listView.style.display = '';
+      renderList();
+    }
+    function showForm() {
+      listView.style.display = 'none';
+      form.style.display = '';
+    }
+
+    function renderList() {
+      if (!items.length) {
+        listEl.innerHTML = '<div class="cm-empty">No spotlights yet. Nothing is shown to visitors.</div>';
+        return;
+      }
+      var statusWord = { active: 'Online', scheduled: 'Scheduled', expired: 'Ended' };
+      listEl.innerHTML = items.map(function(sp) {
+        var confirming = confirmDeleteId === sp.id;
+        var dates = (sp.onlineDate ? 'Online ' + shortDate(sp.onlineDate) + ' – ' : 'Online now – ') + 'offline ' + shortDate(sp.offlineDate);
+        return '<div class="cm-item" data-id="' + sp.id + '">' +
+          '<div><div class="cm-item-title">' + escapeHtml(sp.name) +
+          '<span class="sp-chip is-' + escapeHtml(sp.status) + '">' + escapeHtml(statusWord[sp.status] || sp.status) + '</span></div>' +
+          '<div class="cm-item-detail">' + escapeHtml(dates) + '</div>' +
+          '<div class="cm-item-note">' + sp.steps.length + ' step' + (sp.steps.length === 1 ? '' : 's') + ': ' +
+          escapeHtml(sp.steps.map(function(st) { return st.title; }).join(' → ')) + '</div></div>' +
+          '<div class="cm-item-actions">' +
+            '<button type="button" class="cm-act sp-act-preview" data-id="' + sp.id + '">Preview</button>' +
+            '<button type="button" class="cm-act sp-act-edit" data-id="' + sp.id + '">Edit</button>' +
+            '<button type="button" class="cm-act sp-act-delete' + (confirming ? ' is-confirm' : '') + '" data-id="' + sp.id + '">' + (confirming ? 'Confirm delete' : 'Delete') + '</button>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    async function load() {
+      listEl.innerHTML = '<div class="cm-empty">Loading...</div>';
+      try {
+        var res = await fetch('/api/admin/feature-spotlights', { credentials: 'include', cache: 'no-store' });
+        if (res.status === 401) { listEl.innerHTML = '<div class="cm-empty">Admin sign-in required.</div>'; return; }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+        items = Array.isArray(data.spotlights) ? data.spotlights : [];
+        targets = Array.isArray(data.targets) ? data.targets : [];
+        if (typeof data.maxSteps === 'number') maxSteps = data.maxSteps;
+        renderList();
+      } catch (err) {
+        listEl.innerHTML = '<div class="cm-empty">Could not load the list (' + escapeHtml(err.message || 'error') + ').</div>';
+      }
+    }
+
+    // ---- step editor ----
+    function collectSteps() {
+      return Array.prototype.map.call(stepsEl.querySelectorAll('.sp-step-block'), function(block) {
+        return {
+          target: block.querySelector('.sp-step-target').value,
+          title: block.querySelector('.sp-step-title').value.trim(),
+          text: block.querySelector('.sp-step-text').value.trim()
+        };
+      });
+    }
+    function renderSteps(steps) {
+      stepsEl.innerHTML = '';
+      steps.forEach(function(step, i) {
+        var block = document.createElement('div');
+        block.className = 'sp-step-block';
+        var options = targets.map(function(t) {
+          return '<option value="' + escapeHtml(t.key) + '"' + (t.key === step.target ? ' selected' : '') + '>' + escapeHtml(t.label) + '</option>';
+        }).join('');
+        block.innerHTML =
+          '<div class="sp-step-head"><span class="sp-step-num">Step ' + (i + 1) + '</span>' +
+          (steps.length > 1 ? '<button type="button" class="cm-act sp-step-remove">Remove</button>' : '') + '</div>' +
+          '<div class="form-row"><label>Point at</label><select class="sp-step-target">' + options + '</select></div>' +
+          '<div class="form-row"><label>Title *</label><input class="sp-step-title" maxlength="60" placeholder="e.g. New: Weekly Schedule"></div>' +
+          '<div class="form-row"><label>Text *</label><textarea class="sp-step-text" maxlength="300" placeholder="One or two short sentences."></textarea></div>';
+        block.querySelector('.sp-step-title').value = step.title || '';
+        block.querySelector('.sp-step-text').value = step.text || '';
+        stepsEl.appendChild(block);
+      });
+      addStepBtn.style.display = steps.length >= maxSteps ? 'none' : '';
+    }
+    stepsEl.addEventListener('click', function(e) {
+      var rm = e.target.closest('.sp-step-remove');
+      if (!rm) return;
+      var blocks = Array.prototype.slice.call(stepsEl.querySelectorAll('.sp-step-block'));
+      var idx = blocks.indexOf(rm.closest('.sp-step-block'));
+      var steps = collectSteps();
+      steps.splice(idx, 1);
+      renderSteps(steps);
+    });
+    addStepBtn.addEventListener('click', function() {
+      var steps = collectSteps();
+      if (steps.length >= maxSteps) return;
+      steps.push({ target: 'none', title: '', text: '' });
+      renderSteps(steps);
+    });
+
+    function plusDays(n) {
+      return new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    }
+    function openForm(sp) {
+      editingId = sp ? sp.id : null;
+      setStatus('');
+      document.getElementById('spFormHeading').textContent = sp ? 'Edit spotlight' : 'New spotlight';
+      nameInput.value = sp ? sp.name : '';
+      onlineInput.value = sp ? (sp.onlineDate || '') : '';
+      offlineInput.value = sp ? sp.offlineDate : plusDays(30);
+      renderSteps(sp ? sp.steps.map(function(st) { return { target: st.target, title: st.title, text: st.text }; })
+                     : [{ target: 'none', title: '', text: '' }]);
+      showForm();
+      nameInput.focus();
+    }
+
+    function runPreview(steps) {
+      if (!window.CCASpotlight) return;
+      var shown = steps.map(function(st) {
+        return { target: st.target, title: st.title || 'Title goes here', text: st.text || 'Your text goes here.' };
+      });
+      modal.style.display = 'none';
+      var started = window.CCASpotlight.show({ id: 0, version: 0, steps: shown }, {
+        preview: true,
+        onDone: function() { modal.style.display = 'flex'; }
+      });
+      if (started === false) {
+        modal.style.display = 'flex';
+        setStatus('None of these steps can be shown on this screen right now (the thing they point at is not visible here).');
+      }
+    }
+
+    function open() {
+      confirmDeleteId = null;
+      editingId = null;
+      modal.style.display = 'flex';
+      showList();
+      load();
+    }
+    function close() { modal.style.display = 'none'; }
+    window.openSpotlightMgmt = open;
+
+    document.getElementById('smCardSpotlights').addEventListener('click', function() {
+      closeSiteMgmt();
+      open();
+    });
+    document.getElementById('spBackBtn').addEventListener('click', function() { close(); openSiteMgmt(); });
+    document.getElementById('spNewBtn').addEventListener('click', function() { openForm(null); });
+    document.getElementById('spCancelBtn').addEventListener('click', function() { setStatus(''); showList(); });
+    document.getElementById('spPreviewBtn').addEventListener('click', function() { setStatus(''); runPreview(collectSteps()); });
+    modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+
+    listEl.addEventListener('click', async function(e) {
+      var btn = e.target.closest('button[data-id]');
+      if (!btn) return;
+      var id = Number(btn.getAttribute('data-id'));
+      var sp = items.find(function(x) { return x.id === id; });
+      if (!sp) return;
+      if (btn.classList.contains('sp-act-preview')) { runPreview(sp.steps); return; }
+      if (btn.classList.contains('sp-act-edit')) { openForm(sp); return; }
+      if (btn.classList.contains('sp-act-delete')) {
+        if (confirmDeleteId !== id) { confirmDeleteId = id; renderList(); return; } // first click asks, second deletes
+        try {
+          var res = await fetch('/api/admin/feature-spotlights?id=' + id, { method: 'DELETE', credentials: 'include' });
+          if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+          confirmDeleteId = null;
+          await load();
+        } catch (err) {
+          listEl.insertAdjacentHTML('afterbegin', '<div class="cm-status">Could not delete (' + escapeHtml(err.message || 'error') + ').</div>');
+        }
+      }
+    });
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      var name = nameInput.value.trim();
+      var steps = collectSteps();
+      if (!name) { setStatus('Please give the spotlight a name.'); nameInput.focus(); return; }
+      if (!offlineInput.value) { setStatus('Please pick an offline date.'); offlineInput.focus(); return; }
+      if (onlineInput.value && onlineInput.value >= offlineInput.value) { setStatus('The offline date must be after the online date.'); return; }
+      for (var i = 0; i < steps.length; i++) {
+        if (!steps[i].title || !steps[i].text) { setStatus('Step ' + (i + 1) + ' needs a title and some text.'); return; }
+      }
+      var payload = { name: name, onlineDate: onlineInput.value || null, offlineDate: offlineInput.value, steps: steps };
+      if (editingId !== null) payload.id = editingId;
+      saveBtn.disabled = true;
+      setStatus('');
+      try {
+        var res = await fetch('/api/admin/feature-spotlights', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        var data = null;
+        try { data = await res.json(); } catch (err2) { data = null; }
+        if (!res.ok || !data || !data.success) throw new Error((data && data.error) || ('HTTP ' + res.status));
+        confirmDeleteId = null;
+        showList();
+        await load();
+      } catch (err) {
+        setStatus((err && err.message) || 'Sorry, saving failed. Please try again.');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  })();
 
   // ---- Manually added conferences (admin) ----
   // Talks to /api/admin/conferences. The server turns each one into a ticker

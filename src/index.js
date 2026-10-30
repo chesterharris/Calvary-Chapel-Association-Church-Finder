@@ -1137,6 +1137,244 @@ async function handleSaveFeaturedVideo(request, env) {
   });
 }
 
+// ---- Feature spotlights (first-visit "what's new" tours) ----
+//
+// An admin-configured, optional tour: a dimmed page, a bubble pointing at
+// one named spot on the page (search box, Live Now button, radio ticker,
+// ...), and Next / Back / Skip buttons. Several spotlights can exist at
+// once (e.g. one scheduled for later); visitors see the active ones in
+// the order they were created, oldest first, each ONE time per browser.
+//
+// Stored in KV under FEATURE_SPOTLIGHTS_KV_KEY as:
+//   { nextId, nextVersion, spotlights: [spotlight, ...] }
+// Each spotlight:
+//   { id, name, onlineDate, offlineDate, steps: [{ target, title, text }],
+//     version, updatedAt }
+//
+// onlineDate/offlineDate are plain YYYY-MM-DD values compared lexically
+// with todayDateString() (same convention as the featured video above):
+// a spotlight is active when onlineDate (if any) has arrived and
+// offlineDate has not - offlineDate is the first day it is GONE.
+//
+// version follows the featured video's rule: it only moves when the
+// visitor-facing CONTENT (any step's target/title/text, or the number of
+// steps) changes. Editing just the name or the dates keeps the version, so
+// visitors who already saw it are not shown it again; changing the wording
+// makes it a new version and everyone sees it again. The browser remembers
+// {id: version} in localStorage (see the frontend's feature spotlight
+// section).
+//
+// "target" must be one of FEATURE_SPOTLIGHT_TARGETS below ("none" = a
+// centered message that points at nothing). The server only stores the
+// key; the page itself knows which element each key means (see
+// SPOTLIGHT_TARGET_SELECTORS in index.html) - so to offer a NEW spot to
+// point at, add it in BOTH places.
+const FEATURE_SPOTLIGHTS_KV_KEY = 'feature-spotlights';
+const FEATURE_SPOTLIGHT_MAX_STEPS = 6;
+const FEATURE_SPOTLIGHT_MAX_STORED = 12;
+const FEATURE_SPOTLIGHT_PURGE_AFTER_DAYS = 30;
+const FEATURE_SPOTLIGHT_TARGETS = [
+  { key: 'none', label: 'Nothing (centered message)' },
+  { key: 'search', label: 'Search box' },
+  { key: 'live-now', label: 'Live Now button' },
+  { key: 'radio', label: 'Radio button' },
+  { key: 'radio-ticker', label: 'Radio ticker' },
+  { key: 'conference-ticker', label: 'Conference ticker' },
+  { key: 'featured-video', label: 'Featured video banner' },
+  { key: 'feedback', label: 'Feedback button' },
+  { key: 'weekly-schedule', label: 'Weekly Schedule button' },
+  { key: 'menu', label: 'Menu button (phones)' }
+];
+
+async function loadFeatureSpotlightStore(env) {
+  const raw = await env.CHURCHES_KV.get(FEATURE_SPOTLIGHTS_KV_KEY);
+  const empty = { nextId: 1, nextVersion: 1, spotlights: [] };
+  if (!raw) return empty;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return empty;
+  }
+  if (!parsed || !Array.isArray(parsed.spotlights)) return empty;
+  return {
+    nextId: typeof parsed.nextId === 'number' ? parsed.nextId : 1,
+    nextVersion: typeof parsed.nextVersion === 'number' ? parsed.nextVersion : 1,
+    spotlights: parsed.spotlights.filter(Boolean)
+  };
+}
+
+async function saveFeatureSpotlightStore(env, store) {
+  await env.CHURCHES_KV.put(FEATURE_SPOTLIGHTS_KV_KEY, JSON.stringify(store));
+}
+
+function featureSpotlightStatus(sp, today) {
+  if (sp.offlineDate && sp.offlineDate <= today) return 'expired';
+  if (sp.onlineDate && sp.onlineDate > today) return 'scheduled';
+  return 'active';
+}
+
+// Public: only the active spotlights, oldest first, with just what the
+// visitor's browser needs (no names, dates or timestamps).
+async function handleGetFeatureSpotlights(request, env) {
+  const store = await loadFeatureSpotlightStore(env);
+  const today = todayDateString();
+  const active = store.spotlights
+    .filter(function(sp) { return featureSpotlightStatus(sp, today) === 'active'; })
+    .sort(function(a, b) { return a.id - b.id; })
+    .map(function(sp) {
+      return {
+        id: sp.id,
+        version: sp.version,
+        steps: sp.steps.map(function(st) { return { target: st.target, title: st.title, text: st.text }; })
+      };
+    });
+  return new Response(JSON.stringify(active), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handleGetFeatureSpotlightsAdmin(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const store = await loadFeatureSpotlightStore(env);
+  const today = todayDateString();
+  const list = store.spotlights
+    .slice()
+    .sort(function(a, b) { return a.id - b.id; })
+    .map(function(sp) { return Object.assign({}, sp, { status: featureSpotlightStatus(sp, today) }); });
+  return new Response(JSON.stringify({
+    spotlights: list,
+    targets: FEATURE_SPOTLIGHT_TARGETS,
+    maxSteps: FEATURE_SPOTLIGHT_MAX_STEPS
+  }), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
+
+function featureSpotlightError(message, status) {
+  return new Response(JSON.stringify({ error: message }), {
+    status: status || 400,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// Creates a spotlight (no id) or updates one (id of an existing one).
+async function handleSaveFeatureSpotlight(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return featureSpotlightError('Unauthorized', 401);
+  }
+  let incoming;
+  try {
+    incoming = await request.json();
+  } catch (err) {
+    return featureSpotlightError('Bad request body');
+  }
+  incoming = incoming && typeof incoming === 'object' ? incoming : {};
+
+  const name = typeof incoming.name === 'string' ? incoming.name.trim() : '';
+  const onlineDate = typeof incoming.onlineDate === 'string' && incoming.onlineDate ? incoming.onlineDate.trim() : null;
+  const offlineDate = typeof incoming.offlineDate === 'string' ? incoming.offlineDate.trim() : '';
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (!name) return featureSpotlightError('Give the spotlight a name (only you see it)');
+  if (name.length > 60) return featureSpotlightError('The name is too long (60 characters max)');
+  if (!offlineDate) return featureSpotlightError('An offline date is required');
+  if (!datePattern.test(offlineDate) || (onlineDate && !datePattern.test(onlineDate))) {
+    return featureSpotlightError('Dates must be valid dates');
+  }
+  if (onlineDate && onlineDate >= offlineDate) {
+    return featureSpotlightError('Offline date must be after the online date');
+  }
+
+  const rawSteps = Array.isArray(incoming.steps) ? incoming.steps : [];
+  if (rawSteps.length < 1) return featureSpotlightError('Add at least one step');
+  if (rawSteps.length > FEATURE_SPOTLIGHT_MAX_STEPS) {
+    return featureSpotlightError('A spotlight can have at most ' + FEATURE_SPOTLIGHT_MAX_STEPS + ' steps');
+  }
+  const validTargets = FEATURE_SPOTLIGHT_TARGETS.map(function(t) { return t.key; });
+  const steps = [];
+  for (let i = 0; i < rawSteps.length; i++) {
+    const raw = rawSteps[i] && typeof rawSteps[i] === 'object' ? rawSteps[i] : {};
+    const target = typeof raw.target === 'string' ? raw.target : '';
+    const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+    const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+    if (validTargets.indexOf(target) === -1) return featureSpotlightError('Step ' + (i + 1) + ': pick something to point at');
+    if (!title) return featureSpotlightError('Step ' + (i + 1) + ' needs a title');
+    if (!text) return featureSpotlightError('Step ' + (i + 1) + ' needs some text');
+    if (title.length > 60) return featureSpotlightError('Step ' + (i + 1) + ': the title is too long (60 characters max)');
+    if (text.length > 300) return featureSpotlightError('Step ' + (i + 1) + ': the text is too long (300 characters max)');
+    steps.push({ target: target, title: title, text: text });
+  }
+
+  const store = await loadFeatureSpotlightStore(env);
+  const today = todayDateString();
+
+  // Tidy up: spotlights that went offline long ago are dropped on any
+  // save, so the list can't grow forever (no separate cleanup job).
+  const purgeBefore = new Date(Date.now() - FEATURE_SPOTLIGHT_PURGE_AFTER_DAYS * 86400000).toISOString().slice(0, 10);
+  store.spotlights = store.spotlights.filter(function(sp) {
+    return !(sp.offlineDate && sp.offlineDate < purgeBefore && sp.id !== incoming.id);
+  });
+
+  const incomingId = typeof incoming.id === 'number' ? incoming.id : null;
+  const existing = incomingId !== null
+    ? store.spotlights.find(function(sp) { return sp.id === incomingId; })
+    : null;
+  if (incomingId !== null && !existing) {
+    return featureSpotlightError('That spotlight no longer exists', 404);
+  }
+  if (!existing && store.spotlights.length >= FEATURE_SPOTLIGHT_MAX_STORED) {
+    return featureSpotlightError('Too many spotlights stored - delete an old one first');
+  }
+
+  const contentChanged = !existing || JSON.stringify(existing.steps) !== JSON.stringify(steps);
+  const version = contentChanged ? store.nextVersion++ : existing.version;
+  const saved = {
+    id: existing ? existing.id : store.nextId++,
+    name: name,
+    onlineDate: onlineDate,
+    offlineDate: offlineDate,
+    steps: steps,
+    version: version,
+    updatedAt: new Date().toISOString()
+  };
+  if (existing) {
+    store.spotlights[store.spotlights.indexOf(existing)] = saved;
+  } else {
+    store.spotlights.push(saved);
+  }
+  await saveFeatureSpotlightStore(env, store);
+
+  return new Response(JSON.stringify({
+    success: true,
+    spotlight: Object.assign({}, saved, { status: featureSpotlightStatus(saved, today) })
+  }), { headers: { 'Content-Type': 'application/json' } });
+}
+
+async function handleDeleteFeatureSpotlight(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return featureSpotlightError('Unauthorized', 401);
+  }
+  const url = new URL(request.url);
+  const id = Number(url.searchParams.get('id'));
+  if (!id) return featureSpotlightError('Missing spotlight id');
+  const store = await loadFeatureSpotlightStore(env);
+  const before = store.spotlights.length;
+  store.spotlights = store.spotlights.filter(function(sp) { return sp.id !== id; });
+  if (store.spotlights.length === before) {
+    return featureSpotlightError('That spotlight no longer exists', 404);
+  }
+  await saveFeatureSpotlightStore(env, store);
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
 // ---- YouTube live-stream detection ----
 //
 // A Cron Trigger (see wrangler config) calls checkAllChurchesLive() on a
@@ -6296,6 +6534,14 @@ export default {
     }
     if (url.pathname === '/api/featured-video' && request.method === 'POST') {
       return handleSaveFeaturedVideo(request, env);
+    }
+    if (url.pathname === '/api/feature-spotlights' && request.method === 'GET') {
+      return handleGetFeatureSpotlights(request, env);
+    }
+    if (url.pathname === '/api/admin/feature-spotlights') {
+      if (request.method === 'GET') return handleGetFeatureSpotlightsAdmin(request, env);
+      if (request.method === 'POST') return handleSaveFeatureSpotlight(request, env);
+      if (request.method === 'DELETE') return handleDeleteFeatureSpotlight(request, env);
     }
     if (url.pathname === '/api/live-status' && request.method === 'GET') {
       return handleGetLiveStatus(request, env);
