@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /conferences
+Disallow: /radio-now-playing
+
+Sitemap: https://cca-finder.calvary.workers.dev/sitemap.xml
