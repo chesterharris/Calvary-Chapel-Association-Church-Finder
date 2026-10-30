@@ -1352,6 +1352,15 @@ different, on-demand program name ("Keep It Simple Talk Show," hosted by
 Xavier Ries). The internet-radio stream and the named talk show appear to
 be two different things sharing one page.
 
+**SonSaltLight Radio (Devine, TX)** — added 2026-10-30 as `radiocov2`.
+`stationId` `s1df711a7e`. Fourth distinct Radio.co stream host in this file:
+`streamUrl` is `https://streams.radio.co/s1df711a7e/listen` (note **streams**,
+plural) - read from the status JSON's `streaming_hostname`
+(`https://public.radio.co/stations/{stationId}/status`) and confirmed to play
+as MP3. The station's own website shows no embedded player and its schedule
+page is only logo links (no times), so the station ID came from the Radio.co
+request Larry found, and there is no published schedule to import.
+
 **WAOG-LP / The Shield FM (Aberdeen, NC)** — investigated and **not added**,
 per the no-now-playing-data policy (see the "Adding a new station" checklist,
 step 4). `stationId` `s56323fdac`, `streamUrl`

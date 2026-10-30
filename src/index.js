@@ -3902,6 +3902,28 @@ const RADIO_STATIONS = [
     streamUrl: 'https://s5.radio.co/sf4a5da436/listen'
   },
   {
+    // Added 2026-10-30. Radio.co station, v2 track API (same "radiocov2"
+    // provider as KPTG - the feed returns clean track_artist/track_title
+    // fields). Station self-identifies as "SON-SALT-LIGHT RADIO"; displayed
+    // under the name Larry gave it.
+    //
+    // streamUrl host is "streams.radio.co" (plural) - taken from the status
+    // JSON's own "streaming_hostname" field, NOT the s5.radio.co host used
+    // by KLYT/KPTG (see the Radio.co notes: the host varies per station).
+    // Confirmed the .../listen URL loads as playable MP3 audio.
+    //
+    // homePage is the station's own schedule page. That page is only logo
+    // images linking to external program sites (no times), so there is no
+    // published schedule to import - now-playing metadata is the data source.
+    id: 'sonsaltlightradio',
+    displayName: 'SonSaltLight Radio',
+    cityState: 'Devine, TX',
+    homePage: 'https://www.sonsaltlightradio.com/schedule.html',
+    provider: 'radiocov2',
+    stationId: 's1df711a7e',
+    streamUrl: 'https://streams.radio.co/s1df711a7e/listen'
+  },
+  {
     // Added 2026-10-03. Larry gave this one as "Simple Truths Radio" -
     // not the station's call-sign/city branding on its own homepage (that
     // page markets the on-demand "Keep It Simple Talk Show" program, hosted
