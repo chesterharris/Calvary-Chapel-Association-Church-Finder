@@ -84,3 +84,8 @@ radio-station-providers-notes-consolidated.md
 radio-station-providers-notes-consolidated.md
 church-languages-notes.md
 live-stream-detection-notes.md
+
+# Notes (Markdown) are for local use only - not published to the repository.
+# Note: this only affects files git is not already tracking; tracked ones
+# must be removed once with: git rm --cached "*.md"
+*.md
