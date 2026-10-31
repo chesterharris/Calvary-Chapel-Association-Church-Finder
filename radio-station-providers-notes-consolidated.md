@@ -1357,9 +1357,34 @@ be two different things sharing one page.
 `streamUrl` is `https://streams.radio.co/s1df711a7e/listen` (note **streams**,
 plural) - read from the status JSON's `streaming_hostname`
 (`https://public.radio.co/stations/{stationId}/status`) and confirmed to play
-as MP3. The station's own website shows no embedded player and its schedule
-page is only logo links (no times), so the station ID came from the Radio.co
-request Larry found, and there is no published schedule to import.
+as MP3. The station ID came from the Radio.co request Larry found.
+
+**Correction (2026-10-31):** the earlier note that this station has no
+published schedule was wrong. `https://www.sonsaltlightradio.com/schedule.html`
+embeds two Radio.co iframes (a player and a "Broadcast Schedule" widget,
+`embed.radio.co/embeds/schedule/esf177489.html`); they are invisible to a
+text-only page fetch, so the page looked like logo links only. The widget loads
+`https://public.radio.co/stations/s1df711a7e/embed/schedule` (public JSON,
+`{"data":[{"start","end","event_id","description","playlist":{"name","title",
+"artist","artwork"}}]}`, about two weeks of events with a UTC offset on each
+time) and shows "On Air" on the event covering the current time. The widget's
+config is at `https://public.radio.co/embeds/schedule/esf177489`.
+
+**Program names instead of file labels (built 2026-10-31).** This station's
+now-playing text is file labels (`BBT20260807.1`, `IDHEF_Podcast_Phoenix_9-4-26`),
+so it has the optional station field `scheduleFeedStationId` (any Radio.co
+station with a schedule widget can use it). In `fetchStationNowPlaying`, if an
+event covers the current moment its `playlist.name` (whitespace tidied)
+replaces the title and the artist is left blank - program name only, no track
+text after it (Larry's choice), e.g. `Bridging the Gap-Lloyd Pulley`. If no
+event covers now (small gaps between programs), the schedule can't be read, or
+anything fails, the normal feed result is used unchanged (including the
+empty-title fix below). The schedule is cached 30 minutes in the Workers cache
+(`RADIO_SCHEDULE_FEED_TTL_SECONDS`), no KV writes, and only a usable schedule
+is cached. Caveats: it shows the PLANNED program, so a schedule change at the
+station can take up to 30 minutes to show and a swapped program shows its
+planned name; the cover art still comes from the track feed. To turn it off for
+the station, delete its `scheduleFeedStationId` line.
 
 **`radiocov2` empty-title quirk (found 2026-10-31 on SonSaltLight).** Its
 podcast/program files put the program name in `track_artist` and leave

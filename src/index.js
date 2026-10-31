@@ -4276,6 +4276,11 @@ const RADIO_STATIONS = [
     homePage: 'https://www.sonsaltlightradio.com/schedule.html',
     provider: 'radiocov2',
     stationId: 's1df711a7e',
+    // Added 2026-10-31: its feed text is file labels ("BBT20260807.1"), so
+    // the readable program name comes from the station's Broadcast Schedule
+    // widget feed instead - see the RADIO_SCHEDULE_FEED block above
+    // fetchStationNowPlaying. Falls back to the feed when no event covers now.
+    scheduleFeedStationId: 's1df711a7e',
     streamUrl: 'https://streams.radio.co/s1df711a7e/listen'
   },
   {
@@ -6282,6 +6287,94 @@ async function fetchPublishedScheduleNowPlaying(station) {
   };
 }
 
+// ---- Radio.co published-schedule program names (added 2026-10-31) ----
+//
+// Optional per-station field `scheduleFeedStationId` (a Radio.co station id,
+// e.g. 's1df711a7e'). Some Radio.co stations (SonSaltLight Radio) play files
+// whose now-playing text is a file label ("BBT20260807.1",
+// "IDHEF_Podcast_Phoenix_9-4-26") but publish a Broadcast Schedule widget
+// whose data has the human program name ("Bridging the Gap-Lloyd Pulley").
+// That widget loads https://public.radio.co/stations/{id}/embed/schedule: about
+// two weeks of events {start, end (with UTC offset), playlist.name, ...}.
+//
+// When a station has the field and an event covers the current moment, the
+// program name becomes the title (artist left blank, no track text after it -
+// Larry's decision). If no event covers now (small gaps between programs),
+// the schedule can't be read, or anything fails, the station's normal
+// now-playing feed result is used unchanged. The schedule is cached for 30
+// minutes in the free Workers cache (no KV writes) as a compact list.
+const RADIO_SCHEDULE_FEED_TTL_SECONDS = 1800;
+const RADIO_SCHEDULE_FEED_TIMEOUT_MS = 4000;
+
+function compactRadioCoScheduleEvents(rawJson) {
+  const parsed = JSON.parse(rawJson);
+  const events = parsed && Array.isArray(parsed.data) ? parsed.data : [];
+  const out = [];
+  events.forEach(function(e) {
+    if (!e || !e.playlist) return;
+    const startMs = Date.parse(e.start);
+    const endMs = Date.parse(e.end);
+    const name = typeof e.playlist.name === 'string'
+      ? e.playlist.name.replace(/\s+/g, ' ').trim()
+      : '';
+    if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs || !name) return;
+    out.push([startMs, endMs, name]);
+  });
+  out.sort(function(a, b) { return a[0] - b[0]; });
+  return out;
+}
+
+// Pure lookup: the program name of the event covering nowMs, or ''.
+// If events overlap, the one that started most recently wins.
+function findRadioCoScheduledProgram(events, nowMs) {
+  let best = null;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev[0] <= nowMs && nowMs < ev[1] && (!best || ev[0] >= best[0])) best = ev;
+  }
+  return best ? best[2] : '';
+}
+
+async function getRadioCoScheduledProgramName(stationId, nowMs) {
+  try {
+    const cache = caches.default;
+    const cacheKey = new Request('https://cca-finder.internal/radio-schedule-feed/' + encodeURIComponent(stationId));
+    let events = null;
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      events = await cached.json();
+    } else {
+      const controller = new AbortController();
+      const timer = setTimeout(function() { controller.abort(); }, RADIO_SCHEDULE_FEED_TIMEOUT_MS);
+      let raw;
+      try {
+        const res = await fetch('https://public.radio.co/stations/' + encodeURIComponent(stationId) + '/embed/schedule', {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CCA-Map-Ticker/1.0)' },
+          signal: controller.signal
+        });
+        if (!res.ok) return '';
+        raw = await res.text();
+      } finally {
+        clearTimeout(timer);
+      }
+      events = compactRadioCoScheduleEvents(raw);
+      // Only cache a usable schedule, so a bad/empty response is retried
+      // on the next poll instead of being remembered for 30 minutes.
+      if (events.length) {
+        await cache.put(cacheKey, new Response(JSON.stringify(events), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=' + RADIO_SCHEDULE_FEED_TTL_SECONDS
+          }
+        }));
+      }
+    }
+    return Array.isArray(events) ? findRadioCoScheduledProgram(events, nowMs) : '';
+  } catch (err) {
+    return '';
+  }
+}
+
 async function fetchStationNowPlaying(station) {
   const provider = RADIO_PROVIDERS[station.provider];
   if (!provider) throw new Error('Unknown radio provider: ' + station.provider);
@@ -6301,6 +6394,15 @@ async function fetchStationNowPlaying(station) {
     if (!res.ok) throw new Error('Station ' + station.displayName + ' returned ' + res.status);
     const raw = await res.text();
     parsed = provider.parse(raw, station);
+  }
+
+  // Optional: replace a cryptic file-label title with the published
+  // program name (see the RADIO_SCHEDULE_FEED block above).
+  if (station.scheduleFeedStationId) {
+    const programName = await getRadioCoScheduledProgramName(station.scheduleFeedStationId, Date.now());
+    if (programName) {
+      parsed = { title: programName, artist: '', coverUrl: parsed.coverUrl };
+    }
   }
 
   return {
