@@ -441,3 +441,63 @@ Also noted from the same usage page: Workers requests were 97.86k and CPU
 6.19M ms for the cycle (limits 10M and 30M), so the Dec 1 Cloudflare
 Observability pricing change (50 GB of logs included) is not a concern at this
 size.
+
+---
+
+## 8. Live Now "watch list": extra checks around program start times (2026-10-31)
+
+Problem: a full round of live checks takes about 17 batches of 50 churches, so
+a church is rechecked every ~17 minutes on average (up to ~34). A program
+that starts at 4:00 PM could be live for a long time before its "Live Now"
+pill appears.
+
+What it does: at the start of each 2-minute cycle the worker reads the Weekly
+Program Schedule (the same data the admin preview uses), finds programs that
+are about to start or just started, and checks those churches RIGHT NOW,
+ahead of the regular batch. Everything else about the cycle is unchanged.
+
+Rules (settings in `src/program-schedule.js` and `src/index.js`):
+
+- Window: from 5 minutes BEFORE to 30 minutes AFTER the program's typical
+  start (`WATCH_LIST_LEAD_MIN = 5`, `WATCH_LIST_TAIL_MIN = 30`). A stream that
+  goes live 10 minutes early is just a slideshow, so it is not worth chasing.
+- Only Steady and Building programs. New, hidden and lapsed programs are never
+  watched. One entry per church.
+- Skip a church that already shows Live Now (nothing to find).
+- No double fetch: a watched church is removed from the regular batch of 50
+  for that cycle, so it is fetched once.
+- Cap of 12 extra churches per cycle (`WATCH_LIST_MAX`). If more are due, the
+  Steady ones go first, then the ones closest to their start time.
+- The cap also shrinks when the adaptive stagger delay is high, so the extra
+  fetches can never push a cycle past about 30 seconds of added time
+  (`LIVE_CHECK_WATCH_LIST_TIME_BUDGET_MS`, `LIVE_CHECK_WATCH_LIST_ASSUMED_FETCH_MS`).
+- No extra KV writes: still 11 writes per cycle. One extra READ of the program
+  sessions (and the overrides) per cycle.
+- Errors in the watch list are swallowed: if it fails, the cycle runs exactly
+  as before.
+
+Kill switch: set `LIVE_CHECK_WATCH_LIST_ENABLED = false` in `src/index.js`
+and deploy. The regular batches then run exactly as they did before.
+
+Not covered: Sundays and Wednesdays (the schedule never records them, so
+there is nothing to watch). The reverse lag (a pill lingering after a stream
+ends) is unchanged.
+
+Realistic expectation: the check happens within a 2-minute cycle, but results
+are saved at the end of the cycle and visitors' browsers poll every 120
+seconds, so a Live Now pill typically appears 2 to 5 minutes after the stream
+goes live, instead of up to ~34.
+
+How to verify (a Friday around 4:00 PM, when several Steady programs start):
+open Admin -> Live Debug. The latest cycle summary has a "Watch list" row
+(checked / due / over cap) and a line "On the watch list:" naming the
+churches; in the per-church list those churches carry a "watch list" tag; the
+history table has a "Watch" column. If "over cap" is regularly above 0 the
+cap of 12 is being hit and can be raised.
+
+Testing done: simulated cycles with a mock KV and fake clock (25+ checks,
+including watched churches outside the current batch: 12 extra + 50 regular =
+62 fetches, no duplicates, rotation unchanged, KV writes unchanged). Cost
+check on a synthetic 4,500-session store: building the schedule ~73 ms per
+cycle, well inside the Worker CPU limit; the real store is about a quarter of
+that. No caching was added.

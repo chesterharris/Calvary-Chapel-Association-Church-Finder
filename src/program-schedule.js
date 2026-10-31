@@ -765,3 +765,72 @@ export function buildProgramSchedule(store, churchesById, overrides, nowMs) {
   });
   return programs;
 }
+
+// ---------------------------------------------------------------------------
+// Live-check "watch list" - which churches deserve an extra live check right
+// now, so a program that is about to start (or just started) shows its LIVE
+// NOW pill within a few minutes instead of waiting for its church's turn in the
+// rotating batches (a full round of batches takes up to ~34 minutes).
+//
+// A church is on the list when ALL of these are true:
+//   - it has a steady or building program (never "new" - one sighting is too
+//     little to bet extra checks on), not hidden by the admin, not lapsed;
+//   - that program's next start (nextStartUtc, which already knows about
+//     biweekly and monthly programs, so off-weeks cost nothing) is within the
+//     window: WATCH_LIST_LEAD_MIN minutes before it to WATCH_LIST_TAIL_MIN
+//     minutes after it;
+//   - the church is a normal live-check candidate;
+//   - the church does not already show as live (a church that is live needs
+//     no help being noticed).
+// If more churches qualify than the cap, steady beats building, then whichever
+// is closest to its start time wins (the most likely to be going live right
+// now). A church with two programs in the window counts once.
+// Pure function - src/index.js owns reading KV and doing the actual checks.
+export const WATCH_LIST_LEAD_MIN = 5;
+export const WATCH_LIST_TAIL_MIN = 30;
+export const WATCH_LIST_MAX = 12;
+
+export function selectWatchList(programs, nowMs, opts) {
+  opts = opts || {};
+  const leadMs = (opts.leadMin != null ? opts.leadMin : WATCH_LIST_LEAD_MIN) * 60000;
+  const tailMs = (opts.tailMin != null ? opts.tailMin : WATCH_LIST_TAIL_MIN) * 60000;
+  const max = opts.max != null ? opts.max : WATCH_LIST_MAX;
+  const eligible = opts.eligibleChurchIds || null; // { id: true }; null = everyone
+  const live = opts.liveChurchIds || {};
+
+  const bestByChurch = {};
+  (programs || []).forEach(function(p) {
+    if (!p || (p.status !== 'steady' && p.status !== 'emerging')) return;
+    if (p.hidden || p.lapsed || !p.nextStartUtc) return;
+    if (eligible && !eligible[p.churchId]) return;
+    if (live[p.churchId]) return;
+    const startMs = Date.parse(p.nextStartUtc);
+    if (isNaN(startMs)) return;
+    const offsetMs = nowMs - startMs; // negative = not started yet
+    if (offsetMs < -leadMs || offsetMs > tailMs) return;
+    const entry = {
+      churchId: p.churchId,
+      churchName: p.churchName,
+      programKey: p.key,
+      status: p.status,
+      startMs: startMs,
+      offsetMin: Math.round(offsetMs / 60000)
+    };
+    const prev = bestByChurch[p.churchId];
+    if (!prev || watchRank(entry) < watchRank(prev)) bestByChurch[p.churchId] = entry;
+  });
+
+  const due = Object.keys(bestByChurch).map(function(k) { return bestByChurch[k]; });
+  due.sort(function(a, b) {
+    const ra = watchRank(a), rb = watchRank(b);
+    if (ra !== rb) return ra - rb;
+    return a.churchId < b.churchId ? -1 : (a.churchId > b.churchId ? 1 : 0);
+  });
+  const selected = due.slice(0, Math.max(0, max));
+  return { selected: selected, dueCount: due.length, overCap: due.length - selected.length };
+}
+
+// Lower sorts first: steady before building, then closest to its start time.
+function watchRank(e) {
+  return (e.status === 'steady' ? 0 : 1) * 1e6 + Math.abs(e.offsetMin);
+}

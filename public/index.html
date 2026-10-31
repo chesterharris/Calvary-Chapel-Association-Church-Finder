@@ -5494,6 +5494,10 @@
       const batchHtml = '<span style="opacity:0.55;">batch ' + r.batchNumber + '/' + batchCount + '</span>';
       detailsHtml = detailsHtml ? (detailsHtml + ' &middot; ' + batchHtml) : batchHtml;
     }
+    if (r.watchedThisCycle) {
+      const watchHtml = '<span style="color:var(--brass);font-weight:700;" title="Checked this cycle because a recorded program was due to start">watch list</span>';
+      detailsHtml = detailsHtml ? (detailsHtml + ' &middot; ' + watchHtml) : watchHtml;
+    }
 
     return '<tr><td class="church-name" title="' + escapeHtmlDebug(r.name) + '">' + escapeHtmlDebug(r.name) + '</td><td>' + badge + '</td>' +
       '<td>' + timeText + '</td>' +
@@ -5571,12 +5575,35 @@
       html += '<div><span class="label">Batch</span><span class="value">' + (cycle.batchIndex + 1) + ' of ' + cycle.batchCount + '</span></div>';
       html += '<div><span class="label">Total churches</span><span class="value">' + (cycle.totalChurches != null ? cycle.totalChurches : '-') + '</span></div>';
     }
-    html += '<div><span class="label">' + (cycle.batchCount != null && cycle.batchCount > 1 ? 'Checked this batch' : 'Total candidates') + '</span><span class="value">' + cycle.totalCandidates + '</span></div>';
+    const watch = cycle.watchList || null;
+    const watchChecked = watch ? (watch.checked || 0) : 0;
+    html += '<div><span class="label">' + (watchChecked > 0 ? 'Checked this cycle' : (cycle.batchCount != null && cycle.batchCount > 1 ? 'Checked this batch' : 'Total candidates')) + '</span><span class="value">' + cycle.totalCandidates + '</span></div>';
+    if (watch) {
+      // Watch list: churches with a Steady/Building program due to start from
+      // 5 min before to 30 min after now that don't show live yet - checked
+      // every cycle instead of waiting for their batch turn (see
+      // planWatchList in index.js). "due" above "checked" means the cap (or
+      // the stagger-based limit) held some back.
+      let watchText;
+      if (!watch.enabled) watchText = 'off';
+      else if (watch.error) watchText = 'error';
+      else watchText = watchChecked + ' checked' + (watch.due > watchChecked ? ' (' + watch.due + ' due, cap ' + watch.cap + ')' : '');
+      html += '<div><span class="label">Watch list</span><span class="value' + ((watch.error || watch.overCap > 0) ? ' warn' : '') + '">' + escapeHtmlDebug(watchText) + '</span></div>';
+    }
     html += '<div><span class="label">Actually checked</span><span class="value">' + cycle.actuallyChecked + '</span></div>';
     html += '<div><span class="label">Errored</span><span class="value' + (cycle.errored > 0 ? ' warn' : '') + '">' + cycle.errored + '</span></div>';
     html += '<div><span class="label">Not checked</span><span class="value' + (cycle.notChecked > 0 ? ' warn' : '') + '">' + cycle.notChecked + '</span></div>';
     html += '<div><span class="label">Current stagger delay</span><span class="value">' + (staggerMs != null ? staggerMs + 'ms' : '-') + '</span></div>';
     html += '</div>';
+    if (watch && watch.error) {
+      html += '<div class="live-debug-warning-banner">Watch list problem (normal checks were not affected): ' + escapeHtmlDebug(watch.error) + '</div>';
+    } else if (watch && watch.churches && watch.churches.length) {
+      html += '<div class="live-debug-note" style="font-size:12px;opacity:0.8;margin:4px 0 10px;"><strong>On the watch list:</strong> ' +
+        watch.churches.map(function(w) {
+          const when = w.offsetMin < 0 ? ('starts in ' + (-w.offsetMin) + 'm') : (w.offsetMin === 0 ? 'starts now' : ('started ' + w.offsetMin + 'm ago'));
+          return escapeHtmlDebug(w.name) + ' (' + (w.status === 'steady' ? 'steady' : 'building') + ', ' + when + ')';
+        }).join('; ') + '</div>';
+    }
 
     // Sparklines - quick visual trend, faster to scan than a column of
     // numbers. Last 20 cycles, chronological (oldest to newest, left to
@@ -5635,7 +5662,7 @@
 
     if (data.history && data.history.length) {
       html += '<div class="live-debug-section-title">Recent Cycles (trend)</div>';
-      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Batch</th><th>Total</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
+      html += '<table class="live-debug-table"><thead><tr><th>When</th><th>Batch</th><th>Total</th><th>Watch</th><th>Errored</th><th>Not checked</th><th>Stagger</th><th>Duration</th></tr></thead><tbody>';
       // Most recent first - easier to spot a worsening trend at a glance
       // without scrolling to the bottom.
       data.history.slice().reverse().forEach(function(h) {
@@ -5659,7 +5686,7 @@
           const stalledBatchText = (h.previousBatchIndex != null && h.previousBatchCount != null)
             ? '(' + (h.previousBatchIndex + 1) + '/' + h.previousBatchCount + ') '
             : '';
-          html += '<tr><td colspan="7" style="color:var(--ember);">⚠️ ' + stalledBatchText + 'Stuck on ' + churchText +
+          html += '<tr><td colspan="8" style="color:var(--ember);">⚠️ ' + stalledBatchText + 'Stuck on ' + churchText +
             ' (' + countText + '), ' + stuckText + ' - restarted ' +
             formatRelativeTime(h.checkedAt) + '</td></tr>';
           return;
@@ -5678,6 +5705,7 @@
           : '-';
         html += '<tr><td>' + formatRelativeTime(h.checkedAt) + (h.hitSubrequestLimit ? ' ⚠️' : '') + '</td>' +
           '<td>' + batchText + '</td><td>' + total + '</td>' +
+          '<td' + (h.watchOverCap > 0 ? ' style="color:var(--ember);font-weight:700;" title="' + h.watchDue + ' due, only ' + h.watchChecked + ' checked"' : '') + '>' + (h.watchChecked != null ? h.watchChecked : '-') + '</td>' +
           '<td' + (h.errored > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + h.errored + '</td>' +
           '<td' + (typeof notChecked === 'number' && notChecked > 0 ? ' style="color:var(--ember);font-weight:700;"' : '') + '>' + notChecked + '</td>' +
           '<td>' + h.staggerMsUsed + 'ms</td><td>' + formatDurationMs(h.durationMs) + '</td></tr>';

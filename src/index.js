@@ -36,6 +36,8 @@ import {
   emptyProgramStore,
   recordProgramSessions,
   buildProgramSchedule,
+  selectWatchList,
+  WATCH_LIST_MAX,
   programOverrideKey
 } from './program-schedule.js';
 
@@ -2388,6 +2390,79 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
 //    is actually checked per cycle - every other church just keeps
 //    showing its last known result until its own batch's turn comes back
 //    around.
+// ---- Live-check watch list (extra checks for programs about to start) ----
+//
+// The rotating batches (LIVE_CHECK_BATCH_SIZE) mean any one church is only
+// re-checked about every 17-34 minutes, so a Steady or Building weekly
+// program could start and wait that long for its LIVE NOW pill. To shrink
+// that, every cycle also checks a short "watch list" FIRST: churches whose
+// recorded program is due to start from 5 minutes before to 30 minutes after
+// now and that don't already show live (see selectWatchList in
+// program-schedule.js for the exact rules, window and ordering).
+//
+//  - A watch-list church is checked ONLY in the watch part of the cycle: it is
+//    skipped when its normal batch turn comes up (skipped at check time - the
+//    batch membership itself never changes, so the rotation stays stable).
+//  - The cap is WATCH_LIST_MAX (12), lowered further when the adaptive
+//    stagger delay has grown, so the extra checks can never push a cycle past
+//    its 2-minute tick: cap = floor(TIME_BUDGET / (stagger + assumed fetch)).
+//  - No extra KV writes: the results are saved with the normal once-per-cycle
+//    writes. Cost is a few YouTube requests plus reading the recorded program
+//    sessions (which the end-of-cycle recorder already read - it now reuses
+//    this copy instead of reading them a second time).
+//  - Sundays and Wednesdays are never recorded, so they get no watch list.
+//  - To switch the whole thing off, set LIVE_CHECK_WATCH_LIST_ENABLED to false.
+const LIVE_CHECK_WATCH_LIST_ENABLED = true;
+const LIVE_CHECK_WATCH_LIST_TIME_BUDGET_MS = 30000;
+const LIVE_CHECK_WATCH_LIST_ASSUMED_FETCH_MS = 1000;
+
+// Decides who is on this cycle's watch list. Never throws: any problem just
+// means an empty list (the normal rotation is unaffected) plus an error note
+// that Live Debug shows. Also returns the program store it loaded so the
+// end-of-cycle program recorder can reuse it.
+async function planWatchList(env, churches, candidates, mergedResults, staggerMs, nowMs) {
+  const plan = {
+    enabled: LIVE_CHECK_WATCH_LIST_ENABLED,
+    selected: [], dueCount: 0, overCap: 0, cap: 0, capByStagger: 0,
+    error: null, programStore: null
+  };
+  if (!LIVE_CHECK_WATCH_LIST_ENABLED) return plan;
+  try {
+    plan.capByStagger = Math.max(0, Math.floor(LIVE_CHECK_WATCH_LIST_TIME_BUDGET_MS / (staggerMs + LIVE_CHECK_WATCH_LIST_ASSUMED_FETCH_MS)));
+    plan.cap = Math.min(WATCH_LIST_MAX, plan.capByStagger);
+
+    const programRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
+    let store = null;
+    if (programRaw) {
+      try { store = JSON.parse(programRaw); } catch (parseErr) { store = null; }
+    }
+    if (!store || typeof store !== 'object' || !store.sessions) return plan; // nothing recorded yet
+    plan.programStore = store;
+
+    const churchesById = {};
+    churches.forEach(function(c) { churchesById[c.id] = c; });
+    const overrides = await loadProgramOverrides(env);
+    const programs = buildProgramSchedule(store, churchesById, overrides, nowMs);
+
+    const eligible = {};
+    candidates.forEach(function(c) { eligible[c.id] = true; });
+    const live = {};
+    Object.keys(mergedResults).forEach(function(id) {
+      if (mergedResults[id] && mergedResults[id].isLive) live[id] = true;
+    });
+
+    const sel = selectWatchList(programs, nowMs, { max: plan.cap, eligibleChurchIds: eligible, liveChurchIds: live });
+    plan.selected = sel.selected;
+    plan.dueCount = sel.dueCount;
+    plan.overCap = sel.overCap;
+  } catch (err) {
+    plan.error = (err && err.message) || 'watch list failed';
+    plan.selected = [];
+    console.log('Watch list planning failed (normal checks unaffected): ' + plan.error);
+  }
+  return plan;
+}
+
 async function checkAllChurchesLive(env) {
   // Overlap guard - see LIVE_CHECK_OVERLAP_GUARD_MS above for the full
   // reasoning. Skip this entire invocation if the progress record left
@@ -2466,6 +2541,23 @@ async function checkAllChurchesLive(env) {
   const staggerState = await loadStaggerState(env);
   const staggerMs = staggerState.staggerMs;
 
+  // Watch list (see the block comment above planWatchList): checked FIRST,
+  // then this cycle's regular batch minus anyone already on the watch list.
+  // checkList is what the loop below actually walks.
+  const watchPlan = await planWatchList(env, churches, candidates, mergedResults, staggerMs, Date.now());
+  const candidatesById = {};
+  candidates.forEach(function(c) { candidatesById[c.id] = c; });
+  const watchIds = {};
+  const watchCandidates = [];
+  watchPlan.selected.forEach(function(sel) {
+    const c = candidatesById[sel.churchId];
+    if (c && !watchIds[c.id]) {
+      watchIds[c.id] = true;
+      watchCandidates.push(c);
+    }
+  });
+  const checkList = watchCandidates.concat(batchCandidates.filter(function(c) { return !watchIds[c.id]; }));
+
   const cycleStartedAt = Date.now();
 
   // Writes the live in-progress snapshot the admin debug panel polls for a
@@ -2481,7 +2573,7 @@ async function checkAllChurchesLive(env) {
         running: running,
         startedAt: new Date(cycleStartedAt).toISOString(),
         updatedAt: new Date().toISOString(),
-        totalCandidates: batchCandidates.length,
+        totalCandidates: checkList.length,
         completedCount: completedCount,
         currentChurchName: currentChurchName || null,
         batchIndex: batchIndex,
@@ -2497,10 +2589,10 @@ async function checkAllChurchesLive(env) {
   // every LIVE_CHECK_PROGRESS_WRITE_EVERY-th church, but never the last one -
   // the end-of-cycle write below already records that.
   function shouldWriteProgressAfter(i) {
-    return (i + 1) % LIVE_CHECK_PROGRESS_WRITE_EVERY === 0 && (i + 1) < batchCandidates.length;
+    return (i + 1) % LIVE_CHECK_PROGRESS_WRITE_EVERY === 0 && (i + 1) < checkList.length;
   }
 
-  await writeProgress(0, batchCandidates.length ? batchCandidates[0].name : null, true);
+  await writeProgress(0, checkList.length ? checkList[0].name : null, true);
 
   let erroredCount = 0;
   // Churches that were never actually attempted this cycle because we'd
@@ -2524,8 +2616,8 @@ async function checkAllChurchesLive(env) {
   const pendingDebugSamples = [];
 
   try {
-    for (let i = 0; i < batchCandidates.length; i++) {
-      const c = batchCandidates[i];
+    for (let i = 0; i < checkList.length; i++) {
+      const c = checkList[i];
 
       if (hitSubrequestLimit) {
         // Record the rest as not-checked rather than attempting (and
@@ -2540,7 +2632,7 @@ async function checkAllChurchesLive(env) {
           usedStaleData: !!prior,
           notChecked: true
         });
-        if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+        if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, checkList[i + 1] ? checkList[i + 1].name : null, true);
         lastCompletedCount = i + 1;
         continue;
       }
@@ -2647,14 +2739,14 @@ async function checkAllChurchesLive(env) {
         }
       }
 
-      if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, batchCandidates[i + 1] ? batchCandidates[i + 1].name : null, true);
+      if (shouldWriteProgressAfter(i)) await writeProgress(i + 1, checkList[i + 1] ? checkList[i + 1].name : null, true);
       lastCompletedCount = i + 1;
 
       // Stagger requests to YouTube instead of firing them all at once.
       // Skip the delay after the last item, or once we've already hit the
       // subrequest ceiling - no point waiting to attempt something we know
       // will fail identically.
-      if (i < batchCandidates.length - 1 && !hitSubrequestLimit) {
+      if (i < checkList.length - 1 && !hitSubrequestLimit) {
         await sleep(staggerMs);
       }
     }
@@ -2669,7 +2761,7 @@ async function checkAllChurchesLive(env) {
     // batch-rotations ago shouldn't still claim "checked this cycle" just
     // because that field was left over from whenever it last ran.
     // batchNumber (1-based, for display) is this church's position in the
-    // same sorted `candidates` list batchCandidates was sliced from above -
+    // same sorted `candidates` list the batch was sliced from above -
     // Math.floor(index / LIVE_CHECK_BATCH_SIZE) always lands on the exact
     // batch that church's turn comes up in, since both use the identical
     // stable id-sorted ordering. Recomputed fresh every cycle for every
@@ -2677,10 +2769,11 @@ async function checkAllChurchesLive(env) {
     // as churches are added/removed and batchCount shifts.
     const fullResults = candidates.map(function(c, index) {
       const entry = mergedResults[c.id];
-      const checkedThisCycle = !!batchIds[c.id];
+      const checkedThisCycle = !!batchIds[c.id] || !!watchIds[c.id];
+      const watchedThisCycle = !!watchIds[c.id];
       const batchNumber = Math.floor(index / LIVE_CHECK_BATCH_SIZE) + 1;
-      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle, batchNumber: batchNumber });
-      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle, batchNumber: batchNumber };
+      if (entry) return Object.assign({}, entry, { checkedThisCycle: checkedThisCycle, watchedThisCycle: watchedThisCycle, batchNumber: batchNumber });
+      return { churchId: c.id, name: c.name, isLive: false, neverChecked: true, checkedThisCycle: checkedThisCycle, watchedThisCycle: watchedThisCycle, batchNumber: batchNumber };
     });
 
     const liveOnly = fullResults.filter(function(r) { return r.isLive; });
@@ -2708,10 +2801,10 @@ async function checkAllChurchesLive(env) {
 
     const cycleDurationMs = Date.now() - cycleStartedAt;
     // actuallyChecked/errored/notChecked below are scoped to THIS BATCH -
-    // batchCandidates.length, not candidates.length, is the denominator,
+    // checkList.length (this cycle's batch plus any watch-list extras), not candidates.length, is the denominator,
     // so the adaptive stagger system and "Recent Cycles" trend reflect
     // the real sample size actually exercised this cycle.
-    const actuallyCheckedCount = batchCandidates.length - notCheckedCount;
+    const actuallyCheckedCount = checkList.length - notCheckedCount;
 
     await env.CHURCHES_KV.put(LIVE_STATUS_KV_KEY, JSON.stringify({
       checkedAt: new Date().toISOString(),
@@ -2726,14 +2819,15 @@ async function checkAllChurchesLive(env) {
       // empirical error rate for our own traffic over time in KV, rather
       // than guessing at what YouTube's threshold is.
       stats: {
-        totalCandidates: batchCandidates.length,
+        totalCandidates: checkList.length,
         actuallyChecked: actuallyCheckedCount,
         errored: erroredCount,
         notChecked: notCheckedCount,
         staggerMsUsed: staggerMs,
         batchIndex: batchIndex,
         batchCount: batchCount,
-        totalChurches: candidates.length
+        totalChurches: candidates.length,
+        watchListChecked: watchCandidates.length
       }
     }));
 
@@ -2790,10 +2884,15 @@ async function checkAllChurchesLive(env) {
     // problem in it must never be able to fail the live check itself. Only
     // writes to KV when something actually changed.
     try {
-      const programRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
-      let programStore = null;
-      if (programRaw) {
-        try { programStore = JSON.parse(programRaw); } catch (parseErr) { programStore = null; }
+      // Reuses the copy the watch list already read at the start of this
+      // cycle (nothing else writes it mid-cycle - the overlap guard sees to
+      // that); falls back to reading it here when the watch list didn't.
+      let programStore = watchPlan.programStore;
+      if (!programStore) {
+        const programRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
+        if (programRaw) {
+          try { programStore = JSON.parse(programRaw); } catch (parseErr) { programStore = null; }
+        }
       }
       if (!programStore || typeof programStore !== 'object' || !programStore.sessions) {
         programStore = emptyProgramStore(Date.now());
@@ -2824,7 +2923,7 @@ async function checkAllChurchesLive(env) {
     const history = Array.isArray(debugPrevious.history) ? debugPrevious.history : [];
     history.push({
       checkedAt: new Date().toISOString(),
-      totalCandidates: batchCandidates.length,
+      totalCandidates: checkList.length,
       actuallyChecked: actuallyCheckedCount,
       errored: erroredCount,
       notChecked: notCheckedCount,
@@ -2832,14 +2931,17 @@ async function checkAllChurchesLive(env) {
       durationMs: cycleDurationMs,
       hitSubrequestLimit: hitSubrequestLimit,
       batchIndex: batchIndex,
-      batchCount: batchCount
+      batchCount: batchCount,
+      watchChecked: watchCandidates.length,
+      watchDue: watchPlan.dueCount,
+      watchOverCap: watchPlan.overCap
     });
     while (history.length > LIVE_CHECK_HISTORY_MAX_CYCLES) history.shift();
 
     await env.CHURCHES_KV.put(LIVE_CHECK_DEBUG_KV_KEY, JSON.stringify({
       latestCycle: {
         checkedAt: new Date().toISOString(),
-        totalCandidates: batchCandidates.length,
+        totalCandidates: checkList.length,
         actuallyChecked: actuallyCheckedCount,
         errored: erroredCount,
         notChecked: notCheckedCount,
@@ -2849,6 +2951,21 @@ async function checkAllChurchesLive(env) {
         batchIndex: batchIndex,
         batchCount: batchCount,
         totalChurches: candidates.length,
+        // Watch list (see planWatchList): who got extra checks this cycle
+        // and why, plus the numbers needed to tell whether the cap is ever
+        // too small (due > checked) or the stagger-based limit kicked in.
+        watchList: {
+          enabled: watchPlan.enabled,
+          checked: watchCandidates.length,
+          due: watchPlan.dueCount,
+          overCap: watchPlan.overCap,
+          cap: watchPlan.cap,
+          capByStagger: watchPlan.capByStagger,
+          error: watchPlan.error,
+          churches: watchPlan.selected.map(function(sel) {
+            return { id: sel.churchId, name: sel.churchName, status: sel.status, offsetMin: sel.offsetMin };
+          })
+        },
         results: fullResults
       },
       history: history
@@ -2870,19 +2987,19 @@ async function checkAllChurchesLive(env) {
     // behavior, and a truncated cycle isn't a representative sample of
     // the real error rate anyway.
     if (!hitSubrequestLimit) {
-      const updatedStaggerMs = nextStaggerMs(staggerMs, batchCandidates.length, erroredCount);
+      const updatedStaggerMs = nextStaggerMs(staggerMs, checkList.length, erroredCount);
       if (updatedStaggerMs !== staggerMs) {
         await env.CHURCHES_KV.put(LIVE_CHECK_STAGGER_STATE_KV_KEY, JSON.stringify({
           staggerMs: updatedStaggerMs,
           updatedAt: new Date().toISOString(),
-          reason: erroredCount / Math.max(batchCandidates.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
+          reason: erroredCount / Math.max(checkList.length, 1) > LIVE_CHECK_ERROR_RATE_THRESHOLD
             ? 'error-rate-above-threshold'
             : 'clean-cycle-decay'
         }));
       }
     }
 
-    await writeProgress(batchCandidates.length, null, false);
+    await writeProgress(checkList.length, null, false);
     completedNormally = true;
   } finally {
     // Confirmed in production: without this, a cycle that throws anywhere
