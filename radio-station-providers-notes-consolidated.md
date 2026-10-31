@@ -1361,6 +1361,20 @@ as MP3. The station's own website shows no embedded player and its schedule
 page is only logo links (no times), so the station ID came from the Radio.co
 request Larry found, and there is no published schedule to import.
 
+**`radiocov2` empty-title quirk (found 2026-10-31 on SonSaltLight).** Its
+podcast/program files put the program name in `track_artist` and leave
+`track_title` empty (e.g. `"track_artist":"IDHEF_Podcast_Phoenix_9-4-26"`,
+`"track_title":""`; the feed's top-level `"title"` holds the same text). The
+player shows "Live" when the title is empty and ignores the artist, so the
+program name was hidden. `parseRadioCoV2Json` now handles it: if
+`track_title` is empty but `track_artist` is not, the title becomes the
+feed's top-level `title` (or the artist if that is missing) and the artist is
+left blank (no "X - X"). Songs with both fields filled are unchanged, and a
+feed with both empty still falls back to "Live". The text is shown exactly as
+the station sends it (underscores and all, matching the station's own
+player); IDHEF = "I Don't Have Enough FAITH to Be an ATHEIST" with Dr. Frank
+Turk. Applies to KPTG too, since it uses the same provider.
+
 **WAOG-LP / The Shield FM (Aberdeen, NC)** — investigated and **not added**,
 per the no-now-playing-data policy (see the "Adding a new station" checklist,
 step 4). `stationId` `s56323fdac`, `streamUrl`

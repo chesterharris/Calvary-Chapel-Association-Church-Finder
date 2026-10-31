@@ -5443,9 +5443,27 @@ function parseRadioCoV2Json(rawJson) {
     ? track.artwork_urls.standard.trim()
     : '';
 
+  let title = track && typeof track.track_title === 'string' ? track.track_title.trim() : '';
+  let artist = track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '';
+
+  // Added 2026-10-31 (SonSaltLight Radio). Some stations' podcast/program
+  // files carry the program name in track_artist only and leave
+  // track_title empty (e.g. track_artist "IDHEF_Midweek-Podcast_...",
+  // track_title ""). The player shows a plain "Live" when the title is
+  // empty and ignores the artist, so a perfectly good program label was
+  // being hidden. In that case use the feed's own combined "title" field
+  // (the same text the station's own player shows), or the artist if that
+  // is missing, as the title and leave the artist blank - which also
+  // avoids showing "X - X". Normal songs (both fields filled) are untouched.
+  if (!title && artist) {
+    const combined = track && typeof track.title === 'string' ? track.title.trim() : '';
+    title = combined || artist;
+    artist = '';
+  }
+
   return {
-    title: track && typeof track.track_title === 'string' ? track.track_title.trim() : '',
-    artist: track && typeof track.track_artist === 'string' ? track.track_artist.trim() : '',
+    title: title,
+    artist: artist,
     coverUrl: rawCover || null
   };
 }
