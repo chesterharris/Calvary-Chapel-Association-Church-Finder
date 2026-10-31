@@ -196,6 +196,69 @@ check itself - and only writes to KV when something actually changed.
 - Footer: collecting-since date, streams recorded, and a "Show hidden rows"
   toggle.
 
+## The public (visitor) version (built 2026-10-31)
+
+**Off until you switch it on.** Admin: Site Management -> Weekly Schedule ->
+tick "Show the Weekly Schedule to visitors" (it saves immediately; untick to
+turn it off, also immediate). While it is off visitors do not see the
+📅 button (or the ☰ row on phones) and the endpoint returns nothing.
+
+**Preview first.** Open the 📅 Weekly Schedule as admin. The strip under the
+title has "Preview as visitor"; tick it and the panel shows exactly what
+visitors will get (tag changes to VISITOR PREVIEW), fed by the same filtered
+data, even while the switch is off. Untick for the normal admin view. The
+panel always reopens in the admin view; the admin view itself is unchanged.
+
+**What visitors see.** Steady and Building programs only - never New, hidden,
+lapsed, a deleted church, or a church whose live checks are off. Each row is
+time (in the visitor's own zone), church name with state, and title. Steady =
+bold; Building = regular weight at 0.75 opacity (about 6:1 contrast on the
+paper background, so it stays readable). No pills. Screen readers also hear
+"(less certain)" on Building rows, and a one-line key sits under the list
+("Bold entries show up week after week; lighter ones are less certain ... may
+not be perfect"). A second line appears only when it adds something: the Live
+Now badge (same link/lightbox as before), a language tag, or "Every other week
+· next Fri, Nov 13" / "First Saturday of the month · next ..." for programs
+that are not weekly ("Occasional" for occasional ones). Kept: day tabs, the
+language buttons (shared with Live Now), the generic Sunday and Wednesday
+notes, click church name -> map.
+
+**Endpoints and data.**
+- `GET /api/program-schedule` (public). Reads the on/off setting (KV key
+  `program-schedule-public`, `{enabled, updatedAt}`, default off, an unreadable
+  value counts as off) on every request. Off -> `{enabled:false, programs:[]}`
+  and no schedule data is read. On -> `selectPublicPrograms()` output cached 60
+  seconds in the Workers cache (no KV writes; one rebuild per minute at most).
+  `?preview=1` from an admin returns the same data even while off (never
+  cached); for anyone else it is the normal answer.
+- `POST /api/admin/program-schedule/public` `{enabled:true|false}` (admin
+  only) saves the setting and clears the cache, so edits show on re-enable.
+- Fields sent per program (nothing else): `churchId`, `nextStartUtc`,
+  `status` (`steady`|`building`), `title`, `pattern`, `patternLabel`,
+  `occTitles` (up to 12 recorded titles, used only to work out the service
+  language) and `languagesOverride` (only if set). NOT sent: church names,
+  sighting counts, first/last seen, avg start, time zones, the pill, edit data.
+  The page looks the church name and state up from the church list it already
+  has, and skips a row whose church it cannot find.
+- The server rule lives in `selectPublicPrograms()` (`src/program-schedule.js`);
+  `handleGetPublicProgramSchedule` / `handleSaveProgramPublicSetting` in
+  `src/index.js`; the page code is next to the admin panel code in
+  `public/index.html` (`psVisitorRowHtml`, `loadVisitorSchedule`,
+  `applyScheduleVisibility`).
+
+**Spotlight.** The Feature Spotlight target `weekly-schedule` points at the
+📅 button (or the ☰ button on phones), so it now also works for visitors once
+the switch is on. Suggested wording: "bold = steady, lighter = less certain".
+
+**Tested 2026-10-31.** Server: off by default, switch rules (non-admin 401, bad
+body 400), exclusion of new/hidden/disabled/no-YouTube/deleted-church programs,
+title overrides, only the allowed fields leave the Worker, caching, immediate
+off, fail-closed on a corrupt setting. Browser (Playwright, desktop and phone
+widths): visitor layout, weights and opacity, contrast, screen-reader text,
+Live Now badge and link, language filter, Sunday/Wednesday notes, no admin
+endpoint called, button/☰ row hidden when off, admin view unchanged, Preview as
+visitor on and off, Site Management switch (including a failed save).
+
 ## Testing done (2026-10-07)
 
 Node tests (not committed) against synthetic data: weekly program with jitter
@@ -221,10 +284,8 @@ and phone widths.
   same church can't be told apart.
 - Detection inherits the live-check quirks (stuck live flags, missing start
   times - see `live-stream-detection-notes.md`).
-- No public endpoint yet. Going public = a read-only endpoint returning the
-  builder output minus hidden rows (and likely only STEADY/BUILDING rows), plus
-  moving the day-link table out of the admin-only gating.
-- No approve/publish flag yet beyond hide - add when the page goes public.
+- ~~No public endpoint yet.~~ Built 2026-10-31 - see "The public (visitor)
+  version" below.
 - **Public version (decided 2026-10-17): "avg start" stays admin-only.** It is a
   tuning number for the quarter-hour snap, and two different times in the same
   row confuse visitors. The public endpoint must not SEND the admin-only fields

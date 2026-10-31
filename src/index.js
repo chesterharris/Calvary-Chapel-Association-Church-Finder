@@ -36,6 +36,7 @@ import {
   emptyProgramStore,
   recordProgramSessions,
   buildProgramSchedule,
+  selectPublicPrograms,
   selectWatchList,
   WATCH_LIST_MAX,
   programOverrideKey
@@ -3255,6 +3256,108 @@ async function handleGetProgramSchedule(request, env) {
     snapGraceMin: PROGRAM_SNAP_EARLY_GRACE_MIN,
     programs: programs
   });
+}
+
+// ---- Weekly program schedule: the public (visitor) view ----
+//
+// GET /api/program-schedule is public but OFF until an admin turns it on
+// (Site Management -> Weekly Schedule). While it is off the answer is just
+// { enabled: false, programs: [] } - no schedule data leaves the Worker. When
+// it is on, the answer is selectPublicPrograms() output (steady and building
+// programs only, minimal fields - see program-schedule.js), cached for a
+// minute in the Workers cache so a busy site costs one rebuild per minute.
+// The on/off setting is read on every request, so switching it off takes
+// effect immediately. An admin can add ?preview=1 to get the same visitor
+// data even while the switch is off (never cached) - that is what the admin's
+// "Preview as visitor" switch uses.
+const PROGRAM_PUBLIC_KV_KEY = 'program-schedule-public';
+const PROGRAM_PUBLIC_CACHE_SECONDS = 60;
+const PROGRAM_PUBLIC_CACHE_URL = 'https://cca-finder.internal/program-schedule-public';
+
+async function loadProgramPublicSetting(env) {
+  try {
+    const raw = await env.CHURCHES_KV.get(PROGRAM_PUBLIC_KV_KEY);
+    if (!raw) return { enabled: false };
+    const parsed = JSON.parse(raw);
+    return { enabled: !!(parsed && parsed.enabled) };
+  } catch (err) {
+    return { enabled: false };
+  }
+}
+
+async function buildPublicProgramPayload(env, nowMs) {
+  const storeRaw = await env.CHURCHES_KV.get(PROGRAM_SESSIONS_KV_KEY);
+  let store = null;
+  if (storeRaw) {
+    try { store = JSON.parse(storeRaw); } catch (err) { store = null; }
+  }
+  if (!store || !store.sessions) store = emptyProgramStore(nowMs);
+  const churches = await loadChurches(env);
+  const churchesById = {};
+  churches.forEach(function(c) { churchesById[c.id] = c; });
+  const overrides = await loadProgramOverrides(env);
+  const programs = buildProgramSchedule(store, churchesById, overrides, nowMs);
+  return {
+    generatedAt: new Date(nowMs).toISOString(),
+    programs: selectPublicPrograms(programs, churchesById)
+  };
+}
+
+async function handleGetPublicProgramSchedule(request, env, ctx) {
+  const url = new URL(request.url);
+  const setting = await loadProgramPublicSetting(env);
+  const wantPreview = url.searchParams.get('preview') === '1';
+  const isAdmin = wantPreview ? await isAdminRequest(request, env) : false;
+
+  if (!setting.enabled && !isAdmin) {
+    return jsonResponse({ enabled: false, programs: [] });
+  }
+
+  const nowMs = Date.now();
+  if (isAdmin) {
+    const payload = await buildPublicProgramPayload(env, nowMs);
+    return jsonResponse(Object.assign({ enabled: setting.enabled, preview: true }, payload));
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(PROGRAM_PUBLIC_CACHE_URL);
+  try {
+    const cached = await cache.match(cacheKey);
+    if (cached) return jsonResponse(await cached.json());
+  } catch (err) { /* rebuild below */ }
+
+  const body = Object.assign({ enabled: true }, await buildPublicProgramPayload(env, nowMs));
+  try {
+    ctx.waitUntil(cache.put(cacheKey, new Response(JSON.stringify(body), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=' + PROGRAM_PUBLIC_CACHE_SECONDS
+      }
+    })));
+  } catch (err) { /* caching is best-effort */ }
+  return jsonResponse(body);
+}
+
+// Admin-only. Turns the visitor schedule on or off.
+async function handleSaveProgramPublicSetting(request, env) {
+  if (!(await isAdminRequest(request, env))) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonResponse({ error: 'Bad request body' }, 400);
+  }
+  if (!body || typeof body.enabled !== 'boolean') {
+    return jsonResponse({ error: 'enabled must be true or false' }, 400);
+  }
+  await env.CHURCHES_KV.put(PROGRAM_PUBLIC_KV_KEY, JSON.stringify({
+    enabled: body.enabled,
+    updatedAt: new Date().toISOString()
+  }));
+  try { await caches.default.delete(new Request(PROGRAM_PUBLIC_CACHE_URL)); } catch (err) { /* best-effort */ }
+  return jsonResponse({ enabled: body.enabled });
 }
 
 // Admin-only. Hide/unhide a program row, or give it a title of your own
@@ -6839,6 +6942,12 @@ export default {
     }
     if (url.pathname === '/api/debug/live-check-progress' && request.method === 'GET') {
       return handleDebugLiveCheckProgress(request, env);
+    }
+    if (url.pathname === '/api/program-schedule' && request.method === 'GET') {
+      return handleGetPublicProgramSchedule(request, env, ctx);
+    }
+    if (url.pathname === '/api/admin/program-schedule/public' && request.method === 'POST') {
+      return handleSaveProgramPublicSetting(request, env);
     }
     if (url.pathname === '/api/admin/program-schedule' && request.method === 'GET') {
       return handleGetProgramSchedule(request, env);

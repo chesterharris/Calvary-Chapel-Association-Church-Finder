@@ -834,3 +834,37 @@ export function selectWatchList(programs, nowMs, opts) {
 function watchRank(e) {
   return (e.status === 'steady' ? 0 : 1) * 1e6 + Math.abs(e.offsetMin);
 }
+
+// ---------------------------------------------------------------------------
+// Public (visitor) view of the schedule. Takes the full builder output and
+// returns ONLY what a visitor's page needs, for programs that are fit to show:
+//   - steady or building (a "new" program has been seen once - admin only);
+//   - not hidden by the admin, not lapsed, and with a known next start;
+//   - the church still exists and is still live-checked (same rule the live
+//     checks use: livestreamsEnabled and a YouTube address).
+// Fields: churchId (the page looks the church name up itself), nextStartUtc,
+// status ('steady' | 'building'), title, pattern + patternLabel (so a
+// biweekly or monthly program can say so), occTitles and languagesOverride
+// (only used by the page to work out the service language, exactly as the
+// admin view does). Nothing else - no sighting counts, dates or time zones.
+export function selectPublicPrograms(programs, churchesById) {
+  const out = [];
+  (programs || []).forEach(function(p) {
+    if (!p || (p.status !== 'steady' && p.status !== 'emerging')) return;
+    if (p.hidden || p.lapsed || !p.nextStartUtc) return;
+    const church = churchesById && churchesById[p.churchId];
+    if (!church || !church.livestreamsEnabled || !church.youtubeUrl) return;
+    const rec = {
+      churchId: p.churchId,
+      nextStartUtc: p.nextStartUtc,
+      status: p.status === 'steady' ? 'steady' : 'building',
+      title: String(p.title || '').trim(),
+      pattern: (p.pattern && p.pattern.type) || 'unknown',
+      patternLabel: p.patternLabel || '',
+      occTitles: (p.occTitles || []).slice(0, 12)
+    };
+    if (p.languagesOverride && p.languagesOverride.length) rec.languagesOverride = p.languagesOverride.slice();
+    out.push(rec);
+  });
+  return out;
+}
