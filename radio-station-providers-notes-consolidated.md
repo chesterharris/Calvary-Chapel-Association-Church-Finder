@@ -528,6 +528,25 @@ references, not song credits. KACM (Montrose, CO) - `host:
 for why this one's confirmed straight from Icecast rather than the
 station's own player-reported data.
 
+**CCVB title format (handled 2026-10-31).** The Icecast title is
+`CODE - Program - Host - Host - File-ID`, for example
+`SAS - Sword And Spirit - Zak Vazquez - Zak Vazquez  - SAS-2026.10.30`
+(`status-json.xsl` on `wwsh.ccvb.fm/stream`; note the double space before the
+last dash). The normal "Artist - Track" split turned that into the artist
+`SAS` and a long title, shown as a cryptic string. The station's own player
+(`https://wwsh.ccvb.fm/newlibre/embed/radio`, embedded on ccvb.fm/radio) takes
+part 2 when a title has more than two parts (so it shows `Sword And Spirit`);
+it also loads `/newlibre/api/today-schedule` (show names like
+`SAS - Sword And Spirit`) but only for its schedule list. We use the station
+flag `programFromTitleParts: true`: with more than two parts, show the program
+(part 2), plus the host as `Program - Host` ONLY when parts 3 and 4 are the
+same text and the program name does not already contain it (so
+`Sword And Spirit - Zak Vazquez`, but `Family Talk with Dr. James Dobson` stays
+as is). Any other shape shows the program name alone. Two-part titles
+("Artist - Track") still use the normal split. Based on ONE real sample - if
+another CCVB program shows an odd result, send its raw title. To turn it off,
+remove the `programFromTitleParts` line from the CCVB entry.
+
 **Known gotcha - a station's own player may front real Icecast data through
 its own custom API, not a reason to build a new provider.** KACM's page
 uses a bespoke WordPress plugin ("vmplayer") that calls its own

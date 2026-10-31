@@ -3679,6 +3679,12 @@ const RADIO_CACHE_VERSION = 1;
 //                 misreported as an artist name. Defaults to false/absent
 //                 for every other Icecast station - don't set this
 //                 speculatively, only after seeing a real bad split.
+//   programFromTitleParts (optional) - set true only for a station whose
+//                 titles are "CODE - Program - Host - Host - File-ID"
+//                 (CCVB, a LibreTime station). Shows the program name, plus
+//                 the host when it is clearly present - see
+//                 parseCodeProgramHostTitle. Titles with only two parts
+//                 ("Artist - Track") are left to the normal split.
 //
 //   Futuri/streamon.fm stations also need:
 //   mount       - identifies this station on yp.cdnstream1.com's metadata
@@ -3867,6 +3873,14 @@ const RADIO_STATIONS = [
     provider: 'icecast',
     host: 'wwsh.ccvb.fm/stream',
     mount: 'main',
+    // Added 2026-10-31: the feed title looks like
+    // "SAS - Sword And Spirit - Zak Vazquez - Zak Vazquez  - SAS-2026.10.30"
+    // (code - program - host - host - file id). The station's own player
+    // (wwsh.ccvb.fm/newlibre/embed/radio) shows only the program by taking
+    // the second part when there are more than two. We show the program and,
+    // when the feed clearly carries it, the host: "Sword And Spirit - Zak
+    // Vazquez". See parseCodeProgramHostTitle.
+    programFromTitleParts: true,
     streamUrl: 'https://wwsh.ccvb.fm/stream/main'
   },
   {
@@ -5020,6 +5034,29 @@ function parseLive365Json(rawJson, station) {
 // on the first " - " to recover both. If a station's title doesn't follow
 // that convention, we fall back to treating the whole string as the title
 // with no artist, rather than guessing wrong.
+// CCVB-style titles (added 2026-10-31): "CODE - Program - Host - Host - File-ID",
+// e.g. "SAS - Sword And Spirit - Zak Vazquez - Zak Vazquez  - SAS-2026.10.30".
+// The station's own player takes part 2 (the program) when a title has more
+// than two parts. We do the same, and add the host as "Program - Host" only
+// when the feed clearly carries it: parts 3 and 4 are the same non-empty text
+// (the host repeated) and the program name doesn't already contain it. In any
+// other shape (episode titles, dates, missing fields) only the program name
+// is shown, which is always at least what the station's own page shows.
+// Returns '' when the title doesn't have more than two parts, so the caller
+// falls back to the normal "Artist - Track" handling (songs etc.).
+function parseCodeProgramHostTitle(rawTitle) {
+  const parts = String(rawTitle).split(' - ').map(function(p) { return p.replace(/\s+/g, ' ').trim(); });
+  if (parts.length <= 2) return '';
+  const program = parts[1];
+  if (!program) return '';
+  const host = parts[2];
+  const hostRepeated = parts.length >= 4 && host && host.toLowerCase() === parts[3].toLowerCase();
+  if (hostRepeated && program.toLowerCase().indexOf(host.toLowerCase()) === -1) {
+    return program + ' - ' + host;
+  }
+  return program;
+}
+
 function parseIcecastJson(rawJson, station) {
   let data;
   try {
@@ -5048,6 +5085,11 @@ function parseIcecastJson(rawJson, station) {
   // confirmed to need this.
   if (station && station.noArtistSplit) {
     return { title: rawTitle, artist: '', coverUrl: null };
+  }
+
+  if (station && station.programFromTitleParts) {
+    const programTitle = parseCodeProgramHostTitle(rawTitle);
+    if (programTitle) return { title: programTitle, artist: '', coverUrl: null };
   }
 
   const sepIndex = rawTitle.indexOf(' - ');
