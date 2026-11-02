@@ -22,6 +22,7 @@ import { WXMB_SCHEDULE } from './radioSchedules/wxmb.js';
 import { CROSSWAY_SCHEDULE } from './radioSchedules/crossway.js';
 import { FAITHFM_SCHEDULE } from './radioSchedules/faithfm.js';
 import { WJCX_SCHEDULE } from './radioSchedules/wjcx.js';
+import { KRTM_SCHEDULE } from './radioSchedules/krtm.js';
 // KYYR_SCHEDULE import removed 2026-09-23 along with the station itself -
 // see the comment at the end of RADIO_STATIONS. The data file
 // (src/radioSchedules/kyyr.js) is untouched; re-add this import when the
@@ -5050,6 +5051,27 @@ const RADIO_STATIONS = [
     nowPlayingUrl: 'https://reach.radio/api/stream-info-sse',
     scheduleUrl: 'https://reach.radio/scheduled-list',
     streamUrl: 'https://reach.radio/api/audio-stream'
+  },
+  {
+    // Added 2026-11-01. KTWD (Wallace, ID, 103.5 FM) simulcasts KRTM
+    // "Bible School Radio" (Aledo, TX), whose own now-playing feeds are
+    // meaningless (a frozen filler nowplaying.json and a looping station-ID
+    // bumper on the Live365 API - see "KRTM" in
+    // radio-station-providers-notes-consolidated.md), so this uses the
+    // station's published Program Schedule page instead, transcribed into
+    // src/radioSchedules/krtm.js (times assumed Pacific - see that file).
+    // Named KTWD at Larry's request; the website and stream are KRTM's.
+    // homePage is plain http on purpose: https://www.krtmradio.org refuses
+    // connections, the http:// address is the one that loads. streamUrl is
+    // the Live365 mount (a28002) from the station's own Listen page;
+    // confirmed it reaches "canplay" in a real browser on 2026-11-01.
+    id: 'ktwd',
+    displayName: 'KTWD',
+    cityState: 'Wallace, ID',
+    homePage: 'http://www.krtmradio.org/',
+    provider: 'publishedschedule',
+    schedule: KRTM_SCHEDULE,
+    streamUrl: 'https://streaming.live365.com/a28002'
   }
   // KYYR "The Bridge of Hope" (Yakima, WA) was added here 2026-09-23, then
   // REMOVED the same day - the stream itself doesn't reliably play over

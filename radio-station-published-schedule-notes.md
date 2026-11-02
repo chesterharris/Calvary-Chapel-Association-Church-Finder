@@ -873,6 +873,50 @@ Eleventh station wired up on this provider, 2026-09-23. Data lives in
   resized to 512x512 / 128x128.
 - Re-check folded into the consolidated 60-day schedule check (see "Keeping it fresh" above) rather than its own standalone reminder date.
 
+### KTWD (Wallace, ID - simulcast of KRTM, Aledo, TX)
+
+Added 2026-11-01. Data lives in `src/radioSchedules/krtm.js` (named for the
+schedule's source station, KRTM; the station entry is `ktwd`).
+
+- Why this provider: KRTM's own now-playing feeds are meaningless (frozen
+  filler `nowplaying.json`; Live365 API looping a station-ID bumper) - see
+  "KRTM" in `radio-station-providers-notes-consolidated.md`. The station's
+  published Program Schedule page is the only usable source.
+- Named **KTWD** at Larry's request (103.5 FM, Wallace, ID, owned by Penfold
+  Communications, simulcasts KRTM). Website and stream are KRTM's.
+- Pages: `http://www.krtmradio.org/listen.shtml` and
+  `http://www.krtmradio.org/schedule.shtml`. **Only plain `http://` works**:
+  `https://www.krtmradio.org/` and the bare domain refuse the connection, so
+  `homePage` is deliberately `http://www.krtmradio.org/` (an http link is fine
+  on an https site - only embedded resources are blocked as mixed content).
+- Stream: `https://streaming.live365.com/a28002` (Live365 mount a28002, taken
+  from the Listen page's own player; its `.asx`/`.pls` links use the same
+  mount). Verified 2026-11-01 that a browser `<audio>` element reaches
+  "canplay" on it. Playback on the deployed site still worth a listen.
+- **Schedule page structure** (re-use this to re-verify): seven tables, one
+  per weekday (`#monday` ... `#sunday`), each row `<td class="time"
+  data-utc="EPOCH">`, program link in column 2, teacher in column 3. Every
+  table uses the SAME reference day (2026-10-05, a Monday), so the epoch gives
+  time of day only; the day comes from the table. The page's script converts
+  to the viewer's local time. Monday-Friday are identical (verified
+  script-side); Saturday (35 rows) and Sunday (33) differ. No day-specific
+  calendar-icon rows exist at present, although the page text says weekday
+  variations can occur - if a future check finds a Tuesday that differs from
+  Monday, split it out with `weekdayOverridesByDay`.
+- **Timezone is an assumption**: `America/Los_Angeles`. 07:00 UTC on the
+  reference day is 12:00 AM Pacific (PDT); nothing on the page names a zone.
+  Larry (in Pacific time) asked to try Pacific. If a listener ever hears a
+  different program than the ticker shows, check the zone first (the
+  schedule is DST-aware, so a Pacific wall clock stays right all year; if
+  the station's real clock is something else, change `timezone`).
+- Transcription choices: "To Every Man an Answer - Live Broadcast Live Call-In:
+  (888)..." shortened to "To Every Man an Answer (Live)" and kept as one
+  entry (the source repeats it on the 3:00 and 3:30 PM rows); "Mike
+  Macintosh" spelled "Mike MacIntosh" (matches WJWD); gaps in the source
+  (a skipped half hour) show the earlier program through the gap.
+- Because it is a normal `publishedschedule` station, the consolidated
+  60-day schedule re-check picks it up automatically.
+
 ### KYYR "The Bridge of Hope" (Yakima, WA)
 
 Twelfth station wired up on this provider, 2026-09-23. Data lives in

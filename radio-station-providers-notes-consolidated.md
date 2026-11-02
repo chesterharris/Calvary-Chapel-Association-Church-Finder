@@ -916,6 +916,13 @@ Skip - neither available feed reflects real program content, regardless
 of which endpoint is used. Revisit only if the station's live-operator
 workflow starts tagging its own segments.
 
+**Update 2026-11-01:** KRTM's programming is now on the site as **KTWD
+(Wallace, ID)** using the `publishedschedule` provider, built from the
+station's own Program Schedule page rather than either feed - see "KTWD" in
+`radio-station-published-schedule-notes.md`. The `nowplaying.json` filler
+entry is deliberately ignored. The station's pages only load over plain
+`http://` (`https://www.krtmradio.org/` refuses connections).
+
 **Confirmed: check `live365json` first even when the captured traffic is
 HLS.** Aloha KIHL (Hilo, HI) was captured via its embedded player's actual
 network traffic requesting an HLS chunklist
