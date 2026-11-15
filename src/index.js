@@ -42,6 +42,10 @@ import {
   WATCH_LIST_MAX,
   programOverrideKey
 } from './program-schedule.js';
+// Sunday / Wednesday weekly stats for the Live Now pane's Live Stream
+// Activity section (pure rules + view builder; KV reads/writes stay here).
+// See live-stream-detection-notes.md, "Weekly stats".
+import { nextWeekdayRecords, buildWeekdayViews } from './weekday-stats.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -1445,6 +1449,18 @@ const LIVE_CHECK_MERGED_RESULTS_KV_KEY = 'live-check-merged-results';
 // there's no separate storage or cron path for the two views.
 const LIVE_STREAM_STATS_KV_KEY = 'live-stream-stats';
 const LIVE_STREAM_STATS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Sunday / Wednesday weekly stats (Pacific-time days) - the Live Now pane's
+// "Sunday" and "Wednesday" blocks. Deliberately a SEPARATE key from
+// LIVE_STREAM_STATS_KV_KEY: that payload is the raw 7-day samples the two
+// existing charts read, this one is a small long-lived record (the most
+// recent Sunday/Wednesday's peak + 10-minute chart series, and the one
+// before it's peak) that must outlive the 7-day sample window. Written by
+// the cron cycle only on Pacific Sundays/Wednesdays (see weekday-stats.js
+// for every rule). If the key doesn't exist yet it is backfilled from the
+// stored samples, and the public endpoint does the same on the fly, so the
+// section is populated on the first page load after deploy.
+const LIVE_STREAM_WEEKDAY_KV_KEY = 'live-stream-weekday-records';
 
 // Starting point for the delay between each church's fetch in a cron run.
 // YouTube's anti-bot rate limiting kicks in fast on bursts of requests
@@ -2878,6 +2894,24 @@ async function checkAllChurchesLive(env) {
       allTimePeak: allTimePeak
     }));
 
+    // Sunday / Wednesday weekly stats (see LIVE_STREAM_WEEKDAY_KV_KEY).
+    // Own try/catch on purpose - a side feature that must never be able to
+    // fail the live check. Only writes when something actually changed
+    // (every other weekday the stored record is returned untouched).
+    try {
+      const weekdayRaw = await env.CHURCHES_KV.get(LIVE_STREAM_WEEKDAY_KV_KEY);
+      let weekdayExisting = null;
+      if (weekdayRaw) {
+        try { weekdayExisting = JSON.parse(weekdayRaw); } catch (err) { weekdayExisting = null; }
+      }
+      const weekdayNext = JSON.stringify(nextWeekdayRecords(weekdayExisting, statsSamples));
+      if (weekdayNext !== weekdayRaw) {
+        await env.CHURCHES_KV.put(LIVE_STREAM_WEEKDAY_KV_KEY, weekdayNext);
+      }
+    } catch (err) {
+      console.error('Weekday stats update failed (live check unaffected):', err);
+    }
+
     // Weekly program schedule recorder (admin-only preview for now - see
     // program-schedule.js and weekly-program-schedule-notes.md). Logs one
     // "session" per broadcast, keyed by church + YouTube's own start time,
@@ -3044,6 +3078,22 @@ async function handleGetLiveStatus(request, env) {
 async function handleGetLiveStreamStats(request, env) {
   const raw = await env.CHURCHES_KV.get(LIVE_STREAM_STATS_KV_KEY);
   const data = raw ? JSON.parse(raw) : { samples: [], allTimePeak: null };
+  // Sunday / Wednesday weekly stats ("weekdays" field, see
+  // LIVE_STREAM_WEEKDAY_KV_KEY). Built here, read-only, from the stored
+  // weekday records plus the 7-day samples (which fill in anything the
+  // records don't have yet). Wrapped so a problem here can only ever hide
+  // the two weekly blocks, never the existing Today / Last 7 Days charts.
+  try {
+    const weekdayRaw = await env.CHURCHES_KV.get(LIVE_STREAM_WEEKDAY_KV_KEY);
+    let weekdayRecords = null;
+    if (weekdayRaw) {
+      try { weekdayRecords = JSON.parse(weekdayRaw); } catch (err) { weekdayRecords = null; }
+    }
+    data.weekdays = buildWeekdayViews(weekdayRecords, Array.isArray(data.samples) ? data.samples : [], Date.now());
+  } catch (err) {
+    console.error('Weekday stats view failed (charts unaffected):', err);
+    data.weekdays = null;
+  }
   return new Response(JSON.stringify(data), {
     headers: {
       'Content-Type': 'application/json',

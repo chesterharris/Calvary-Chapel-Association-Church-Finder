@@ -501,3 +501,76 @@ including watched churches outside the current batch: 12 extra + 50 regular =
 check on a synthetic 4,500-session store: building the schedule ~73 ms per
 cycle, well inside the Worker CPU limit; the real store is about a quarter of
 that. No caching was added.
+
+## 9. Live Stream Activity: Sunday / Wednesday weekly stats (2026-11-15)
+
+**What visitors see.** Under the "Today" and "Last 7 Days" charts in the Live Now
+pane there are now two more blocks, "Sunday" and "Wednesday". Each shows the
+date, the day's peak ("Peak: 9 churches (57 watching) - 10:40 AM PT"), a small
+midnight-to-midnight chart, and a "Last Sunday (Sep 27): 7 churches (44
+watching) at 11:10 AM PT (dashed line)" reference line (also drawn as a dashed
+horizontal line on the chart, with the chart's top raised so it is always
+visible). The Sunday block keeps showing that Sunday until the next Sunday
+begins; same for Wednesday. At 12:00 AM Pacific on the new Sunday/Wednesday the
+block starts over empty ("No live streams yet today.") and the old peak moves
+into the "Last ..." line. If the previous recorded day is not exactly 7 days
+earlier it reads "Previous Sunday". A day that history only began part-way
+through is labelled "(partial day)".
+
+**Fixed Pacific day.** Unlike the two charts above (visitor-local time), these
+use America/Los_Angeles so everyone sees the same Sunday/Wednesday. Times are
+labelled "PT". The chart axis is the Pacific wall clock, 12a-11:59p, so the two
+daylight-saving days (both fall on a Sunday: Nov 1 2026 fall back, Mar 14 2027
+spring forward) just fold the repeated/skipped hour into the same or adjacent
+10-minute slice. Tested with the 2026-11-01 (25-hour) and 2026-03-08 (23-hour)
+Sundays.
+
+**Where the code is.** All rules are in `src/weekday-stats.js` (pure functions,
+no KV or clock access, so they can be tested with fake timestamps):
+`updateWeekdayRecords`, `seedWeekdayRecords`, `nextWeekdayRecords`,
+`buildWeekdayViews`. `src/index.js` only does the KV reads/writes: the cron
+cycle (right after the live-stream-stats write, in its own try/catch so it can
+never fail a live check) and `handleGetLiveStreamStats`, which now adds a
+`weekdays` field to the same public `/api/live-stream-stats` JSON. The page code
+is `renderLiveStreamWeekdayBlocks()` in `public/index.html`; the two existing
+charts are untouched (they just ignore the new field).
+
+**Storage.** New KV key `live-stream-weekday-records`, separate from the 7-day
+samples. Per weekday: `current` {date, peak, partial, buckets} and `previous`
+{date, peak, partial}. Buckets are 10-minute slices of the Pacific clock holding
+the highest count seen in the slice (plus the viewers then): at most 144 per day,
+about 2 KB for a full day, so it is kept forever. The cron only changes it on
+Pacific Sundays/Wednesdays, and only writes when the stored text actually
+changed (inside a 10-minute slice that is usually no write at all).
+
+**Rules.** Peak = highest concurrent church count in any sample that day, ties
+keep the earlier time (strict `>`, same rule as the all-time peak). Only
+Pacific Sundays and Wednesdays are tracked; other days write nothing. The first
+sample of a new Sunday/Wednesday moves `current` into `previous` and starts
+`current` empty. A sample dated before the stored current day (clock skew) is
+ignored. The page also treats "today is Sunday" as a fresh empty day at 12:00 AM
+Pacific even before the first sample arrives (the view is computed at request
+time, so old totals never linger past midnight). Weekly totals are in
+"churches live at the same moment" (like the all-time peak), not distinct
+churches over the day - that was skipped by agreement.
+
+**Backfill (instant fill-in on deploy).** If the weekly key does not exist yet,
+the cron seeds it by replaying the stored 7-day samples through the same rules,
+and the public endpoint does the same on the fly, so the blocks are already
+populated on the first page load after deploy (before any cron cycle). Limit:
+only 7 days of samples exist, so right after deploy the "Last ..." line for the
+EARLIER Sunday/Wednesday is usually missing or flagged "partial day" (the
+sample window began part-way through that day). It fills in properly from the
+second week on. A deploy in the middle of a Sunday shows that Sunday's chart
+from the samples already stored (nothing is lost).
+
+**Failure behaviour.** If the weekly key is missing or corrupt, the endpoint
+rebuilds from samples (tested with a corrupt value). If building the view throws,
+`weekdays` is null and the page simply hides the two blocks; Today / Last 7 Days
+are unaffected.
+
+**Tests run (scratch harness, not shipped).** 14 unit checks on the rules
+(day filter, strict-greater peak, bucket max, rollover, Saturday 11:58 PM vs
+Sunday 12:00 AM boundary, clock skew, both DST days, empty/missing data, record
+size) plus a Worker-level request test (mock KV, fake clock) and browser renders
+(desktop, phone width, empty states, no `weekdays` field).

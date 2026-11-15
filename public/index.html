@@ -1201,6 +1201,16 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  /* Sunday / Wednesday weekly blocks (see renderLiveStreamWeekdayBlocks). */
+  .live-stream-stats-weekday-peak,
+  .live-stream-stats-weekday-last {
+    font-size: 11px;
+    color: var(--ink);
+    opacity: 0.75;
+    line-height: 1.35;
+  }
+  .live-stream-stats-weekday-peak { margin-bottom: 3px; }
+  .live-stream-stats-weekday-last { margin-top: 3px; }
   .live-stream-stats-chart svg {
     display: block;
     width: 100%;
@@ -4015,6 +4025,26 @@
         <div class="live-stream-stats-chart-label">Last 7 Days</div>
         <div id="liveStreamStatsWeekChart" class="live-stream-stats-chart"></div>
       </div>
+      <!-- Sunday / Wednesday weekly blocks. Unlike the two charts above
+           (visitor-local time), these use FIXED PACIFIC-TIME days so every
+           visitor sees the same Sunday/Wednesday. Each shows the most
+           recent Sunday/Wednesday's peak + a small midnight-to-midnight
+           chart, a dashed line and a text line for the previous week's
+           peak, and starts over (empty) at 12:00 AM Pacific on the next
+           one. Hidden if the server didn't send a "weekdays" field. Filled
+           in by renderLiveStreamWeekdayBlocks(). -->
+      <div id="liveStreamStatsSundayBlock" class="live-stream-stats-chart-block" style="display: none;">
+        <div id="liveStreamStatsSundayLabel" class="live-stream-stats-chart-label">Sunday</div>
+        <div id="liveStreamStatsSundayPeak" class="live-stream-stats-weekday-peak"></div>
+        <div id="liveStreamStatsSundayChart" class="live-stream-stats-chart"></div>
+        <div id="liveStreamStatsSundayLast" class="live-stream-stats-weekday-last"></div>
+      </div>
+      <div id="liveStreamStatsWednesdayBlock" class="live-stream-stats-chart-block" style="display: none;">
+        <div id="liveStreamStatsWednesdayLabel" class="live-stream-stats-chart-label">Wednesday</div>
+        <div id="liveStreamStatsWednesdayPeak" class="live-stream-stats-weekday-peak"></div>
+        <div id="liveStreamStatsWednesdayChart" class="live-stream-stats-chart"></div>
+        <div id="liveStreamStatsWednesdayLast" class="live-stream-stats-weekday-last"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -4448,23 +4478,35 @@
   // (57 watching)...") rather than graphed. `ticks` is an array of
   // {x, label} for the bottom axis labels (hour-of-day for Today, weekday
   // abbreviation for Last 7 Days).
-  function renderLiveStreamStatsChart(containerId, samples, xMin, xMax, ticks, emptyMessage) {
+  // `options` (optional, used by the Sunday/Wednesday blocks): `refY` draws
+  // a dashed horizontal reference line at that count (last week's peak,
+  // and raises the chart's top so the line is always visible), `ariaLabel`
+  // overrides the screen-reader label. Samples may carry a numeric `x`
+  // (already on the chart's own axis, e.g. minutes since Pacific midnight)
+  // instead of a `t` timestamp.
+  function renderLiveStreamStatsChart(containerId, samples, xMin, xMax, ticks, emptyMessage, options) {
     const el = document.getElementById(containerId);
     if (!el) return;
     if (!samples.length) {
       el.innerHTML = '<div class="live-stream-stats-chart-empty">' + emptyMessage + '</div>';
       return;
     }
+    const opts = options || {};
     const width = 300, height = 84;
     const padTop = 6, padBottom = 16, padSide = 2;
-    const countPoints = samples.map(function(s) { return { x: new Date(s.t).getTime(), y: s.count }; });
-    const countMax = Math.max(1, countPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
+    const countPoints = samples.map(function(s) { return { x: typeof s.x === 'number' ? s.x : new Date(s.t).getTime(), y: s.count }; });
+    const hasRef = typeof opts.refY === 'number' && opts.refY > 0;
+    const countMax = Math.max(1, hasRef ? opts.refY : 1, countPoints.reduce(function(m, p) { return Math.max(m, p.y); }, 0));
 
     const countShape = buildLiveStreamStatsSvgPath(countPoints, xMin, xMax, countMax, width, height, padTop, padBottom, padSide);
     const baselineY = (height - padBottom).toFixed(1);
 
-    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="Concurrent live streams over time">';
+    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="' + (opts.ariaLabel || 'Concurrent live streams over time') + '">';
     svg += '<line x1="' + padSide + '" y1="' + baselineY + '" x2="' + (width - padSide) + '" y2="' + baselineY + '" stroke="var(--line)" stroke-width="1"/>';
+    if (hasRef) {
+      const refYPos = countShape.yPos(opts.refY).toFixed(1);
+      svg += '<line x1="' + padSide + '" y1="' + refYPos + '" x2="' + (width - padSide) + '" y2="' + refYPos + '" stroke="var(--ink)" stroke-opacity="0.45" stroke-width="1" stroke-dasharray="4 3"/>';
+    }
     if (countShape.area) {
       svg += '<path d="' + countShape.area + '" fill="rgba(47,75,60,0.16)" stroke="none"/>';
     }
@@ -4551,6 +4593,127 @@
         peakEl.textContent = '';
       }
     }
+
+    renderLiveStreamWeekdayBlocks();
+  }
+
+  // ---- Sunday / Wednesday weekly blocks. Server-built (see weekday-stats.js
+  // and live-stream-detection-notes.md, "Weekly stats"): fixed PACIFIC-time
+  // days, the same for every visitor. The server sends, per weekday,
+  // { date: 'YYYY-MM-DD', isToday, peak, partial, series: [{m, count,
+  // viewers}], last: { date, peak, partial } | null } where `m` is minutes
+  // since Pacific midnight. Shows the most recent Sunday/Wednesday; on the
+  // next one it starts over empty at 12:00 AM Pacific (isToday, no data
+  // yet) and last week's peak moves into the dashed reference line.
+  const LIVE_STREAM_WEEKDAY_BLOCKS = [
+    { key: 'sunday', name: 'Sunday', idPrefix: 'liveStreamStatsSunday' },
+    { key: 'wednesday', name: 'Wednesday', idPrefix: 'liveStreamStatsWednesday' }
+  ];
+
+  // 'YYYY-MM-DD' (already a Pacific calendar date) -> 'Oct 4'. Formatted in
+  // UTC on purpose so the visitor's own timezone can never shift the day.
+  function liveStreamWeekdayDateLabel(dateStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || '');
+    if (!m) return '';
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+
+  function liveStreamWeekdayDayDiff(laterDate, earlierDate) {
+    const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(laterDate || '');
+    const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(earlierDate || '');
+    if (!a || !b) return null;
+    return Math.round((Date.UTC(+a[1], +a[2] - 1, +a[3]) - Date.UTC(+b[1], +b[2] - 1, +b[3])) / 86400000);
+  }
+
+  // "9 churches (57 watching)" / "1 church"
+  function liveStreamWeekdayPeakText(peak) {
+    const churchWord = peak.count === 1 ? 'church' : 'churches';
+    let text = peak.count + ' ' + churchWord;
+    if (peak.viewers > 0) text += ' (' + peak.viewers.toLocaleString() + ' watching)';
+    return text;
+  }
+
+  // Peak time on the PACIFIC clock, labeled so it can't be mistaken for the
+  // visitor's own local time (e.g. "10:40 AM PT").
+  function liveStreamWeekdayPeakTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' }) + ' PT';
+  }
+
+  function renderLiveStreamWeekdayBlocks() {
+    const weekdays = liveStreamStatsData && liveStreamStatsData.weekdays;
+    LIVE_STREAM_WEEKDAY_BLOCKS.forEach(function(def) {
+      const block = document.getElementById(def.idPrefix + 'Block');
+      if (!block) return;
+      const view = weekdays && weekdays[def.key];
+      if (!view) { block.style.display = 'none'; return; }
+      block.style.display = '';
+
+      const hasPeak = view.peak && view.peak.count > 0;
+      const labelEl = document.getElementById(def.idPrefix + 'Label');
+      const peakEl = document.getElementById(def.idPrefix + 'Peak');
+      const lastEl = document.getElementById(def.idPrefix + 'Last');
+
+      let label = def.name;
+      if (view.date) {
+        label += ' · ' + liveStreamWeekdayDateLabel(view.date);
+        if (view.isToday) label += ' (today so far)';
+        if (view.partial) label += ' (partial day)';
+      }
+      if (labelEl) labelEl.textContent = label;
+
+      if (peakEl) {
+        if (hasPeak) {
+          peakEl.textContent = 'Peak: ' + liveStreamWeekdayPeakText(view.peak) + ' — ' + liveStreamWeekdayPeakTime(view.peak.t);
+        } else if (view.date) {
+          peakEl.textContent = view.isToday ? 'No live streams yet today.' : 'No live streams recorded.';
+        } else {
+          peakEl.textContent = '';
+        }
+      }
+
+      // Dashed reference line + text for the previous Sunday/Wednesday.
+      const last = view.last && view.last.peak ? view.last : null;
+      const lastHasPeak = !!(last && last.peak.count > 0);
+      const seriesLength = Array.isArray(view.series) ? view.series.length : 0;
+      if (lastEl) {
+        if (last) {
+          const isExactlyLastWeek = view.date && liveStreamWeekdayDayDiff(view.date, last.date) === 7;
+          const lastName = (isExactlyLastWeek ? 'Last ' : 'Previous ') + def.name;
+          let text = lastName + ' (' + liveStreamWeekdayDateLabel(last.date) + (last.partial ? ', partial day' : '') + '): ';
+          text += lastHasPeak
+            ? liveStreamWeekdayPeakText(last.peak) + ' at ' + liveStreamWeekdayPeakTime(last.peak.t) + (seriesLength ? ' (dashed line)' : '')
+            : 'no live streams';
+          lastEl.textContent = text;
+        } else {
+          lastEl.textContent = '';
+        }
+      }
+
+      const series = Array.isArray(view.series) ? view.series : [];
+      const points = series.map(function(s) { return { x: s.m, count: s.count }; });
+      const dayLabel = def.name + ' ' + (view.date ? liveStreamWeekdayDateLabel(view.date) : '');
+      renderLiveStreamStatsChart(
+        def.idPrefix + 'Chart',
+        points,
+        0,
+        1440,
+        [
+          { x: 0, label: '12a' },
+          { x: 360, label: '6a' },
+          { x: 720, label: '12p' },
+          { x: 1080, label: '6p' }
+        ],
+        view.date
+          ? (view.isToday ? 'Collecting today’s data…' : 'No data was recorded for this ' + def.name + '.')
+          : 'No ' + def.name + ' recorded yet — this fills in after the next ' + def.name + '.',
+        {
+          refY: lastHasPeak ? last.peak.count : null,
+          ariaLabel: 'Concurrent live streams on ' + dayLabel.trim() + ', Pacific time'
+        }
+      );
+    });
   }
 
   function minutesSince(isoString) {

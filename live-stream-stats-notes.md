@@ -166,3 +166,11 @@ committed to the repo):
   ever shown on a page that's open for a long time, consider pausing the
   poll when the tab isn't visible (not done here, matches the existing
   `loadLiveStatus` pattern which also doesn't do this).
+
+## Update 2026-11-15 - Sunday / Wednesday weekly blocks
+
+The Live Stream Activity section also has fixed-Pacific-time "Sunday" and
+"Wednesday" blocks (peak, small midnight-to-midnight chart, dashed line for the
+previous week's peak; they start over at 12:00 AM Pacific on the next
+Sunday/Wednesday). Full design, storage key, rules, backfill and tests are in
+`live-stream-detection-notes.md`, section 9. Code: `src/weekday-stats.js`.
