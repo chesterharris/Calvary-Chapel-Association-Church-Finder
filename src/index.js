@@ -3254,6 +3254,7 @@ async function handleGetProgramSchedule(request, env) {
     since: store.since || null,
     sessionCount: Object.keys(store.sessions).length,
     diag: store.diag || null,
+    memorialSkipped: Object.keys(store.memorial || {}).length,
     snapGraceMin: PROGRAM_SNAP_EARLY_GRACE_MIN,
     programs: programs
   });

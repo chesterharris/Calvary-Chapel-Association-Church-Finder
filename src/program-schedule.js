@@ -400,8 +400,31 @@ export function snapToQuarterHour(minuteOfDay) {
 // Recorder
 // ---------------------------------------------------------------------------
 
+// ---- One-time memorial / celebration-of-life streams (added 2026-11-15) ----
+//
+// Almost every Saturday some church streams a one-time memorial service or
+// celebration of life. They never repeat, so they are kept OUT of the schedule
+// entirely (not recorded, rather than recorded and hidden): no stray "Seen
+// once" rows, and a church's regular study is not disturbed by a one-off.
+// The live check already reads each stream's title and description, so this
+// costs no extra YouTube requests.
+//
+// Matching is on the title plus only the START of the description
+// (PROGRAM_MEMORIAL_DESC_CHARS). YouTube descriptions often carry weekly
+// announcements ("Memorial service for Bob next Saturday at 2pm") on an ordinary
+// stream; scanning the whole text could make a regular program vanish. A real
+// memorial stream says what it is at the top. "Memorial Day" does not match.
+export const PROGRAM_MEMORIAL_DESC_CHARS = 300;
+const PROGRAM_MEMORIAL_RE = /\b(memorial\s+services?|celebration\s+of\s+(the\s+)?life|celebrating\s+the\s+life\s+of|life\s+celebration|funerals?|home\s?going|in\s+loving\s+memory|graveside)\b/i;
+
+export function isMemorialStream(title, description) {
+  const text = String(title || '') + ' \n ' + String(description || '').slice(0, PROGRAM_MEMORIAL_DESC_CHARS);
+  // Hyphens/underscores/dots between words ("Celebration-of-Life") count as spaces.
+  return PROGRAM_MEMORIAL_RE.test(text.replace(/[-_.\u2013\u2014]+/g, ' '));
+}
+
 export function emptyProgramStore(nowMs) {
-  return { since: new Date(nowMs).toISOString(), sessions: {}, diag: { noStartDate: 0, skippedSunWed: 0, skippedLongRunning: 0, noTimeZone: 0, lastCycleAt: null } };
+  return { since: new Date(nowMs).toISOString(), sessions: {}, memorial: {}, diag: { noStartDate: 0, skippedSunWed: 0, skippedLongRunning: 0, noTimeZone: 0, lastCycleAt: null } };
 }
 
 // Folds this cycle's live entries into the store. `liveEntries` is the same
@@ -419,6 +442,19 @@ export function recordProgramSessions(store, liveEntries, churchesById, nowMs) {
   if (!store.diag) store.diag = { noStartDate: 0, skippedSunWed: 0, skippedLongRunning: 0, noTimeZone: 0, lastCycleAt: null };
   let changed = false;
   const nowIso = new Date(nowMs).toISOString();
+  // store.memorial: distinct memorial / celebration-of-life streams kept out of
+  // the schedule ("<churchId>|<startISO>" -> start ISO), so the panel can show
+  // how many were skipped. Pruned with the same retention as sessions.
+  if (!store.memorial) store.memorial = {};
+  // Streams recorded earlier (before this rule, or before their description
+  // said what they were) are removed by title.
+  Object.keys(store.sessions).forEach(function(k) {
+    if (isMemorialStream(store.sessions[k].t, '')) {
+      if (!store.memorial[k]) store.memorial[k] = store.sessions[k].s;
+      delete store.sessions[k];
+      changed = true;
+    }
+  });
 
   (liveEntries || []).forEach(function(e) {
     if (!e || !e.isLive) return;
@@ -439,6 +475,13 @@ export function recordProgramSessions(store, liveEntries, churchesById, nowMs) {
     const seenIso = new Date(isNaN(seenAtMs) ? nowMs : Math.min(seenAtMs, nowMs)).toISOString();
 
     if (existing) {
+      // A description that only became clear after the stream was first seen.
+      if (isMemorialStream(e.title, e.description)) {
+        delete store.sessions[key];
+        if (!store.memorial[key]) store.memorial[key] = startIso;
+        changed = true;
+        return;
+      }
       if (seenIso > existing.l) { existing.l = seenIso; changed = true; }
       if (e.title && e.title !== existing.t) { existing.t = e.title; changed = true; }
       return;
@@ -459,6 +502,10 @@ export function recordProgramSessions(store, liveEntries, churchesById, nowMs) {
       store.diag.skippedSunWed++;
       return;
     }
+    if (isMemorialStream(e.title, e.description)) {
+      if (!store.memorial[key]) { store.memorial[key] = startIso; changed = true; }
+      return;
+    }
     store.sessions[key] = {
       c: e.churchId,
       s: startIso,
@@ -476,6 +523,10 @@ export function recordProgramSessions(store, liveEntries, churchesById, nowMs) {
   const cutoff = new Date(nowMs - PROGRAM_SESSION_RETENTION_MS).toISOString();
   Object.keys(store.sessions).forEach(function(k) {
     if (store.sessions[k].s < cutoff) { delete store.sessions[k]; changed = true; }
+  });
+
+  Object.keys(store.memorial).forEach(function(k) {
+    if (store.memorial[k] < cutoff) { delete store.memorial[k]; changed = true; }
   });
 
   store.diag.lastCycleAt = nowIso;
@@ -652,6 +703,7 @@ export function buildProgramSchedule(store, churchesById, overrides, nowMs) {
     if (isNaN(startMs)) return;
     const endMs = Date.parse(s.l);
     if (!isNaN(endMs) && endMs - startMs > PROGRAM_MAX_SESSION_MS) return; // 24/7 loop, conference
+    if (isMemorialStream(s.t, '')) return; // one-time memorial / celebration of life
     const lp = localParts(startMs, s.z);
     if (PROGRAM_SKIPPED_WEEKDAYS.indexOf(lp.weekday) !== -1) return;
     const rec = {

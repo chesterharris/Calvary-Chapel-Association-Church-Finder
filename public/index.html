@@ -6432,6 +6432,7 @@
       ' (' + days + ' day' + (days === 1 ? '' : 's') + ') • ' + (psData.sessionCount || 0) + ' streams recorded • Sundays and Wednesdays are not recorded.' +
       ' Lighter rows are new or still building; the quarter-hour time is the typical start rounded (early starts round up).</div>' +
       (diag.noStartDate ? '<div>' + diag.noStartDate + ' live sightings had no start time and were skipped.</div>' : '') +
+      (psData.memorialSkipped ? '<div>' + psData.memorialSkipped + ' one-time memorial / celebration-of-life stream' + (psData.memorialSkipped === 1 ? '' : 's') + ' kept off the schedule (last 70 days).</div>' : '') +
       '<div><label><input type="checkbox" id="psShowHiddenCb"' + (psShowHidden ? ' checked' : '') + '> Show hidden rows (' + hiddenCount + ')</label></div>';
   }
 

@@ -56,6 +56,8 @@ check itself - and only writes to KV when something actually changed.
     `f` first seen, `l` last seen.
   - Retention 70 days (a monthly program needs a couple of cycles to prove
     itself). Expect a few hundred KB at most.
+  - The same key also holds `memorial` (distinct memorial / celebration-of-life
+    streams kept out of `sessions`; see the section below).
   - `diag` counts *sightings* (once per cron cycle a stream is seen), not
     distinct streams: `noStartDate`, `skippedSunWed`, `skippedLongRunning`,
     `noTimeZone`. Informational only.
@@ -76,6 +78,43 @@ check itself - and only writes to KV when something actually changed.
     the panel sends that slot back when saving so the same record is updated
     instead of a second one being created. Saved titles always beat the YouTube
     title; clear one by saving an empty title.
+
+## One-time memorial / celebration-of-life streams (added 2026-11-15)
+
+Almost every Saturday some church streams a one-time memorial service or
+celebration of life. They never repeat, so the recorder **keeps them out of the
+schedule entirely** (not recorded, instead of recorded-then-hidden). Larry's
+call: cleaner data, no stray "Seen once" rows, and a church's regular study is
+not disturbed by a one-off.
+
+- Detector: `isMemorialStream(title, description)` in `src/program-schedule.js`.
+  Matches (case-insensitive, hyphens/underscores count as spaces): memorial
+  service(s), celebration of (the) life, celebrating the life of, life
+  celebration, funeral(s), homegoing / home going, in loving memory, graveside.
+  "Memorial Day" does not match.
+- It reads the **title plus only the first 300 characters of the description**
+  (`PROGRAM_MEMORIAL_DESC_CHARS`). Descriptions often carry weekly announcements
+  ("Memorial service for Bob next Saturday at 2pm") on an ordinary stream;
+  scanning the whole text could make a regular program disappear. The live
+  check already reads title and description from the same page fetch, so there
+  are no extra YouTube requests. (`og:description` is itself short.)
+- Known limitation: an announcement at the very top of a regular stream's
+  description still matches - that one stream is skipped, but the program keeps
+  showing as long as its other sessions are recorded.
+- Recorder behavior: a new matching stream is not stored; a stored session whose
+  later sighting reveals it is deleted; stored sessions whose *title* matches are
+  purged at the start of every recorder pass (and ignored by the builder, so they
+  disappear the moment the panel opens). Sunday/Wednesday streams are not counted
+  (they are never on the schedule anyway).
+- KV: `program-sessions` gets a `memorial` map `{ "<churchId>|<startISO>": startISO }`
+  of **distinct streams** skipped (not sightings), pruned with the 70-day
+  retention. `GET /api/admin/program-schedule` returns `memorialSkipped` (the
+  map's size) and the panel footer shows "N one-time memorial / celebration-of-life
+  streams kept off the schedule (last 70 days)". Seeing that number rise on
+  Saturdays is the check that it is working.
+- Not affected: the Live Now list (these streams still show as live), the public
+  schedule endpoint (it only ever sees what the builder returns).
+- To add a phrase: edit `PROGRAM_MEMORIAL_RE` in `src/program-schedule.js`.
 
 ## Recorder rules
 
