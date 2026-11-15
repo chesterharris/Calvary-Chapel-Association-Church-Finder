@@ -574,3 +574,52 @@ are unaffected.
 Sunday 12:00 AM boundary, clock skew, both DST days, empty/missing data, record
 size) plus a Worker-level request test (mock KV, fake clock) and browser renders
 (desktop, phone width, empty states, no `weekdays` field).
+
+## 10. "Watching" counts went missing: YouTube changed its page (found 2026-11-15)
+
+**Symptom.** Live Now "View count" sort: picking it disabled the dropdown and
+did not sort. The cause is by design - the dropdown disables itself when NONE
+of the visible live streams has a view count - so the real problem was that all
+234 live streams (checked Sunday 2026-11-15, 8 AM Pacific) had `viewCount: null`.
+The Live Stream Activity stats confirmed it: the last sample with any viewers
+was 2026-11-10 01:31 UTC (Nov 9, 5:31 PM Pacific); every sample after it shows
+0 watching, including Sunday and Wednesday ones, so the weekly "(N watching)"
+text was also missing.
+
+**Cause.** Not a code regression. The old reader was one regex that required
+`"originalViewCount"` to come immediately after `"isLive":true` inside YouTube's
+`videoViewCountRenderer`. YouTube now puts two more fields between them:
+`"isLive":true,"extraShortViewCount":{"simpleText":"22"},"entityKey":"...","originalViewCount":"22"`.
+Confirmed on a real live page on 2026-11-15: the old regex matched nothing, the
+new reader returns the right number (22/23 while the page said "22 watching
+now").
+
+**Fix.** The reading moved to `src/youtube-viewers.js`
+(`extractConcurrentViewers(html)`, pure function, used by `checkChurchLive` for
+both the returned `viewCount` and the soft-duration guard). It stays anchored on
+the `videoViewCountRenderer` that says `"isLive":true` (never the lifetime
+`videoDetails.viewCount`, never a sidebar video) and tries, in order:
+(1) `originalViewCount` after any number of simple fields; (2) `originalViewCount`
+anywhere inside that one renderer (never crossing into the next renderer);
+(3) the visible text, e.g. "1,234 watching now". Missing everywhere -> null, as
+before. 12 checks pass, including the exact real-page structure, the old shapes,
+a real 0, lifetime views ignored, and "never borrow a later renderer's number".
+
+**What to expect after deploy.** Counts come back as each church is re-checked
+(the cron checks one batch per cycle, plus the watch list), so the View count
+sort enables as soon as the first batch is checked and everything fills in over
+one full rotation. The Live Stream Activity "watching" totals resume from the
+next cycle. Weekly/all-time peaks are by church COUNT, so they were never wrong;
+only their "(N watching)" text was.
+
+**Side effect to know about.** While counts were null (Nov 10 - deploy), the two
+guards that cut a long-running stream with a nearly empty audience
+(`LIVE_CHECK_SOFT_DURATION_CAP_MS` + `LIVE_CHECK_MIN_REAL_AUDIENCE`, and the
+similar check in `checkAllChurchesLive`) could not fire, because they need a
+number. Once counts return those guards work again, so the live count may drop a
+little as stale/empty streams are cut.
+
+**If it happens again.** The tell is Live Stream Activity showing 0 watching with
+many churches live, or every `/api/live-status` entry having `viewCount: null`.
+Open any live YouTube watch page, look at the HTML around `videoViewCountRenderer`
+and compare to the shapes in the comment at the top of `src/youtube-viewers.js`.

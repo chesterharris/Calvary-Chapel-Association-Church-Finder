@@ -46,6 +46,8 @@ import {
 // Activity section (pure rules + view builder; KV reads/writes stay here).
 // See live-stream-detection-notes.md, "Weekly stats".
 import { nextWeekdayRecords, buildWeekdayViews } from './weekday-stats.js';
+// Tolerant reader for YouTube's "watching now" number (see that file).
+import { extractConcurrentViewers } from './youtube-viewers.js';
 
 const SOURCE_URL = 'https://calvarycca.org/conferences/';
 const CACHE_SECONDS = 6 * 60 * 60; // 6 hours
@@ -2132,7 +2134,15 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
   // matching a similar-looking renderer for an unrelated recommended/
   // sidebar video elsewhere on the page - same anchoring discipline
   // already used for the videoId match above, for the same reason.
-  const concurrentViewersMatch = html.match(/"videoViewCountRenderer":\{"viewCount":\{"runs":\[(?:\{"text":"[^"]*"\},?)+\]\},"isLive":true,"originalViewCount":"(\d+)"\}/);
+  //
+  // UPDATE 2026-11-15: the single regex that used to be here (it required
+  // "originalViewCount" immediately after "isLive":true) silently stopped
+  // matching around Nov 9-10 2026 when YouTube added extra fields between
+  // them, so every viewCount became null. The reading now lives in
+  // src/youtube-viewers.js as a tolerant reader (same anchoring, three
+  // fallbacks) - see the comment there and live-stream-detection-notes.md
+  // section 10. Returns a number or null, exactly as the old code did.
+  const concurrentViewers = extractConcurrentViewers(html);
 
   // Fallback source: the page's embedded videoDetails/microformat JSON.
   // Confirmed via a real production case (Calvary Chapel Gresham) where the
@@ -2334,7 +2344,7 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
   // RECENT_WINDOW_MS hard ceiling above, so it still can't linger forever.
   if (startDate) {
     const startTime = new Date(startDate).getTime();
-    const viewCount = concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null;
+    const viewCount = concurrentViewers;
     if (!isNaN(startTime) && (Date.now() - startTime) > LIVE_CHECK_SOFT_DURATION_CAP_MS &&
         viewCount !== null && viewCount < LIVE_CHECK_MIN_REAL_AUDIENCE) {
       return { isLive: false, status: 'not_live' };
@@ -2379,7 +2389,7 @@ async function checkChurchLive(youtubeUrl, env, churchId, churchName, pendingDeb
     title: title,
     description: description,
     author: authorMatch ? authorMatch[1] : null,
-    viewCount: concurrentViewersMatch ? Number(concurrentViewersMatch[1]) : null
+    viewCount: concurrentViewers
   };
 }
 
