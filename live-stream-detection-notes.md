@@ -623,3 +623,58 @@ little as stale/empty streams are cut.
 many churches live, or every `/api/live-status` entry having `viewCount: null`.
 Open any live YouTube watch page, look at the HTML around `videoViewCountRenderer`
 and compare to the shapes in the comment at the top of `src/youtube-viewers.js`.
+
+## 11. Live Now pane: controls scroll away with the list (2026-11-17)
+
+**Ask.** In the Live Now pane the Sort dropdown, the language selector and the
+three checkboxes took a lot of room, especially on phones. When the visitor
+starts scrolling the list those controls should scroll up and out of the way
+(smoothly, with a fade) to give the list the whole pane, and come back when the
+visitor scrolls to the top. Default (just-opened) state is unchanged.
+
+**Choices made (Larry, 2026-11-17).** (1) Controls scroll away WITH the list and
+fade, rather than a timed collapse animation or hide-on-scroll-down/show-on-
+scroll-up; they return only at the very top. (2) A thin summary strip, only when
+something is not on its default. (3) Same behavior on phone and desktop.
+
+**How it works (all in `public/index.html`, no server change).**
+- The sort row, language selector, filter checkboxes and the "Showing X of Y"
+  message moved INSIDE `#liveNowScrollArea` (wrapped in `#liveNowControls`),
+  above `#liveNowList`. Same element ids, so every existing handler is
+  untouched. Because they scroll with the content nothing resizes under the
+  visitor's finger, so there is no scroll jitter to guard against.
+- `updateLiveNowControlsFade()`: scroll-linked fade. Over the first 70% of the
+  controls' height of scrolling, opacity goes 1 -> 0 and the block drifts up 8px.
+  Reverses by itself on the way back up. Driven by a passive scroll listener
+  through `requestAnimationFrame`. With reduced motion the drift is skipped
+  (opacity only).
+- Summary strip (`#liveNowSummaryStrip`): a zero-height `position: sticky`
+  wrapper at the top of the scroll area with the strip positioned inside it, so
+  showing/hiding it never changes layout. It fades in only when the controls are
+  fully out of view AND the sort/language/filters are not default. Text examples:
+  "Sort: View count", "Showing 10 of 40 · Featured · Sort: View count". Tapping
+  the text scrolls back to the top (smooth, instant with reduced motion);
+  "Clear" (shown only when Featured/Favorites/language is active) runs the same
+  `clearLiveNowFilters()` as the "Clear all filters" link: clears Featured,
+  Favorites and language; leaves Sort and "Show only live churches on the map"
+  alone, as before.
+- `renderLiveNowList()` is now a thin wrapper: it calls `renderLiveNowListBody()`
+  (the old body, unchanged), then `updateLiveNowSummaryStrip()` and
+  `updateLiveNowControlsFade()`, so every existing caller (poll, filter change,
+  sort change, language change) refreshes the strip automatically.
+- Opening the pane always scrolls it to the top, so it opens in the default
+  state.
+
+**Things to know.** The live-on-the-map checkbox is not part of the strip (it
+changes the map, not the list). With very few live streams the area may not
+scroll far enough for the controls to leave, in which case they simply stay put
+at full strength (the Live Stream Activity section below the list normally gives
+enough height to scroll). The page's own "Showing X of Y ... Clear all filters"
+message still appears with the controls at the top; the strip covers it once
+scrolled.
+
+**Tested (scratch Playwright harness with local copies of the map libraries,
+mock live-status/churches):** desktop and phone width; default state;
+mid-fade; fully scrolled with defaults (no strip); non-default sort (strip);
+Featured filter (strip with count + Clear); tap-to-top; Clear; 2 live streams;
+reduced-motion. No page errors.

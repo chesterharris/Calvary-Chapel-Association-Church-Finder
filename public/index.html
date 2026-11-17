@@ -1167,6 +1167,86 @@
   .live-now-list {
     padding: 12px 16px;
   }
+  /* Sort / language / filter controls: the first thing INSIDE the scroll
+     area, so they scroll up and away with the list. Their fade + slight
+     upward drift is driven by the scroll position itself (see
+     updateLiveNowControlsFade()) - scroll-linked, not a timed animation,
+     so it tracks the visitor's finger exactly and reverses on its own when
+     they scroll back to the top. */
+  .live-now-controls {
+    will-change: opacity, transform;
+  }
+  /* Pinned summary strip: a ZERO-height sticky wrapper with the strip
+     positioned inside it, so toggling the strip never changes layout or
+     nudges the list - it just fades in over the top edge. */
+  .live-now-summary-sticky {
+    position: sticky;
+    top: 0;
+    height: 0;
+    z-index: 5;
+  }
+  .live-now-summary-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.10);
+    font-size: 12px;
+    color: var(--ink);
+    opacity: 0;
+    transform: translateY(-6px);
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .live-now-summary-strip.is-visible {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
+  }
+  .live-now-summary-text {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--evergreen);
+    background: none;
+    border: none;
+    padding: 4px 0;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .live-now-summary-text::before {
+    content: "\25B4\00a0";
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  .live-now-summary-clear {
+    flex-shrink: 0;
+    padding: 4px 0;
+  }
+  .live-now-summary-text:focus-visible,
+  .live-now-summary-clear:focus-visible {
+    outline: 2px solid var(--ember);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live-now-controls { will-change: auto; }
+    .live-now-summary-strip,
+    .live-now-summary-strip.is-visible { transition: none; transform: none; }
+  }
   .live-stream-stats-section {
     border-top: 1px solid var(--line);
     padding: 10px 16px 14px;
@@ -3944,54 +4024,6 @@
     <button id="closeLiveNowBtn" class="btn-close">×</button>
     <div class="mp-topbar-spacer mobile-panel-spacer" aria-hidden="true"></div>
   </div>
-  <!-- Deliberately its own row, visually separate from #liveNowFilters
-       below - this reorders the list, it doesn't narrow it, and the user
-       who asked for this was explicit that the distinction matters ("This
-       is not a filter"). Always rendered (never hidden), even when there's
-       currently nothing eligible to sort - see the disabled-state check
-       near the top of renderLiveNowList() for why it greys out instead of
-       disappearing. -->
-  <div id="liveNowSortRow" class="live-now-sort-row">
-    <label for="liveNowSortSelect" class="live-now-sort-label">Sort</label>
-    <select id="liveNowSortSelect" class="live-now-sort-select">
-      <option value="freshest">Freshest streams first</option>
-      <option value="viewcount">View count</option>
-      <option value="alphabetical">Alphabetical</option>
-      <option value="default">Default order</option>
-    </select>
-  </div>
-  <div id="liveNowFilters" class="live-now-filters">
-    <div id="liveNowLanguageRow" class="live-now-lang-row">
-      <span id="liveNowLanguageLabel" class="live-now-lang-label">Show services in:</span>
-      <div id="liveNowLanguageSeg" class="live-now-lang-seg" data-lang-seg role="group" aria-labelledby="liveNowLanguageLabel">
-        <button type="button" data-lang="all" aria-pressed="true">All languages</button>
-        <button type="button" data-lang="en" aria-pressed="false">English</button>
-        <button type="button" data-lang="es" aria-pressed="false">Español</button>
-        <button type="button" data-lang="other" aria-pressed="false">Other languages</button>
-      </div>
-      <div id="liveNowLanguageHint" class="live-now-lang-hint">Shows only services held in that language. Nothing is translated.</div>
-    </div>
-    <label id="liveOnlyFilterRow" class="live-only-filter-row">
-      <input type="checkbox" id="liveOnlyFilterCb" disabled>
-      <span class="filter-live-dot" aria-hidden="true"></span>
-      <span>Show only live churches on the map</span>
-    </label>
-    <label id="featuredFilterRow" class="live-only-filter-row">
-      <input type="checkbox" id="featuredFilterCb">
-      <span class="filter-row-icon filter-row-icon-featured" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h12l-3.2 4L17 12H5z"/></svg>
-      </span>
-      <span>Featured Streams only</span>
-    </label>
-    <label id="favoritesFilterRow" class="live-only-filter-row">
-      <input type="checkbox" id="favoritesFilterCb">
-      <span class="filter-row-icon filter-row-icon-favorite" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      </span>
-      <span>Favorites only</span>
-    </label>
-  </div>
-  <div id="liveNowClearFiltersMsg" class="live-now-clear-filters-msg" style="display:none;"></div>
   <!-- Single shared scroll area for the list + the stats section below it -
        per your call, the charts are NOT a separate docked footer (that
        squeezed the live list itself into its own tiny "keyhole" scroll
@@ -4005,6 +4037,75 @@
        entire innerHTML on every refresh/filter change - nesting the
        charts inside it would wipe them out on every poll. -->
   <div id="liveNowScrollArea" class="live-now-scroll-area">
+    <!-- Pinned summary strip (see updateLiveNowSummaryStrip()). A zero-height
+         sticky wrapper at the very top of the scroll area, with the strip
+         itself positioned inside it, so showing/hiding it never changes the
+         layout or shifts the list - it just fades in over the top edge once
+         the controls below have scrolled out of view, and only when the
+         sort/language/filters are not on their defaults. -->
+    <div class="live-now-summary-sticky">
+      <div id="liveNowSummaryStrip" class="live-now-summary-strip" role="region" aria-label="Active sort and filters">
+        <button type="button" id="liveNowSummaryText" class="live-now-summary-text" title="Show sort and filter controls"></button>
+        <button type="button" id="liveNowSummaryClear" class="live-now-clear-filters-link live-now-summary-clear">Clear</button>
+      </div>
+    </div>
+    <!-- The sort row, language selector, filter checkboxes and the "Showing X
+         of Y" message used to sit ABOVE the scroll area, pinned. They are now
+         the first thing INSIDE it, so they scroll up and away with the list
+         (fading out as they go, see updateLiveNowControlsFade()) and come
+         back when the visitor scrolls to the top - maximum room for the list
+         in between. Same elements and ids as before, so every existing
+         handler is untouched. -->
+    <div id="liveNowControls" class="live-now-controls">
+    <!-- Deliberately its own row, visually separate from #liveNowFilters
+         below - this reorders the list, it doesn't narrow it, and the user
+         who asked for this was explicit that the distinction matters ("This
+         is not a filter"). Always rendered (never hidden), even when there's
+         currently nothing eligible to sort - see the disabled-state check
+         near the top of renderLiveNowList() for why it greys out instead of
+         disappearing. -->
+    <div id="liveNowSortRow" class="live-now-sort-row">
+      <label for="liveNowSortSelect" class="live-now-sort-label">Sort</label>
+      <select id="liveNowSortSelect" class="live-now-sort-select">
+        <option value="freshest">Freshest streams first</option>
+        <option value="viewcount">View count</option>
+        <option value="alphabetical">Alphabetical</option>
+        <option value="default">Default order</option>
+      </select>
+    </div>
+    <div id="liveNowFilters" class="live-now-filters">
+      <div id="liveNowLanguageRow" class="live-now-lang-row">
+        <span id="liveNowLanguageLabel" class="live-now-lang-label">Show services in:</span>
+        <div id="liveNowLanguageSeg" class="live-now-lang-seg" data-lang-seg role="group" aria-labelledby="liveNowLanguageLabel">
+          <button type="button" data-lang="all" aria-pressed="true">All languages</button>
+          <button type="button" data-lang="en" aria-pressed="false">English</button>
+          <button type="button" data-lang="es" aria-pressed="false">Español</button>
+          <button type="button" data-lang="other" aria-pressed="false">Other languages</button>
+        </div>
+        <div id="liveNowLanguageHint" class="live-now-lang-hint">Shows only services held in that language. Nothing is translated.</div>
+      </div>
+      <label id="liveOnlyFilterRow" class="live-only-filter-row">
+        <input type="checkbox" id="liveOnlyFilterCb" disabled>
+        <span class="filter-live-dot" aria-hidden="true"></span>
+        <span>Show only live churches on the map</span>
+      </label>
+      <label id="featuredFilterRow" class="live-only-filter-row">
+        <input type="checkbox" id="featuredFilterCb">
+        <span class="filter-row-icon filter-row-icon-featured" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h12l-3.2 4L17 12H5z"/></svg>
+        </span>
+        <span>Featured Streams only</span>
+      </label>
+      <label id="favoritesFilterRow" class="live-only-filter-row">
+        <input type="checkbox" id="favoritesFilterCb">
+        <span class="filter-row-icon filter-row-icon-favorite" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </span>
+        <span>Favorites only</span>
+      </label>
+    </div>
+    <div id="liveNowClearFiltersMsg" class="live-now-clear-filters-msg" style="display:none;"></div>
+    </div>
     <div id="liveNowList" class="live-now-list"></div>
     <!-- Always rendered, even with 0 live churches right now (per your
          call on the zero-count case elsewhere in this pane). Both charts
@@ -4269,6 +4370,10 @@
   let liveNowLanguageMode = loadLiveNowLanguageMode();
 
   let liveNowSortMode = 'freshest';
+  // State for the scroll-away controls / pinned summary strip (see
+  // updateLiveNowSummaryStrip() and updateLiveNowControlsFade()).
+  let liveNowSummaryHasContent = false;
+  let liveNowFadeRaf = null;
 
   // Shared by both the map's renderMarkers() and the Live Now list - a
   // church matches when no filter is on, or when it satisfies whichever
@@ -5331,7 +5436,17 @@
     return matchesFeaturedOrFavoritesFilter(church);
   }
 
+  // Public entry point (unchanged name, so every existing caller keeps
+  // working): draws the list, then refreshes the pinned summary strip and
+  // the controls' scroll fade, since both depend on what was just drawn
+  // (counts, active filters, how tall the controls are).
   function renderLiveNowList() {
+    renderLiveNowListBody();
+    updateLiveNowSummaryStrip();
+    updateLiveNowControlsFade();
+  }
+
+  function renderLiveNowListBody() {
     const list = document.getElementById('liveNowList');
     const msgEl = document.getElementById('liveNowClearFiltersMsg');
     const sortSelect = document.getElementById('liveNowSortSelect');
@@ -5443,6 +5558,8 @@
     // in <style>, same mechanism as #radioBrowsePanel) - above that width
     // this stays the normal side drawer, unchanged.
     if (isMobileHeaderBreakpoint()) document.body.classList.add('mobile-livenow-open');
+    // Always opens in the default state: controls showing, scrolled to top.
+    document.getElementById('liveNowScrollArea').scrollTop = 0;
     renderLiveNowList();
   }
   function closeLiveNowPanel() {
@@ -5504,6 +5621,86 @@
   document.getElementById('liveNowSortSelect').addEventListener('change', function(e) {
     liveNowSortMode = e.target.value;
     renderLiveNowList();
+  });
+
+  // ---- Scroll-away controls (Live Now pane) ----
+  //
+  // The Sort row, language selector, filter checkboxes and "Showing X of Y"
+  // message are the first thing INSIDE #liveNowScrollArea, so they simply
+  // scroll up and out with the list - maximum room for the list - and are
+  // back the moment the visitor scrolls to the top. Two small touches make
+  // it feel finished rather than abrupt:
+  //   1. updateLiveNowControlsFade(): the controls fade out (and drift up
+  //      slightly) in step with the scroll position - scroll-linked, so it
+  //      follows the finger and reverses by itself on the way back up.
+  //   2. updateLiveNowSummaryStrip(): once the controls are out of view, IF
+  //      the sort/language/filters are not on their defaults, a thin strip
+  //      fades in at the top saying what's active ("Showing 3 of 96 ·
+  //      Español · Favorites · Sort: View count"), so a visitor can't
+  //      forget a filter that is hiding streams. Tapping the text scrolls
+  //      back up to the controls; "Clear" is the same as "Clear all
+  //      filters". With everything on defaults the strip never appears.
+  // Because the controls scroll with the content (rather than collapsing
+  // the area they live in), nothing resizes under the visitor's finger, so
+  // there is no scroll jitter or flicker to guard against.
+  function liveNowPrefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function updateLiveNowSummaryStrip() {
+    const textBtn = document.getElementById('liveNowSummaryText');
+    const clearBtn = document.getElementById('liveNowSummaryClear');
+    if (!textBtn || !clearBtn) return;
+    const parts = [];
+    const total = liveStatusData.live.length;
+    const visibleCount = total ? getOrderedLiveList().filter(liveEntryPassesFilter).length : 0;
+    const filtersActive = liveNowLanguageMode !== 'all' || featuredFilterActive || favoritesFilterActive;
+    if (total && visibleCount < total) parts.push('Showing ' + visibleCount + ' of ' + total);
+    if (liveNowLanguageMode !== 'all') parts.push(LIVENOW_LANGUAGE_LABELS[liveNowLanguageMode]);
+    if (featuredFilterActive) parts.push('Featured');
+    if (favoritesFilterActive) parts.push('Favorites');
+    if (liveNowSortMode !== 'freshest') {
+      const sel = document.getElementById('liveNowSortSelect');
+      const opt = sel && sel.options[sel.selectedIndex];
+      if (opt) parts.push('Sort: ' + opt.text);
+    }
+    liveNowSummaryHasContent = parts.length > 0;
+    textBtn.textContent = parts.join(' · ');
+    clearBtn.style.display = filtersActive ? '' : 'none';
+  }
+
+  function updateLiveNowControlsFade() {
+    const area = document.getElementById('liveNowScrollArea');
+    const controls = document.getElementById('liveNowControls');
+    const strip = document.getElementById('liveNowSummaryStrip');
+    if (!area || !controls || !strip) return;
+    const height = controls.offsetHeight; // 0 while the pane is closed
+    const scrolled = area.scrollTop;
+    const fadeDistance = height * 0.7;
+    const progress = fadeDistance > 0 ? Math.min(1, Math.max(0, scrolled / fadeDistance)) : 0;
+    controls.style.opacity = progress === 0 ? '' : String(1 - progress);
+    controls.style.transform = (progress === 0 || liveNowPrefersReducedMotion())
+      ? '' : 'translateY(' + (-8 * progress).toFixed(1) + 'px)';
+    const controlsOutOfView = fadeDistance > 0 && scrolled >= fadeDistance;
+    strip.classList.toggle('is-visible', liveNowSummaryHasContent && controlsOutOfView);
+  }
+
+  document.getElementById('liveNowScrollArea').addEventListener('scroll', function() {
+    if (liveNowFadeRaf !== null) return;
+    liveNowFadeRaf = requestAnimationFrame(function() {
+      liveNowFadeRaf = null;
+      updateLiveNowControlsFade();
+    });
+  }, { passive: true });
+  window.addEventListener('resize', updateLiveNowControlsFade);
+  document.getElementById('liveNowSummaryText').addEventListener('click', function() {
+    document.getElementById('liveNowScrollArea').scrollTo({
+      top: 0,
+      behavior: liveNowPrefersReducedMotion() ? 'auto' : 'smooth'
+    });
+  });
+  document.getElementById('liveNowSummaryClear').addEventListener('click', function() {
+    clearLiveNowFilters();
   });
 
   // ---- Live Check Debug panel (admin-only) ----
@@ -6875,8 +7072,11 @@
     }
   });
 
-  document.getElementById('liveNowClearFiltersMsg').addEventListener('click', function(e) {
-    if (!e.target.closest('#liveNowClearFiltersLink')) return;
+  // "Clear all filters": Featured, Favorites and language. Shared by the
+  // "Showing X of Y" message's link and the pinned summary strip's Clear
+  // button. Deliberately leaves Sort and "Show only live churches on the
+  // map" alone, exactly as before.
+  function clearLiveNowFilters() {
     featuredFilterActive = false;
     favoritesFilterActive = false;
     saveBoolFlag(LIVENOW_FEATURED_FILTER_KEY, false);
@@ -6886,6 +7086,10 @@
     setLanguageChoice('all');
     renderLiveNowList();
     renderMarkers();
+  }
+  document.getElementById('liveNowClearFiltersMsg').addEventListener('click', function(e) {
+    if (!e.target.closest('#liveNowClearFiltersLink')) return;
+    clearLiveNowFilters();
   });
 
   function getEffectiveChurches() {
