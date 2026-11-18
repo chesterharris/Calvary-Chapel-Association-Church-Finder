@@ -89,3 +89,4 @@ live-stream-detection-notes.md
 # Note: this only affects files git is not already tracking; tracked ones
 # must be removed once with: git rm --cached "*.md"
 *.md
+Radio-Ticker.md

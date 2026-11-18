@@ -212,3 +212,37 @@ This is the final, locked-in design for the listening interaction.
 - **Display**: new ticker row below Conferences ticker, same scroll speed, always scrolling (no static fallback).
 - **Interaction**: each ticker segment is clickable/tappable. Click launches a persistent bottom mini-player bar (station name, current title/artist, play/pause, close ✕). Clicking a different segment while the bar is open swaps the active station. No side panel involved anywhere in this feature.
 - **Extensibility**: config-driven station array; future non-SecureNetSystems stations (streamon.fm, Live365, etc.) will need a `provider`-keyed parser registry, normalizing everything to `{ title, artist }` before it reaches the ticker/render logic — not yet needed since no such station exists yet, but the data shape should anticipate it from the start.
+
+## Radio Stations pane: instructions scroll away (2026-11-18)
+
+(The Radio Stations pane = `#radioBrowsePanel`, opened from the Radio button;
+NOT the mobile Station Picker.) Same treatment as the Live Now pane's controls
+(see section 11 of `live-stream-detection-notes.md`), on desktop and phone.
+
+- The search box and the "N in your ticker" count stay pinned at the top.
+- "Tap station to Listen. Tap star to add or remove..." and the "New here? Add a
+  starter set..." link (plus its "Add to my list / Replace my list / Cancel"
+  prompt and confirmation message) are now the first thing INSIDE the scroll
+  area (`#radioBrowseScrollArea` > `#radioBrowseIntro`), above the list. They
+  fade and drift up in step with the scroll position
+  (`updateRadioBrowseIntroFade()`, scroll-linked, reverses by itself) and are
+  back when the visitor scrolls to the top. Opening the pane always starts at
+  the top.
+- While a search is active (anything typed in the box) the whole block collapses
+  and fades out (grid-rows 1fr -> 0fr over 0.25s) to give the results all the
+  room, and returns when the search is cleared (`updateRadioBrowseIntroState()`).
+  A new/cleared query also resets the list to the top.
+- Starter prompts/confirmation live with the instructions and scroll away with
+  them (Larry's choice); they only appear right after tapping the link at the
+  top, so the visitor is already looking at that spot.
+- Nothing extra to bring the tips back: scroll to the top (Larry's choice).
+- With reduced motion: no drift, no collapse animation (opacity only).
+- Code: `public/index.html` only. `renderRadioBrowsePanel()` is now a thin
+  wrapper around `renderRadioBrowsePanelBody()` (the old body, unchanged) plus
+  `updateRadioBrowseIntroState()`, so every existing caller is unchanged. The
+  scroll moved from `.radio-browse-list` to the new `.radio-browse-scroll-area`;
+  starring a station while scrolled keeps the scroll position (tested).
+- Tested (scratch Playwright, 45 fake stations): desktop, phone width,
+  reduced motion; default, mid-fade, scrolled, search on/off, no-match search,
+  starter link with and without favorites, reopen resets to top, star tap
+  keeps scroll. No page errors.

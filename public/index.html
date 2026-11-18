@@ -1651,10 +1651,39 @@
     font-weight: 700;
     white-space: nowrap;
   }
-  .radio-browse-list {
+  /* The one scrolling region (search box + favorites count stay pinned
+     above it). Holds the instructions block and the list. */
+  .radio-browse-scroll-area {
     flex: 1;
     overflow-y: auto;
+  }
+  .radio-browse-list {
     padding: 6px 16px;
+  }
+  /* Instructions block. Outer element collapses (grid rows 1fr -> 0fr) and
+     fades while a search is active; the inner element carries the
+     scroll-linked fade/drift (inline styles set by
+     updateRadioBrowseIntroFade()). Two elements so the two effects never
+     fight over the same opacity. */
+  .radio-browse-intro {
+    display: grid;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transition: grid-template-rows 0.25s ease, opacity 0.2s ease;
+  }
+  .radio-browse-intro.is-collapsed {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .radio-browse-intro-inner {
+    min-height: 0;
+    overflow: hidden;
+    will-change: opacity, transform;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .radio-browse-intro { transition: none; }
+    .radio-browse-intro-inner { will-change: auto; }
   }
   .radio-browse-row {
     display: flex;
@@ -4166,20 +4195,35 @@
     </div>
     <span id="radioBrowseFavCount" class="radio-browse-fav-count"></span>
   </div>
-  <div class="radio-browse-help-text">Tap station to Listen. Tap ★ to add or remove it from your home page ticker.</div>
-  <div class="radio-browse-starter-row">
-    <a href="#" id="radioBrowseStarterLink" class="radio-browse-starter-link">New here? Add a starter set of stations to your ticker - swap any of them out later.</a>
-  </div>
-  <div id="radioBrowseStarterConfirm" class="radio-browse-starter-confirm" style="display:none;">
-    <span>You already have favorites - what would you like to do?</span>
-    <div class="radio-browse-starter-confirm-btns">
-      <button type="button" id="radioBrowseStarterMerge" class="btn btn-outline btn-small">Add to my list</button>
-      <button type="button" id="radioBrowseStarterReplace" class="btn btn-ember btn-small">Replace my list</button>
-      <button type="button" id="radioBrowseStarterCancel" class="radio-browse-starter-cancel">Cancel</button>
+  <!-- Single scroll area (the search box + favorites count above stay
+       pinned). The instructions ("Tap station to Listen...", the "New here?"
+       starter link and its prompt/confirmation) are the first thing INSIDE
+       it, so they fade and roll up with the list as the visitor scrolls (see
+       updateRadioBrowseIntroFade()), come back at the top, and are hidden
+       entirely while a search is active (see updateRadioBrowseIntroState()).
+       The list itself is a plain child - renderRadioBrowsePanel() replaces
+       its innerHTML on every refresh, so nothing that must survive that
+       lives inside it. -->
+  <div id="radioBrowseScrollArea" class="radio-browse-scroll-area">
+    <div id="radioBrowseIntro" class="radio-browse-intro">
+      <div id="radioBrowseIntroInner" class="radio-browse-intro-inner">
+          <div class="radio-browse-help-text">Tap station to Listen. Tap ★ to add or remove it from your home page ticker.</div>
+          <div class="radio-browse-starter-row">
+            <a href="#" id="radioBrowseStarterLink" class="radio-browse-starter-link">New here? Add a starter set of stations to your ticker - swap any of them out later.</a>
+          </div>
+          <div id="radioBrowseStarterConfirm" class="radio-browse-starter-confirm" style="display:none;">
+            <span>You already have favorites - what would you like to do?</span>
+            <div class="radio-browse-starter-confirm-btns">
+              <button type="button" id="radioBrowseStarterMerge" class="btn btn-outline btn-small">Add to my list</button>
+              <button type="button" id="radioBrowseStarterReplace" class="btn btn-ember btn-small">Replace my list</button>
+              <button type="button" id="radioBrowseStarterCancel" class="radio-browse-starter-cancel">Cancel</button>
+            </div>
+          </div>
+          <div id="radioBrowseStarterMsg" class="radio-browse-starter-msg" style="display:none;"></div>
+      </div>
     </div>
+    <div id="radioBrowseList" class="radio-browse-list"></div>
   </div>
-  <div id="radioBrowseStarterMsg" class="radio-browse-starter-msg" style="display:none;"></div>
-  <div id="radioBrowseList" class="radio-browse-list"></div>
 </div>
 
 <div id="liveDebugPanel" class="side-panel" style="display: none;">
@@ -10474,7 +10518,15 @@
 
   const RADIO_BROWSE_TITLE_ICON = '<img class="tower-img" src="/RadioTower.svg" alt="" width="13" height="20">';
 
+  // Public entry point (unchanged name, so every existing caller keeps
+  // working): draws the list, then syncs the instructions block with the
+  // current search and scroll position.
   function renderRadioBrowsePanel() {
+    renderRadioBrowsePanelBody();
+    updateRadioBrowseIntroState();
+  }
+
+  function renderRadioBrowsePanelBody() {
     const listEl = document.getElementById('radioBrowseList');
     const favCountEl = document.getElementById('radioBrowseFavCount');
     const titleEl = document.getElementById('radioBrowseTitle');
@@ -10562,6 +10614,9 @@
     // visibility in sync with whatever query is still sitting there,
     // rather than only reacting to new typing.
     document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
+    // Always opens at the top, so the instructions are showing (unless a
+    // search is still sitting in the box - see updateRadioBrowseIntroState).
+    document.getElementById('radioBrowseScrollArea').scrollTop = 0;
     renderRadioBrowsePanel();
   }
 
@@ -10580,6 +10635,8 @@
   document.getElementById('radioBrowseSearch').addEventListener('input', function(e) {
     radioBrowseSearchQuery = e.target.value;
     document.getElementById('radioBrowseSearchClear').style.display = radioBrowseSearchQuery ? '' : 'none';
+    // A new query means a new result list - start it from the top.
+    document.getElementById('radioBrowseScrollArea').scrollTop = 0;
     renderRadioBrowsePanel();
   });
   document.getElementById('radioBrowseSearchClear').addEventListener('click', function() {
@@ -10587,9 +10644,57 @@
     radioBrowseSearchQuery = '';
     input.value = '';
     this.style.display = 'none';
+    document.getElementById('radioBrowseScrollArea').scrollTop = 0;
     renderRadioBrowsePanel();
     input.focus();
   });
+
+  // ---- Scroll-away instructions (Radio Stations pane) ----
+  //
+  // Same treatment as the Live Now pane's controls (see section 11 of
+  // live-stream-detection-notes.md): the instructions block is the first
+  // thing INSIDE the scroll area, so it scrolls up and away with the list,
+  // fading and drifting up in step with the scroll position (scroll-linked,
+  // so it follows the finger and reverses by itself), and is back when the
+  // visitor scrolls to the top. The search box and favorites count are
+  // outside the scroll area and never move. Nothing resizes under the
+  // visitor's finger while scrolling, so no jitter to guard against.
+  // Extra rule: while a search is active the whole block collapses and fades
+  // out (more room for results) and returns when the search is cleared.
+  function radioBrowsePrefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  let radioBrowseFadeRaf = null;
+
+  function updateRadioBrowseIntroFade() {
+    const area = document.getElementById('radioBrowseScrollArea');
+    const inner = document.getElementById('radioBrowseIntroInner');
+    if (!area || !inner) return;
+    const searching = radioBrowseSearchQuery.trim() !== '';
+    const height = searching ? 0 : inner.offsetHeight; // 0 while closed or searching
+    const fadeDistance = height * 0.7;
+    const progress = fadeDistance > 0 ? Math.min(1, Math.max(0, area.scrollTop / fadeDistance)) : 0;
+    inner.style.opacity = progress === 0 ? '' : String(1 - progress);
+    inner.style.transform = (progress === 0 || radioBrowsePrefersReducedMotion())
+      ? '' : 'translateY(' + (-8 * progress).toFixed(1) + 'px)';
+  }
+
+  function updateRadioBrowseIntroState() {
+    const intro = document.getElementById('radioBrowseIntro');
+    if (!intro) return;
+    intro.classList.toggle('is-collapsed', radioBrowseSearchQuery.trim() !== '');
+    updateRadioBrowseIntroFade();
+  }
+
+  document.getElementById('radioBrowseScrollArea').addEventListener('scroll', function() {
+    if (radioBrowseFadeRaf !== null) return;
+    radioBrowseFadeRaf = requestAnimationFrame(function() {
+      radioBrowseFadeRaf = null;
+      updateRadioBrowseIntroFade();
+    });
+  }, { passive: true });
+  window.addEventListener('resize', updateRadioBrowseIntroFade);
   document.getElementById('radioBrowseList').addEventListener('click', function(e) {
     if (e.target.closest('.radio-browse-homepage-link')) {
       // Let the link's own navigation happen - clicking "Station website"
