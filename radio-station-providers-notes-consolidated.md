@@ -1894,6 +1894,49 @@ Network tab. Not yet independently confirmed as actual audio playback
 once embedded on the deployed map page - per the standard checklist, test
 real playback on the deployed site before considering this fully proven.
 
+**UPDATE 2026-11-18 - Reach Radio rebuilt their site and moved both feeds
+(Now Playing had gone blank on our site).** Symptom: `/radio-now-playing`
+showed `error: "Station Reach Radio stream-info-sse returned 204"` with no
+title/artist. Cause: the site was rebuilt (Next.js, Sanity CDN images) and
+the old Astro/Unpoly endpoints stopped working. What changed, all found via
+the live site's own Network tab and a same-origin fetch in Chrome:
+
+- Now-playing feed: was `https://reach.radio/api/stream-info-sse` (now an
+  empty 204). Now `https://stream.reach.radio/api/stream-info-sse` (200,
+  `text/event-stream`). First event:
+  `event: time-update` / `id: 1` / `data: {"title":"WASHED (Radio edit)",
+  "artist":"ELEVATION RHYTHM","imageUrl":null,"resolvedArtist":null}`.
+  Two new fields: `imageUrl` (null for the music seen; used as the cover
+  when it is an https URL) and `resolvedArtist` (always null so far; used
+  only as a second name to match against the roster). Title/artist read the
+  same as before, so the reader code is otherwise unchanged. Both the title
+  and artist can come through in ALL CAPS for music - that is how the
+  station sends them, not a bug on our side.
+- Teacher photo roster: was the HTML fragment `/scheduled-list` (entity-
+  encoded JSON in an `up-data` attribute). Now plain JSON at
+  `https://reach.radio/api/teachers-list`: a flat array of
+  `{"name": ..., "photo": ...}` (22 entries when checked). The HTML/entity
+  parsing code (`parseReachRadioScheduleHtml`, `decodeReachRadioHtmlEntities`)
+  was removed; `parseReachRadioTeachersJson` replaces it. The `scheduleUrl`
+  field on the station entry still holds the roster address (name kept so
+  nothing else changes).
+- Audio: `https://reach.radio/api/audio-stream` was re-tested in the
+  browser the same day and still loads, so `streamUrl` is UNCHANGED. The
+  site's own player now uses `https://stream.reach.radio/` instead - if the
+  Listen button ever stops working for Reach Radio, try that address.
+- A 204 from the feed now produces a specific error ("returned 204 (no
+  content - the feed address may have moved again)") so a future move is
+  obvious in the production `/radio-now-playing` output. Lesson: when a
+  station's Now Playing disappears, check `/radio-now-playing` for that
+  station's `error` first, then open the station's own site with the
+  browser Network tab and compare addresses.
+- Cover preference order: feed `imageUrl`, then roster photo matched on
+  `artist`, then roster photo matched on `resolvedArtist`.
+- Tested with a mocked feed (music, teacher match, feed image, resolved-
+  artist match, roster failure, 204). Real-world confirmation still needs
+  the deployed site: after deploying, `/radio-now-playing` should show the
+  current Reach Radio title/artist with `error: null`.
+
 **Stations currently configured:** Reach Radio (Tucson, AZ).
 
 ---

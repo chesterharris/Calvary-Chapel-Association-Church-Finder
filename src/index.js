@@ -5089,13 +5089,12 @@ const RADIO_STATIONS = [
     // schedule at the same moment (next up: "Turning Point" / Dr. David
     // Jeremiah, 4:30-5:00 PM) - not a stale placeholder.
     //
-    // scheduleUrl (/scheduled-list) is a SECOND, separate endpoint - added
-    // after Larry noticed the site shows a per-program photo and asked
-    // where it was coming from. It isn't in the SSE payload at all; reading
-    // the site's own bundled JS showed it name-matches the live artist
-    // against a roster fetched from this endpoint. See
-    // fetchReachRadioTeacherRoster/parseReachRadioScheduleHtml for the full
-    // writeup.
+    // scheduleUrl is a SECOND, separate endpoint (the teacher roster, used
+    // only for the per-program photo) - added after Larry noticed the site
+    // shows a photo and asked where it was coming from. It isn't in the SSE
+    // payload; the site's own JS name-matches the live artist against this
+    // roster. See fetchReachRadioTeacherRoster for the full writeup. (Was
+    // /scheduled-list until the 2026-11 site rebuild - now /api/teachers-list.)
     //
     // streamUrl is Larry's own supplied direct stream URL
     // (reach.radio/api/audio-stream) - already HTTPS, same domain as the
@@ -5109,8 +5108,15 @@ const RADIO_STATIONS = [
     cityState: 'Tucson, AZ',
     homePage: 'https://reach.radio/',
     provider: 'reachradio',
-    nowPlayingUrl: 'https://reach.radio/api/stream-info-sse',
-    scheduleUrl: 'https://reach.radio/scheduled-list',
+    // UPDATED 2026-11-18: Reach Radio rebuilt their site (Next.js) and moved
+    // both feeds. The old reach.radio/api/stream-info-sse now answers an
+    // empty 204 and the old /scheduled-list fragment is gone from the page's
+    // own traffic - Now Playing silently went blank on our site. The new
+    // locations below were read from the rebuilt site's own Network tab.
+    // streamUrl (reach.radio/api/audio-stream) was re-tested in the browser
+    // on the same day and still plays, so it is deliberately unchanged.
+    nowPlayingUrl: 'https://stream.reach.radio/api/stream-info-sse',
+    scheduleUrl: 'https://reach.radio/api/teachers-list',
     streamUrl: 'https://reach.radio/api/audio-stream'
   },
   {
@@ -6101,6 +6107,12 @@ const REACHRADIO_SCHEDULE_TIMEOUT_MS = 6000;
 // WebSocket.
 async function fetchReachRadioSseNowPlaying(station) {
   const res = await fetch(station.nowPlayingUrl);
+  // 204 counts as "ok" to fetch but carries no body - that is exactly what
+  // the retired reach.radio/api/stream-info-sse address started returning
+  // after the 2026-11 site rebuild, so call it out by name in the error.
+  if (res.status === 204) {
+    throw new Error('Station ' + station.displayName + ' stream-info-sse returned 204 (no content - the feed address may have moved again)');
+  }
   if (!res.ok || !res.body) {
     throw new Error('Station ' + station.displayName + ' stream-info-sse returned ' + res.status);
   }
@@ -6140,9 +6152,14 @@ async function fetchReachRadioSseNowPlaying(station) {
 
           clearTimeout(timeout);
           reader.cancel();
+          // The rebuilt site's event also carries imageUrl (null for most
+          // music; a real URL when the feed supplies art) and resolvedArtist
+          // (null in everything seen so far). Both are optional extras.
           resolve({
             title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
-            artist: typeof parsed.artist === 'string' ? parsed.artist.trim() : ''
+            artist: typeof parsed.artist === 'string' ? parsed.artist.trim() : '',
+            imageUrl: typeof parsed.imageUrl === 'string' && /^https:\/\//i.test(parsed.imageUrl.trim()) ? parsed.imageUrl.trim() : null,
+            resolvedArtist: typeof parsed.resolvedArtist === 'string' ? parsed.resolvedArtist.trim() : ''
           });
           return;
         }
@@ -6161,51 +6178,24 @@ async function fetchReachRadioSseNowPlaying(station) {
   });
 }
 
-// Decodes just the handful of HTML entities that can appear inside an
-// HTML-attribute-encoded JSON blob (see parseReachRadioScheduleHtml below)
-// - not a general-purpose HTML entity decoder, only what's needed to get
-// back valid JSON text: quotes, ampersands (real names like "Scott & Sean
-// Richards" need this), apostrophes, angle brackets, and any other
-// numeric entity.
-function decodeReachRadioHtmlEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&#34;|&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, '\'')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#(\d+);/g, function(_, code) { return String.fromCharCode(parseInt(code, 10)); });
-}
-
-// Reach Radio's cover art doesn't come through the SSE feed at all - the
-// site's own bundled JS confirms it's resolved from a SECOND, completely
-// separate endpoint. Reading their MediaBarContainer script directly
-// showed the mechanism: whenever the SSE pushes a new host name, the
-// client looks it up against a locally-cached teacher roster
-// (window.globalState.mediaBarState.teachersList().find(t =>
-// t.name.toLowerCase().includes(...))) to resolve a photo - it's a
-// name-matched local lookup, never a live "art" field.
+// Reach Radio's cover art doesn't come through the SSE feed for most
+// programs - the site's own bundled JS resolves it by looking the live
+// "artist" up in a teacher roster (a name-matched local lookup, never a
+// live "art" field).
 //
-// That roster comes from GET /scheduled-list - a normal (non-streaming)
-// request this Unpoly-based site's own frontend makes for its schedule
-// list UI. It returns an HTML fragment whose root element carries the
-// actual data as an HTML-attribute-encoded JSON blob, confirmed via a
-// real, live fetch:
-//   <div id="scheduled-list" up-data="{&#34;todayScheduleWithMusicBreaks&#34;:
-//   [{&#34;name&#34;:&#34;Tony Clark&#34;,&#34;title&#34;:&#34;The Word Made
-//   Plain&#34;,&#34;photo&#34;:&#34;https://cdn.sanity.io/...jpg&#34;,
-//   &#34;slug&#34;:&#34;tony-clark&#34;,&#34;time&#34;:&#34;5:00 AM - 5:30
-//   AM&#34;,&#34;startTime&#34;:&#34;5:00 AM&#34;,&#34;endTime&#34;:&#34;5:30
-//   AM&#34;},...],&#34;allTeachers&#34;:[...]}">
-// `allTeachers` (not `todayScheduleWithMusicBreaks`) is the deduped
-// name+photo roster - matches what the site's own JS reads from, so we
-// read the same one.
-function parseReachRadioScheduleHtml(html) {
-  const attrMatch = html.match(/id="scheduled-list"[^>]*\bup-data="([^"]*)"/);
-  if (!attrMatch) return null;
-
-  const data = tryParseJson(decodeReachRadioHtmlEntities(attrMatch[1]));
-  return data && Array.isArray(data.allTeachers) ? data.allTeachers : null;
+// UPDATED 2026-11-18: the rebuilt site serves that roster as plain JSON at
+// GET /api/teachers-list - a flat array of {name, photo} objects, e.g.
+//   [{"name":"Dr. David Jeremiah","photo":"https://cdn.sanity.io/...jpg"}, ...]
+// (22 entries when checked). This replaces the old /scheduled-list HTML
+// fragment whose up-data attribute had to be entity-decoded; that parsing
+// code is gone because nothing calls it any more.
+function parseReachRadioTeachersJson(text) {
+  const data = tryParseJson(text);
+  if (!Array.isArray(data)) return null;
+  const teachers = data.filter(function(t) {
+    return t && typeof t.name === 'string' && t.name.trim();
+  });
+  return teachers.length ? teachers : null;
 }
 
 // Same bidirectional, case-insensitive substring match the site's own JS
@@ -6227,18 +6217,10 @@ async function fetchReachRadioTeacherRoster(station) {
   const controller = new AbortController();
   const timeout = setTimeout(function() { controller.abort(); }, REACHRADIO_SCHEDULE_TIMEOUT_MS);
   try {
-    // X-Up-Target makes this Unpoly-based site return just the fragment
-    // (confirmed smaller/faster than a full page load) rather than a
-    // whole HTML document - not required for parseReachRadioScheduleHtml's
-    // regex to find the div either way, just a courtesy to their server.
-    const res = await fetch(station.scheduleUrl, {
-      signal: controller.signal,
-      headers: { 'X-Up-Target': '#scheduled-list' }
-    });
-    if (!res.ok) throw new Error('Station ' + station.displayName + ' scheduled-list returned ' + res.status);
-    const html = await res.text();
-    const teachers = parseReachRadioScheduleHtml(html);
-    if (!teachers) throw new Error('Station ' + station.displayName + ' scheduled-list had no parseable roster');
+    const res = await fetch(station.scheduleUrl, { signal: controller.signal });
+    if (!res.ok) throw new Error('Station ' + station.displayName + ' teachers-list returned ' + res.status);
+    const teachers = parseReachRadioTeachersJson(await res.text());
+    if (!teachers) throw new Error('Station ' + station.displayName + ' teachers-list had no parseable roster');
     return teachers;
   } finally {
     clearTimeout(timeout);
@@ -6246,12 +6228,14 @@ async function fetchReachRadioTeacherRoster(station) {
 }
 
 // Combines both of the above: the SSE feed for the live title/artist text,
-// and the /scheduled-list roster for a matching photo - two independent
+// and the teachers-list roster for a matching photo - two independent
 // fetches run concurrently, then the match happens locally once both are
 // in. The roster fetch is treated as a nice-to-have exactly like
 // triton's iTunes lookup and citrus3's albumCover call elsewhere in this
 // file - if it fails or comes back unparseable, that's a missing photo,
-// not a failed now-playing result.
+// not a failed now-playing result. Cover preference: an image the feed
+// itself supplies (imageUrl) first, then the roster photo matched on the
+// artist, then on resolvedArtist if the feed ever fills that in.
 async function fetchReachRadioNowPlaying(station) {
   const results = await Promise.all([
     fetchReachRadioSseNowPlaying(station),
@@ -6260,9 +6244,10 @@ async function fetchReachRadioNowPlaying(station) {
   const nowPlaying = results[0];
   const teachers = results[1];
 
-  let coverUrl = null;
-  if (teachers && nowPlaying.artist) {
-    coverUrl = findReachRadioTeacherPhoto(teachers, nowPlaying.artist);
+  let coverUrl = nowPlaying.imageUrl || null;
+  if (!coverUrl && teachers) {
+    if (nowPlaying.artist) coverUrl = findReachRadioTeacherPhoto(teachers, nowPlaying.artist);
+    if (!coverUrl && nowPlaying.resolvedArtist) coverUrl = findReachRadioTeacherPhoto(teachers, nowPlaying.resolvedArtist);
   }
 
   return { title: nowPlaying.title, artist: nowPlaying.artist, coverUrl: coverUrl };
