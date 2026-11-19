@@ -678,3 +678,51 @@ mock live-status/churches):** desktop and phone width; default state;
 mid-fade; fully scrolled with defaults (no strip); non-default sort (strip);
 Featured filter (strip with count + Clear); tap-to-top; Clear; 2 live streams;
 reduced-motion. No page errors.
+
+
+## 12. Video pop-up: "couldn't load" safety net (2026-11-19)
+
+**Report.** Larry saw Live Now streams open as black boxes that never played.
+Browser console showed "Expected value to be of type number, but found null
+instead" (from a blob worker on our own address).
+
+**What we found.**
+- On the live site, in a separate Chrome session, every stream tried played
+  normally (Knoxville, Houston, San Antonio, Elk Grove), with the latest
+  deployed code. So the site itself was fine; the cause was on Larry's machine
+  (a browser extension, a work/network web filter, or a browser setting that
+  stops YouTube's embedded player).
+- That console message is a MapLibre (map drawing library) style warning: the
+  code in the screenshot is MapLibre's expression evaluator running in its
+  worker. It is harmless and unrelated to video. NOTE: the older comment above
+  `createLightboxPlayer` in index.html attributes this same message to the
+  YouTube player; that attribution was most likely wrong (the fix described
+  there - building the player only once the overlay is visible - is still
+  sound and was left in place).
+
+**The gap.** If YouTube's player is blocked, the lightbox used to be just a
+black box with nothing to click.
+
+**The fix (public/index.html only).** A watchdog on the lightbox:
+- `YT.Player` now also gets an `onReady` handler. If it hasn't fired 8 seconds
+  after the lightbox opens (`LIGHTBOX_READY_TIMEOUT_MS`), a message appears
+  over the black area: "This video couldn't load inside the page..." with a
+  real "Watch on YouTube" link (watch link for a video, playlist link for the
+  Featured Video banner).
+- The `iframe_api` script tag has an `onerror` hook: if YouTube's API script is
+  blocked outright, the same message appears immediately.
+- Once the player has reported ready once, later opens don't start the timer.
+- Closing the lightbox clears the timer and hides the message.
+- It is a real link, not `window.open` from a timer, so pop-up blockers can't
+  swallow it. YouTube's own embed-disabled errors (100/101/150) still use the
+  existing `handleLightboxPlayerError` fallback, unchanged.
+
+**Tested (scratch Playwright harness, fake YouTube API):** script blocked ->
+message immediately with the right link; player ready -> never shows (also on
+reopen); player silent -> hidden at 3s, shown at 9s, hidden on close, shown
+again on a later open; Live Now card click path. No page errors.
+
+**Not diagnosed.** Which specific thing on Larry's machine blocks the player is
+unknown. First tries: restart the browser; open the same stream in a private
+window (extensions off); open the stream's YouTube page directly; try another
+network or phone.

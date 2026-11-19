@@ -773,6 +773,41 @@
     height: 100%;
     border: 0;
   }
+  /* "Video didn't load" safety net - shown over the player area only when
+     the YouTube player never reports ready (see the watchdog next to
+     createLightboxPlayer below). Without it a viewer whose browser,
+     network or extension blocks YouTube's embedded player just stares at
+     a silent black box. A real link (not window.open from a timer) so
+     pop-up blockers can't swallow it. */
+  .video-lightbox-fallback {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 20px;
+    background: #000;
+    color: var(--paper);
+    text-align: center;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .video-lightbox-fallback a {
+    display: inline-block;
+    padding: 10px 18px;
+    border-radius: 4px;
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .video-lightbox-fallback a:hover {
+    background: var(--line);
+  }
   /* videoLightboxCloseBtn also carries the shared .btn-close class (used
      for other panels' close buttons elsewhere in this file). That rule
      - defined later below - sets background:none/border:none, and at
@@ -3902,6 +3937,10 @@
     </div>
     <div class="video-lightbox-video-area">
       <div id="videoLightboxPlayer"></div>
+      <div id="videoLightboxFallback" class="video-lightbox-fallback" role="status">
+        <div>This video couldn't load inside the page. Your browser or network may be blocking YouTube's player.</div>
+        <a id="videoLightboxFallbackLink" href="https://www.youtube.com/" target="_blank" rel="noopener">Watch on YouTube</a>
+      </div>
     </div>
   </div>
 </div>
@@ -4304,7 +4343,7 @@
      (see openLiveVideoLightbox()/onYouTubeIframeAPIReady() below). Loads
      asynchronously and calls the global onYouTubeIframeAPIReady() itself
      once ready - that's a contract of this API, not a name we chose. -->
-<script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://www.youtube.com/iframe_api" onerror="window.ytApiLoadFailed = true; if (window.onYouTubeApiLoadFailed) window.onYouTubeApiLoadFailed();"></script>
 <script>
   let churches = []; // populated by loadChurchesFromServer() at startup
   let liveChurchIds = new Set(); // ids of churches currently live, from the latest live-status check
@@ -7227,6 +7266,79 @@
     }
   }
 
+  // ---- "Video never loaded" watchdog (added 2026-11-19) ----
+  // Larry reported Live Now streams opening as black boxes that never
+  // played, on his own machine only (the same streams played fine in a
+  // separate browser on the live site). That pattern means YouTube's
+  // player was blocked locally (extension, network/web filter, browser
+  // setting) - and until now that left a silent black box with nothing to
+  // click. The player's onReady event only fires when YouTube's iframe
+  // actually loaded and answered, so if it hasn't fired a few seconds
+  // after the lightbox opens, show a plain message and a real
+  // "Watch on YouTube" link instead. YouTube's own error codes (101/150
+  // embedding disabled) are still handled by handleLightboxPlayerError
+  // above and are unaffected.
+  const LIGHTBOX_READY_TIMEOUT_MS = 8000;
+  let lightboxPlayerReady = false;
+  let lightboxReadyTimer = null;
+
+  function hideLightboxFallback() {
+    const el = document.getElementById('videoLightboxFallback');
+    if (el) el.style.display = 'none';
+  }
+
+  function showLightboxFallback() {
+    const overlay = document.getElementById('videoLightboxOverlay');
+    if (!overlay || overlay.style.display === 'none') return;
+    const link = document.getElementById('videoLightboxFallbackLink');
+    if (currentLightboxPlaylistId) {
+      link.href = 'https://www.youtube.com/playlist?list=' + encodeURIComponent(currentLightboxPlaylistId);
+    } else if (currentLightboxVideoId) {
+      link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentLightboxVideoId);
+    } else {
+      link.href = 'https://www.youtube.com/';
+    }
+    document.getElementById('videoLightboxFallback').style.display = 'flex';
+  }
+
+  function clearLightboxReadyTimer() {
+    if (lightboxReadyTimer) {
+      clearTimeout(lightboxReadyTimer);
+      lightboxReadyTimer = null;
+    }
+  }
+
+  // Called on every lightbox open. Once the player has reported ready at
+  // least once there is nothing left to watch for (later opens just call
+  // loadVideoById on a known-good player).
+  function startLightboxReadyWatchdog() {
+    clearLightboxReadyTimer();
+    hideLightboxFallback();
+    if (lightboxPlayerReady) return;
+    if (window.ytApiLoadFailed) {
+      showLightboxFallback();
+      return;
+    }
+    lightboxReadyTimer = setTimeout(function() {
+      lightboxReadyTimer = null;
+      if (!lightboxPlayerReady) showLightboxFallback();
+    }, LIGHTBOX_READY_TIMEOUT_MS);
+  }
+
+  function handleLightboxPlayerReady() {
+    lightboxPlayerReady = true;
+    clearLightboxReadyTimer();
+    hideLightboxFallback();
+  }
+
+  // The IFrame API script itself failed to load (blocked outright) - if a
+  // lightbox is already open waiting on it, say so right away rather than
+  // after the full timeout.
+  window.onYouTubeApiLoadFailed = function() {
+    clearLightboxReadyTimer();
+    showLightboxFallback();
+  };
+
   // Builds the actual YT.Player instance - deliberately NOT called eagerly
   // from onYouTubeIframeAPIReady below. Confirmed in production (2026-09):
   // the IFrame API script calls that global callback itself as soon as
@@ -7259,7 +7371,7 @@
       width: '640',
       height: '360',
       playerVars: playerVars,
-      events: { onError: handleLightboxPlayerError }
+      events: { onError: handleLightboxPlayerError, onReady: handleLightboxPlayerReady }
     };
     if (playlistId) {
       playerVars.listType = 'playlist';
@@ -7311,6 +7423,7 @@
     lightboxTitleEl.textContent = lightboxTitleForChurch(churchId);
     currentLightboxVideoId = videoId || null;
     currentLightboxPlaylistId = playlistId || null;
+    startLightboxReadyWatchdog();
     if (!ytApiReady) {
       // IFrame API script hasn't finished loading yet (unusual, but
       // possible on a slow connection) - onYouTubeIframeAPIReady picks
@@ -7334,6 +7447,8 @@
   function closeVideoLightbox() {
     document.getElementById('videoLightboxOverlay').style.display = 'none';
     document.getElementById('videoLightboxTitle').textContent = '';
+    clearLightboxReadyTimer();
+    hideLightboxFallback();
     pendingLightboxVideoId = null;
     pendingLightboxPlaylistId = null;
     currentLightboxVideoId = null;
