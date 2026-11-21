@@ -246,3 +246,64 @@ NOT the mobile Station Picker.) Same treatment as the Live Now pane's controls
   reduced motion; default, mid-fade, scrolled, search on/off, no-match search,
   starter link with and without favorites, reopen resets to top, star tap
   keeps scroll. No page errors.
+
+
+## Station Picker (phones): hidden pull-down "find Chuck Smith / Sandy Adams" (2026-11-21)
+
+**What it is.** On the phone Station Picker (the "Station Picker" pane, not
+the Radio Stations pane), dragging a finger down from the very top of the list
+looks for stations whose live program is Chuck Smith and moves them to the top,
+under the Now Playing dock. Built for someone who can't type or scroll through
+60+ stations while driving. Nothing on screen advertises it (Larry's choice).
+
+**Decisions (all Larry's answers):**
+- Gesture: one finger, starts while the list is already at the very top, drags
+  mostly downward at least 70px, fires on release. No visible hint while
+  pulling. Any list scrolling during the touch cancels it, so normal scrolling
+  can't trigger it. The list has `overscroll-behavior-y: contain` so Chrome on
+  Android doesn't treat the drag as its own pull-to-refresh and reload the page.
+- Matching: exactly like the All Radio Stations search - the station's live
+  `title` or `artist` text contains the name, ignoring capitals. So
+  "Chuck Smith Jr." also counts (Larry accepted this).
+- Names are tried in order from `MP_PROMOTE_NAMES` (Chuck Smith, then Sandy
+  Adams). The first name with any station on wins; Sandy Adams is promoted only
+  when nobody is playing Chuck Smith. To change who gets searched, edit that
+  one list in index.html.
+- The playing station stays in the dock, unaffected. If it is itself playing the
+  winning name that still counts as "found" (so Sandy isn't promoted behind
+  it), but there is nothing to move, so you just get the bounce.
+- Promoted rows are ordered favorites first, then A-Z (the picker's own order),
+  and sit ahead of favorites and everything else.
+- Nothing found / nothing to move / same result as the last pull: a tiny
+  rubber-band bounce of the list only.
+- Found: gold "On now: <name>" label above the promoted rows, brass frames,
+  rows slide in, brief confetti burst (hand-drawn canvas, brand colors, about
+  2 seconds). Reduced-motion visitors get no confetti, bounce or slide.
+- Staying power: the promoted set is fixed at the moment of the pull. A
+  station drops out when its program stops matching (checked on each 60-second
+  refresh, because the picker re-renders then). A station that starts the
+  program later is NOT added until the visitor pulls down again. The whole
+  set is cleared when the picker closes or opens.
+
+**Where in the code.** `public/index.html`: `mpPromoted` state next to
+`mobilePickerFrozenOrder`; ordering in `getMobilePickerOrderedStations`;
+label/classes in `renderMobileRadioPicker` (which also calls
+`pruneMobilePickerPromoted`); `runMobilePickerPromote`,
+`launchMobilePickerConfetti`, `bounceMobilePickerList` and the touch listeners
+just above `loadRadioTicker();` at the end of the radio section; CSS under
+"Hidden pull-down" next to the `.mp-star` rules.
+
+**Tested (scratch Playwright, phone size, real touch events through the
+browser's own touch input, 40 fake stations):** two Chuck stations promoted in
+the right order with label and confetti; Sandy fallback; Chuck beats Sandy;
+neither -> bounce; a second identical pull -> bounce only, no repeat confetti;
+a promoted program ending drops that station on the next refresh while a new
+Chuck station is not added; all ended -> label disappears; pull again promotes
+the new one; close/reopen clears it; a short drag, a drag while scrolled down,
+and an upward swipe all do nothing; docked station playing Chuck (only one) ->
+bounce, Sandy not promoted; docked plus another Chuck station -> only the other
+is promoted. No page errors.
+
+**Not tested:** a real phone (iPhone Safari / Android Chrome). Worth trying on
+a real device after deploying: pull down from the top of the Station Picker
+while some station is playing a Chuck Smith program.

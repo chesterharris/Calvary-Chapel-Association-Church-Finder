@@ -2970,6 +2970,11 @@
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding: 12px 12px 24px;
+    /* The hidden pull-down gesture (see runMobilePickerPromote) starts with
+       a finger drag downward from the very top of this list. Without this,
+       Chrome on Android would treat that same drag as its own
+       pull-to-refresh and reload the whole page. */
+    overscroll-behavior-y: contain;
   }
   .mp-empty {
     padding: 40px 8px;
@@ -3079,6 +3084,48 @@
   }
   .mp-star.favorited { color: var(--brass); }
   .mp-star svg { width: 24px; height: 24px; }
+
+  /* ---- Hidden pull-down "find Chuck Smith / Sandy Adams" (phones) ----
+     See runMobilePickerPromote. Promoted stations sit at the top of the
+     list under a small brass "On now: <name>" label, with a brass frame so
+     they read as a group. The confetti canvas floats over the picker for
+     about two seconds and never intercepts a touch. */
+  .mp-promo-label {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--brass);
+    margin: 0 2px 8px;
+  }
+  .mp-row.mp-row-promoted { border-color: var(--brass); }
+  .mp-row.mp-row-promoted.mp-row-active { border-color: var(--evergreen); }
+  .mp-row.mp-row-promoted-last { margin-bottom: 24px; }
+  @keyframes mpPromoteIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .mp-row-promote-in { animation: mpPromoteIn 320ms cubic-bezier(0.22, 0.9, 0.3, 1); }
+  /* "Heard you, nothing to show" - a tiny rubber-band bounce of the list. */
+  @keyframes mpListBounce {
+    0%   { transform: translateY(0); }
+    35%  { transform: translateY(12px); }
+    70%  { transform: translateY(-3px); }
+    100% { transform: translateY(0); }
+  }
+  .mp-list.mp-list-bounce { animation: mpListBounce 320ms ease-out; }
+  .mp-confetti {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mp-row-promote-in, .mp-list.mp-list-bounce { animation: none; }
+  }
 
   /* ---- Mobile station picker "dock" ----
      Sits between .mp-topbar and .mp-list as a normal flex sibling (NOT an
@@ -10941,6 +10988,14 @@
 
   let mobilePickerFrozenOrder = null;
 
+  // Stations promoted to the top by the hidden pull-down (see
+  // runMobilePickerPromote below), or null. { name, ids } - fixed at the
+  // moment of the pull: stations can drop OUT of it (their program ended,
+  // see pruneMobilePickerPromoted) but a station that starts the program
+  // later is never added until the visitor pulls down again. Cleared
+  // whenever the picker closes or opens.
+  let mpPromoted = null;
+
   // Favorites first (A-Z), then everything else (A-Z) - same tiering as
   // the desktop "All Stations" panel. The currently-playing station is
   // NOT special-cased here; it's pulled to the very front separately in
@@ -10979,6 +11034,20 @@
     // of favorite status or its position in the frozen order.
     if (currentPlayingId && byId[currentPlayingId]) {
       ids = [currentPlayingId].concat(ids.filter(function(id) { return id !== currentPlayingId; }));
+    }
+    // Stations promoted by the hidden pull-down go right behind the
+    // playing station (which keeps leading, unaffected), ahead of favorites
+    // and everything else. Their own order is whatever it was when the
+    // pull happened (favorites first, then A-Z).
+    if (mpPromoted) {
+      const promoted = mpPromoted.ids.filter(function(id) { return byId[id] && id !== currentPlayingId; });
+      if (promoted.length) {
+        const promotedSet = {};
+        promoted.forEach(function(id) { promotedSet[id] = true; });
+        const lead = (currentPlayingId && byId[currentPlayingId]) ? [currentPlayingId] : [];
+        const others = ids.filter(function(id) { return id !== currentPlayingId && !promotedSet[id]; });
+        ids = lead.concat(promoted, others);
+      }
     }
     return ids.map(function(id) { return byId[id]; });
   }
@@ -11028,6 +11097,7 @@
       listEl.innerHTML = '<div class="mp-empty">Loading stations…</div>';
       return;
     }
+    pruneMobilePickerPromoted();
     const favorites = getFavoriteStationIds();
     const ordered = getMobilePickerOrderedStations();
     const byId = {};
@@ -11040,19 +11110,42 @@
       : '';
 
     const rest = dockedStation ? ordered.filter(function(s) { return s.id !== dockedStation.id; }) : ordered;
-    listEl.innerHTML = rest.map(function(s) {
-      const extra = (opts.returningStationId && s.id === opts.returningStationId) ? 'mp-row-entering' : '';
-      return buildMobilePickerRowHtml(s, favorites, extra);
+    // Promoted rows (hidden pull-down) get a brass frame, and a small
+    // "On now: <name>" label above the first one. The label only shows
+    // while at least one promoted station is actually still in the list
+    // (one that was tapped moves up to the dock instead).
+    const promotedSet = {};
+    if (mpPromoted) mpPromoted.ids.forEach(function(id) { promotedSet[id] = true; });
+    const promotedRows = rest.filter(function(s) { return promotedSet[s.id]; });
+    const lastPromotedId = promotedRows.length ? promotedRows[promotedRows.length - 1].id : null;
+    const promoLabel = promotedRows.length
+      ? '<div class="mp-promo-label">On now: ' + escapeHtml(mpPromoted.name) + '</div>'
+      : '';
+    listEl.innerHTML = promoLabel + rest.map(function(s) {
+      const classes = [];
+      if (opts.returningStationId && s.id === opts.returningStationId) classes.push('mp-row-entering');
+      if (promotedSet[s.id]) {
+        classes.push('mp-row-promoted');
+        if (s.id === lastPromotedId) classes.push('mp-row-promoted-last');
+        if (opts.promoteEntering) classes.push('mp-row-promote-in');
+      }
+      return buildMobilePickerRowHtml(s, favorites, classes.join(' '));
     }).join('');
   }
 
   function openMobileRadioPicker() {
     mobilePickerFrozenOrder = computeMobilePickerBaseOrder();
+    mpPromoted = null;
     renderMobileRadioPicker();
     document.body.classList.add('mobile-picker-open');
   }
 
   function closeMobileRadioPicker() {
+    mpPromoted = null;
+    // Drop any confetti still in flight so it can't be sitting there the
+    // next time the picker opens.
+    const strayConfetti = document.querySelector('#mobileRadioPicker .mp-confetti');
+    if (strayConfetti) strayConfetti.remove();
     document.body.classList.remove('mobile-picker-open');
     // The map (and possibly the mini-player, if a station was picked while
     // the picker was open) just became visible/changed size again - give
@@ -11365,6 +11458,182 @@
       renderMobileRadioPicker({ dockEntering: true, returningStationId: previousId });
     }, MOBILE_PICKER_DOCK_DELAY_MS);
   });
+
+  // ---- Hidden pull-down: "find Chuck Smith / Sandy Adams" (phones) ----
+  //
+  // On the phone Station Picker, dragging a finger down from the very top
+  // of the list (nothing visible, by design) looks for stations whose live
+  // program text mentions a priority name and moves them to the top, right
+  // below the Now Playing dock. Built for someone who can't type or scroll
+  // through 60+ stations while driving.
+  //
+  // Rules agreed with Larry:
+  //  * Names are tried in order; the first name with any station on now
+  //    wins and later names are ignored (Sandy Adams only if nobody is
+  //    playing Chuck Smith). To change who gets searched, edit this list.
+  //  * "On now" uses exactly what the All Radio Stations search uses: the
+  //    station's current title or artist/host text contains the name,
+  //    ignoring capitals (so "Chuck Smith Jr." counts too).
+  //  * The playing station stays in the dock, unaffected. If it is itself
+  //    playing the winning name, that still counts as "found" (so Sandy
+  //    Adams isn't promoted behind it), but there is nothing to move.
+  //  * Nothing found / nothing to move / same result as last time: only a
+  //    tiny bounce of the list, no other change.
+  //  * Found: brass "On now: <name>" label, rows slide in, confetti burst.
+  //  * Promoted stations stay until their program ends (they drop out on the
+  //    next 60-second refresh) or the picker closes. Stations that start the
+  //    program later are NOT added until the visitor pulls down again.
+  const MP_PROMOTE_NAMES = ['Chuck Smith', 'Sandy Adams'];
+  const MP_PULL_THRESHOLD_PX = 70;
+
+  function mobilePickerStationMatches(station, needleLower) {
+    return !!((station.title && station.title.toLowerCase().indexOf(needleLower) !== -1) ||
+      (station.artist && station.artist.toLowerCase().indexOf(needleLower) !== -1));
+  }
+
+  // Run on every render (so on every 60s poll while the picker is open):
+  // only ever REMOVES stations whose program no longer matches.
+  function pruneMobilePickerPromoted() {
+    if (!mpPromoted) return;
+    const needle = mpPromoted.name.toLowerCase();
+    mpPromoted.ids = mpPromoted.ids.filter(function(id) {
+      const s = radioStations.find(function(x) { return x.id === id; });
+      return s && mobilePickerStationMatches(s, needle);
+    });
+    if (!mpPromoted.ids.length) mpPromoted = null;
+  }
+
+  function bounceMobilePickerList() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const listEl = document.getElementById('mpList');
+    listEl.classList.remove('mp-list-bounce');
+    void listEl.offsetWidth; // restart the animation if it was mid-run
+    listEl.classList.add('mp-list-bounce');
+    setTimeout(function() { listEl.classList.remove('mp-list-bounce'); }, 400);
+  }
+
+  // Short confetti burst on a canvas laid over the picker, brand colors,
+  // removed when done. Skipped entirely for reduced-motion visitors.
+  function launchMobilePickerConfetti() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const picker = document.getElementById('mobileRadioPicker');
+    const old = picker.querySelector('.mp-confetti');
+    if (old) old.remove();
+    const canvas = document.createElement('canvas');
+    canvas.className = 'mp-confetti';
+    picker.appendChild(canvas);
+    const dpr = window.devicePixelRatio || 1;
+    const w = picker.clientWidth;
+    const h = picker.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { canvas.remove(); return; }
+    ctx.scale(dpr, dpr);
+    const colors = ['#a68a4a', '#d9bf72', '#2f4b3c', '#c1562f', '#7aa08a'];
+    const listTop = document.getElementById('mpList').getBoundingClientRect().top;
+    const originY = listTop + 40;
+    const parts = [];
+    for (let i = 0; i < 80; i++) {
+      const angle = (-90 + (Math.random() * 130 - 65)) * Math.PI / 180;
+      const speed = 5 + Math.random() * 7;
+      parts.push({
+        x: w / 2, y: originY,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        size: 5 + Math.random() * 6,
+        rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.4,
+        color: colors[i % colors.length],
+        life: 85 + Math.random() * 35, age: 0
+      });
+    }
+    function frame() {
+      ctx.clearRect(0, 0, w, h);
+      let alive = 0;
+      parts.forEach(function(p) {
+        p.age++;
+        if (p.age > p.life) return;
+        alive++;
+        p.vy += 0.28; p.vx *= 0.985;
+        p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        const fade = p.age > p.life - 25 ? (p.life - p.age) / 25 : 1;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, fade);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      });
+      if (alive && canvas.isConnected) requestAnimationFrame(frame);
+      else canvas.remove();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function runMobilePickerPromote() {
+    if (!radioStations || !radioStations.length) { bounceMobilePickerList(); return; }
+    let foundName = null;
+    let matchSet = {};
+    for (let i = 0; i < MP_PROMOTE_NAMES.length && !foundName; i++) {
+      const needle = MP_PROMOTE_NAMES[i].toLowerCase();
+      const matches = radioStations.filter(function(s) { return mobilePickerStationMatches(s, needle); });
+      if (matches.length) {
+        foundName = MP_PROMOTE_NAMES[i];
+        matches.forEach(function(s) { matchSet[s.id] = true; });
+      }
+    }
+    if (!foundName) { bounceMobilePickerList(); return; }
+
+    // Favorites first (A-Z), then the rest (A-Z) - the picker's own base
+    // order - minus the docked station, which stays where it is.
+    const base = (mobilePickerFrozenOrder || computeMobilePickerBaseOrder()).slice();
+    radioStations.forEach(function(s) { if (base.indexOf(s.id) === -1) base.push(s.id); });
+    const ids = base.filter(function(id) { return matchSet[id] && id !== currentPlayingId; });
+    if (!ids.length) { bounceMobilePickerList(); return; }
+
+    const prev = mpPromoted;
+    const unchanged = prev && prev.name === foundName && prev.ids.length === ids.length &&
+      prev.ids.every(function(id, i) { return id === ids[i]; });
+    if (unchanged) { bounceMobilePickerList(); return; }
+
+    mpPromoted = { name: foundName, ids: ids };
+    renderMobileRadioPicker({ promoteEntering: true });
+    document.getElementById('mpList').scrollTop = 0;
+    launchMobilePickerConfetti();
+  }
+
+  // The gesture itself: one finger, starting while the list is already at
+  // the very top, dragging mostly downward at least MP_PULL_THRESHOLD_PX.
+  // Fires on release. Any scrolling of the list (scrollTop above 0) during
+  // the touch cancels it, so ordinary scrolling can never trigger it.
+  (function() {
+    const listEl = document.getElementById('mpList');
+    let tracking = false;
+    let startX = 0;
+    let startY = 0;
+    let bestPull = 0;
+    listEl.addEventListener('touchstart', function(e) {
+      if (e.touches.length !== 1 || listEl.scrollTop > 0) { tracking = false; return; }
+      tracking = true;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      bestPull = 0;
+    }, { passive: true });
+    listEl.addEventListener('touchmove', function(e) {
+      if (!tracking) return;
+      if (e.touches.length !== 1 || listEl.scrollTop > 0) { tracking = false; return; }
+      const dy = e.touches[0].clientY - startY;
+      const dx = Math.abs(e.touches[0].clientX - startX);
+      if (dy > dx && dy > bestPull) bestPull = dy;
+    }, { passive: true });
+    listEl.addEventListener('touchend', function() {
+      const fire = tracking && bestPull >= MP_PULL_THRESHOLD_PX;
+      tracking = false;
+      bestPull = 0;
+      if (fire) runMobilePickerPromote();
+    }, { passive: true });
+    listEl.addEventListener('touchcancel', function() { tracking = false; bestPull = 0; }, { passive: true });
+  })();
 
   loadRadioTicker();
   setInterval(loadRadioTicker, RADIO_POLL_MS);
