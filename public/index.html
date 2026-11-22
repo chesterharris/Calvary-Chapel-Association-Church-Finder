@@ -11616,7 +11616,19 @@
       let how;
       if (safariMajor >= 26) how = 'Tap the menu button (the three lines at the left end of the address bar), then Share, then View More, then Add to Home Screen.';
       else if (safariMajor > 0) how = 'Tap the Share button (a square with an arrow) in the bottom bar, then choose Add to Home Screen.';
-      else if (/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent || '')) how = 'Tap the Share icon (a square with an arrow), then View More, then Add to Home Screen.'; // Chrome/Firefox/Edge on iPhone: confirmed on Chrome by Larry
+      else if (/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent || '')) {
+        // Chrome/Firefox/Edge on iPhone only got Add to Home Screen in iOS
+        // 16.4; on an older iPhone Larry confirmed Chrome has no such option,
+        // so send those visitors to Safari. These browsers report the real
+        // iOS version in their user agent ("iPhone OS 15_8").
+        const os = /OS (\d+)_(\d+)/.exec(navigator.userAgent || '');
+        const iosMajor = os ? parseInt(os[1], 10) : 0;
+        const iosMinor = os ? parseInt(os[2], 10) : 0;
+        const tooOld = iosMajor > 0 && (iosMajor < 16 || (iosMajor === 16 && iosMinor < 4));
+        how = tooOld
+          ? 'This browser can\u2019t add it on this iPhone. Open this page in Safari, then tap the Share button (a square with an arrow) in the bottom bar and choose Add to Home Screen.'
+          : 'Tap the Share icon (a square with an arrow), then View More, then Add to Home Screen. If you don\u2019t see Add to Home Screen, open this page in Safari instead.';
+      }
       else how = 'Tap the Share button (a square with an arrow) or the three-line menu button beside the address bar, then choose Add to Home Screen.';
       return { title: title, body: 'One tap to open it, with no web address to remember. ' + how, canInstall: false };
     }
