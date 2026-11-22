@@ -3279,6 +3279,36 @@ function jsonResponse(body, status) {
   });
 }
 
+// GET /api/app-version - a short fingerprint of the index.html that is
+// currently deployed. The page (public/index.html, "App update check")
+// records it when it loads and compares it again later, so an installed
+// iPhone web app that has been sitting open for days can tell visitors "a
+// new version is available" instead of silently showing an old copy.
+//
+// The fingerprint is the first 12 hex characters of the SHA-256 of the
+// served index.html, so it changes on every deploy that changes the page
+// and on no other deploy (Worker-only changes don't need a page reload).
+// Computed from the real static asset rather than a hand-bumped number, so
+// there is nothing to remember to update. Cached in memory for 60 seconds
+// per Worker instance; a fresh deploy starts fresh instances anyway.
+// no-store so a phone never answers from its own cached copy.
+let appVersionCache = { version: null, at: 0 };
+const APP_VERSION_CACHE_MS = 60 * 1000;
+
+async function handleAppVersion(request, env) {
+  const now = Date.now();
+  if (!appVersionCache.version || now - appVersionCache.at > APP_VERSION_CACHE_MS) {
+    const res = await env.ASSETS.fetch(new Request(new URL('/', request.url).toString()));
+    if (!res.ok) return jsonResponse({ error: 'page unavailable' }, 503);
+    const digest = await crypto.subtle.digest('SHA-256', await res.arrayBuffer());
+    const hex = Array.from(new Uint8Array(digest)).map(function(b) {
+      return b.toString(16).padStart(2, '0');
+    }).join('');
+    appVersionCache = { version: hex.slice(0, 12), at: now };
+  }
+  return jsonResponse({ version: appVersionCache.version });
+}
+
 async function loadProgramOverrides(env) {
   const raw = await env.CHURCHES_KV.get(PROGRAM_OVERRIDES_KV_KEY);
   if (!raw) return {};
@@ -7025,6 +7055,9 @@ export default {
     }
     if (url.pathname === '/api/feedback' && request.method === 'POST') {
       return handleFeedback(request, env);
+    }
+    if (url.pathname === '/api/app-version' && request.method === 'GET') {
+      return handleAppVersion(request, env);
     }
     return env.ASSETS.fetch(request);
   },

@@ -3127,6 +3127,56 @@
     .mp-row-promote-in, .mp-list.mp-list-bounce { animation: none; }
   }
 
+  /* ---- "New version available" banner (see the app update check in
+     the script) ----
+     A slim card along the bottom edge, above everything except the feature
+     tour. Sits higher while the mini radio player bar is showing so it
+     never covers the play/pause button. */
+  .app-update-banner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    max-width: 520px;
+    margin: 0 auto;
+    z-index: 2800;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--evergreen);
+    color: var(--paper);
+    border: 2px solid var(--brass);
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    animation: appUpdateBannerIn 260ms ease-out;
+  }
+  body:has(#radioPlayerBar[style*="display: flex"]) .app-update-banner {
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  }
+  @keyframes appUpdateBannerIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .app-update-text { flex: 1; min-width: 0; font-size: 14px; line-height: 1.3; }
+  .app-update-text strong { display: block; font-size: 15px; }
+  .app-update-note { display: block; opacity: 0.85; font-size: 12.5px; margin-top: 2px; }
+  .app-update-banner button {
+    flex-shrink: 0;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .app-update-now { background: var(--paper); color: var(--ink); border: 2px solid var(--paper); }
+  .app-update-later { background: transparent; color: var(--paper); border: 2px solid rgba(246, 244, 238, 0.45); }
+  @media (prefers-reduced-motion: reduce) {
+    .app-update-banner { animation: none; }
+  }
+
   /* ---- Mobile station picker "dock" ----
      Sits between .mp-topbar and .mp-list as a normal flex sibling (NOT an
      overlay) - this is what makes it push the list down rather than cover
@@ -3517,6 +3567,11 @@
       <button type="button" id="menuFeedbackItem" class="hamburger-menu-item">
         <span class="hamburger-menu-icon" aria-hidden="true">💬</span>
         <span class="hamburger-menu-label">Feedback</span>
+      </button>
+      <button type="button" id="menuRefreshItem" class="hamburger-menu-item">
+        <span class="hamburger-menu-icon" aria-hidden="true">🔄</span>
+        <span class="hamburger-menu-label">Refresh app</span>
+        <span id="menuRefreshNote" class="hamburger-menu-countdown"></span>
       </button>
       <!-- Admin-only rows below - hidden by default (see the inline
            style="display:none" the same way #btnLiveDebug is), shown only
@@ -11230,6 +11285,8 @@
   function openHamburgerMenu() {
     hamburgerMenu.style.display = 'block';
     hamburgerBtn.setAttribute('aria-expanded', 'true');
+    // So the "Update available" note on the Refresh row is current.
+    checkForAppUpdate(true);
   }
   function closeHamburgerMenu() {
     hamburgerMenu.style.display = 'none';
@@ -11310,6 +11367,116 @@
     closeHamburgerMenu();
     document.getElementById('btnFeedback').click();
   });
+
+  // ---- App update check: "new version" banner + ☰ "Refresh app" row ----
+  //
+  // Why: a site added to the iPhone Home Screen opens as a full-screen web
+  // app with no refresh button, and iOS keeps it alive in the background,
+  // so it keeps showing whatever version it loaded until it is fully closed
+  // and relaunched. This lets the page notice a newer deploy by itself.
+  //
+  // How: /api/app-version (Worker) returns a short fingerprint of the
+  // currently deployed index.html. The page records the fingerprint when it
+  // loads, then asks again when the app is opened / returns to the
+  // foreground (at most once a minute), whenever the ☰ menu is opened, and
+  // every 15 minutes while visible. A different answer means this copy is
+  // stale -> a slim "A new version is available" banner with Update / Later
+  // and an "Update available" note on the ☰ "Refresh app" row. Nothing ever
+  // reloads by itself (a reload would cut off the radio); only a tap on
+  // Update or "Refresh app" does. "Later" hides the banner for that version
+  // for the rest of this page's life; the ☰ row stays as the manual way.
+  //
+  // First rollout: pages loaded BEFORE this code existed can't check for
+  // anything, so each already-open copy needs one close-and-reopen (or
+  // refresh) to pick this up; after that it takes care of itself.
+  const APP_VERSION_URL = '/api/app-version';
+  const APP_VERSION_MIN_GAP_MS = 60 * 1000;
+  const APP_VERSION_POLL_MS = 15 * 60 * 1000;
+  let loadedAppVersion = null;
+  let newAppVersion = null;
+  let dismissedAppVersion = null;
+  let lastAppVersionCheckAt = 0;
+  let appVersionCheckInFlight = false;
+
+  async function fetchAppVersion() {
+    const res = await fetch(APP_VERSION_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('app-version returned ' + res.status);
+    const data = await res.json();
+    return (data && typeof data.version === 'string' && data.version) ? data.version : null;
+  }
+
+  function updateAppUpdateNote() {
+    const menuNote = document.getElementById('menuRefreshNote');
+    if (menuNote) menuNote.textContent = newAppVersion ? 'Update available' : '';
+    const bannerNote = document.getElementById('appUpdateNote');
+    if (bannerNote) bannerNote.textContent = radioAudio && !radioAudio.paused ? 'Updating will pause the radio.' : '';
+  }
+
+  function hideAppUpdateBanner() {
+    const el = document.getElementById('appUpdateBanner');
+    if (el) el.style.display = 'none';
+  }
+
+  function showAppUpdateBanner() {
+    if (!newAppVersion || dismissedAppVersion === newAppVersion) return;
+    let el = document.getElementById('appUpdateBanner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'appUpdateBanner';
+      el.className = 'app-update-banner';
+      el.setAttribute('role', 'status');
+      el.innerHTML =
+        '<div class="app-update-text"><strong>A new version is available</strong><span id="appUpdateNote" class="app-update-note"></span></div>' +
+        '<button type="button" id="appUpdateLater" class="app-update-later">Later</button>' +
+        '<button type="button" id="appUpdateNow" class="app-update-now">Update</button>';
+      document.body.appendChild(el);
+      document.getElementById('appUpdateNow').addEventListener('click', function() { location.reload(); });
+      document.getElementById('appUpdateLater').addEventListener('click', function() {
+        dismissedAppVersion = newAppVersion;
+        hideAppUpdateBanner();
+      });
+    }
+    updateAppUpdateNote();
+    el.style.display = 'flex';
+  }
+
+  async function checkForAppUpdate(force) {
+    if (appVersionCheckInFlight) return;
+    const now = Date.now();
+    if (!force && now - lastAppVersionCheckAt < APP_VERSION_MIN_GAP_MS) return;
+    lastAppVersionCheckAt = now;
+    appVersionCheckInFlight = true;
+    try {
+      const version = await fetchAppVersion();
+      if (!version) return;
+      if (loadedAppVersion === null) { loadedAppVersion = version; return; }
+      if (version !== loadedAppVersion) {
+        newAppVersion = version;
+        updateAppUpdateNote();
+        showAppUpdateBanner();
+      }
+    } catch (err) {
+      // Offline / server hiccup: stay quiet and try again at the next trigger.
+    } finally {
+      appVersionCheckInFlight = false;
+    }
+  }
+
+  document.getElementById('menuRefreshItem').addEventListener('click', function() {
+    closeHamburgerMenu();
+    location.reload();
+  });
+  // Keep the banner's radio note honest if play/pause changes while it shows.
+  radioAudio.addEventListener('play', updateAppUpdateNote);
+  radioAudio.addEventListener('pause', updateAppUpdateNote);
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') checkForAppUpdate(false);
+  });
+  window.addEventListener('pageshow', function(e) { if (e.persisted) checkForAppUpdate(false); });
+  setInterval(function() {
+    if (document.visibilityState === 'visible') checkForAppUpdate(false);
+  }, APP_VERSION_POLL_MS);
+  checkForAppUpdate(true); // records this page's own version as the baseline
   // Admin-only rows - hidden unless setAdminUiState(true) has run (see
   // below), so only an already-signed-in admin can ever reach these.
   // Same delegate-to-the-desktop-control pattern as the three rows above,
