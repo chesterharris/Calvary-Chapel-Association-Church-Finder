@@ -11608,14 +11608,15 @@
     }
     if (p.isIOS) {
       // Safari on iOS 26 moved things: the Share option is reached from the
-      // three-line menu button at the left end of the address bar (confirmed
-      // on an iPhone 17 Pro); iOS 18 and earlier have the square-with-arrow
+      // three-line menu button at the left end of the address bar, then Share,
+      // then View More, then Add to Home Screen (confirmed on an iPhone 17 Pro); iOS 18 and earlier have the square-with-arrow
       // Share button in the bottom bar. Safari's version number matches iOS's.
       const m = /Version\/(\d+)/.exec(navigator.userAgent || '');
       const safariMajor = m ? parseInt(m[1], 10) : 0;
       let how;
-      if (safariMajor >= 26) how = 'Tap the menu button (the three lines at the left end of the address bar), then Share, then Add to Home Screen.';
+      if (safariMajor >= 26) how = 'Tap the menu button (the three lines at the left end of the address bar), then Share, then View More, then Add to Home Screen.';
       else if (safariMajor > 0) how = 'Tap the Share button (a square with an arrow) in the bottom bar, then choose Add to Home Screen.';
+      else if (/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent || '')) how = 'Tap the Share icon (a square with an arrow), then View More, then Add to Home Screen.'; // Chrome/Firefox/Edge on iPhone: confirmed on Chrome by Larry
       else how = 'Tap the Share button (a square with an arrow) or the three-line menu button beside the address bar, then choose Add to Home Screen.';
       return { title: title, body: 'One tap to open it, with no web address to remember. ' + how, canInstall: false };
     }
