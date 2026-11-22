@@ -22,6 +22,15 @@
 <meta name="twitter:image" content="https://cca-finder.calvary.workers.dev/og-image.png">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- Home Screen shortcut: the short name under the icon, the app-style launch,
+     and the colour of the phone's status bar. Android's real Install button
+     needs the manifest + /sw.js; iPhone reads the apple-* tags. See
+     app-update-notes.md. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2f4b3c">
+<meta name="apple-mobile-web-app-title" content="Calvary Finder">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
@@ -3177,6 +3186,49 @@
     .app-update-banner { animation: none; }
   }
 
+  /* ---- "Add to Home Screen" tip (see the install tip block in the script) ----
+     Same card look as the update banner, one layer below it, with the
+     buttons on their own row because the how-to text is longer. */
+  .install-tip {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    max-width: 520px;
+    margin: 0 auto;
+    z-index: 2790;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    background: var(--evergreen);
+    color: var(--paper);
+    border: 2px solid var(--brass);
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    animation: appUpdateBannerIn 260ms ease-out;
+  }
+  body:has(#radioPlayerBar[style*="display: flex"]) .install-tip {
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  }
+  .install-tip-text { font-size: 14px; line-height: 1.4; }
+  .install-tip-text strong { display: block; font-size: 15px; margin-bottom: 3px; }
+  .install-tip-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .install-tip-buttons button {
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .install-tip-primary { background: var(--paper); color: var(--ink); border: 2px solid var(--paper); }
+  .install-tip-secondary { background: transparent; color: var(--paper); border: 2px solid rgba(246, 244, 238, 0.45); }
+  @media (prefers-reduced-motion: reduce) {
+    .install-tip { animation: none; }
+  }
+
   /* ---- Mobile station picker "dock" ----
      Sits between .mp-topbar and .mp-list as a normal flex sibling (NOT an
      overlay) - this is what makes it push the list down rather than cover
@@ -3572,6 +3624,13 @@
         <span class="hamburger-menu-icon" aria-hidden="true">🔄</span>
         <span class="hamburger-menu-label">Refresh app</span>
         <span id="menuRefreshNote" class="hamburger-menu-countdown"></span>
+      </button>
+      <!-- Shown only on phones/tablets that are using the site in a browser
+           (not once it is opened from a Home Screen icon) - see the install
+           tip block in the script. -->
+      <button type="button" id="menuInstallItem" class="hamburger-menu-item" style="display:none;">
+        <span class="hamburger-menu-icon" aria-hidden="true">📲</span>
+        <span class="hamburger-menu-label">Add to Home Screen</span>
       </button>
       <!-- Admin-only rows below - hidden by default (see the inline
            style="display:none" the same way #btnLiveDebug is), shown only
@@ -11477,6 +11536,212 @@
     if (document.visibilityState === 'visible') checkForAppUpdate(false);
   }, APP_VERSION_POLL_MS);
   checkForAppUpdate(true); // records this page's own version as the baseline
+
+  // ---- "Add to Home Screen" tip + ☰ "Add to Home Screen" row ----
+  //
+  // Goal: help phone visitors put an icon on their Home Screen so they don't
+  // have to remember the web address. Three pieces work together:
+  //   1. /manifest.webmanifest + the head tags: the short name under the icon
+  //      ("Calvary Finder"), the app-style launch, the status-bar colour, and
+  //      what Android needs to offer its own Install button.
+  //   2. /sw.js (Android only): the tiny pass-through service worker Chrome
+  //      requires before it will hand us the real Install prompt.
+  //   3. This block: a small card for people using the site in a browser.
+  //
+  // What the page CAN and CANNOT know: it can tell when it was opened FROM a
+  // Home Screen icon (navigator.standalone on iPhone, display-mode:
+  // standalone elsewhere) - those visitors never see the tip. It cannot tell
+  // whether a visitor in Safari/Chrome already has a shortcut, so the card
+  // is polite: "Not now" snoozes it for 14 days, "Already added" hides it
+  // for good, and it only appears from a person's 2nd visit onward.
+  //
+  // A "visit" = opening the site again at least 30 minutes after the last
+  // counted visit (so a reload or a quick return doesn't count twice).
+  // Everything is remembered in this phone's localStorage under one key; if
+  // storage is unavailable the card never auto-appears (it can't count
+  // visits) but the ☰ row still works.
+  const INSTALL_STORE_KEY = 'cfInstallTip';
+  const INSTALL_VISIT_GAP_MS = 30 * 60 * 1000;
+  const INSTALL_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
+  const INSTALL_SHOW_DELAY_MS = 10 * 1000;
+  const INSTALL_SHOW_RETRIES = 6;
+  let deferredInstallPrompt = null; // Android Chrome's Install prompt, once it fires
+
+  function installStateRead() {
+    try {
+      const raw = localStorage.getItem(INSTALL_STORE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === 'object') ? obj : {};
+    } catch (err) { return null; } // null = storage unusable
+  }
+  function installStateWrite(obj) {
+    try { localStorage.setItem(INSTALL_STORE_KEY, JSON.stringify(obj)); } catch (err) {}
+  }
+  function installStateUpdate(patch) {
+    const s = installStateRead();
+    if (s) installStateWrite(Object.assign(s, patch));
+  }
+
+  function installPlatform() {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/.test(ua);
+    // Browsers built into other apps (Facebook, Instagram, Messenger, the
+    // Google app, Android WebViews...) have no Add to Home Screen at all.
+    const inApp = /FBAN|FBAV|FB_IAB|Instagram|Messenger|Line\/|Twitter|LinkedInApp|Snapchat|Pinterest|MicroMessenger|GSA\/|; wv\)/.test(ua);
+    return { isIOS: isIOS, isAndroid: isAndroid, inApp: inApp };
+  }
+  function runningAsInstalledApp() {
+    try {
+      return navigator.standalone === true ||
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.matchMedia('(display-mode: fullscreen)').matches ||
+        window.matchMedia('(display-mode: minimal-ui)').matches;
+    } catch (err) { return false; }
+  }
+
+  function installTipContent() {
+    const p = installPlatform();
+    const title = 'Add Calvary Finder to your Home Screen';
+    if (p.isIOS && p.inApp) {
+      return { title: title, body: 'This page is open inside another app. Open it in Safari first, then tap the Share button and choose Add to Home Screen.', canInstall: false };
+    }
+    if (p.isIOS) {
+      // Safari on iOS 26 moved things: the Share option is reached from the
+      // three-line menu button at the left end of the address bar (confirmed
+      // on an iPhone 17 Pro); iOS 18 and earlier have the square-with-arrow
+      // Share button in the bottom bar. Safari's version number matches iOS's.
+      const m = /Version\/(\d+)/.exec(navigator.userAgent || '');
+      const safariMajor = m ? parseInt(m[1], 10) : 0;
+      let how;
+      if (safariMajor >= 26) how = 'Tap the menu button (the three lines at the left end of the address bar), then Share, then Add to Home Screen.';
+      else if (safariMajor > 0) how = 'Tap the Share button (a square with an arrow) in the bottom bar, then choose Add to Home Screen.';
+      else how = 'Tap the Share button (a square with an arrow) or the three-line menu button beside the address bar, then choose Add to Home Screen.';
+      return { title: title, body: 'One tap to open it, with no web address to remember. ' + how, canInstall: false };
+    }
+    if (p.isAndroid && p.inApp) {
+      return { title: title, body: 'This page is open inside another app. Open it in Chrome first, then open the ⋮ menu and choose Install app.', canInstall: false };
+    }
+    if (p.isAndroid && deferredInstallPrompt) {
+      return { title: title, body: 'Install it for one-tap access, with no web address to remember.', canInstall: true };
+    }
+    return { title: title, body: 'One tap to open it, with no web address to remember. Open your browser’s ⋮ menu and choose Install app (or Add to Home screen).', canInstall: false };
+  }
+
+  function hideInstallTip() {
+    const el = document.getElementById('installTip');
+    if (el) el.style.display = 'none';
+  }
+
+  function showInstallTip() {
+    const content = installTipContent();
+    let el = document.getElementById('installTip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'installTip';
+      el.className = 'install-tip';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.innerHTML =
+      '<div class="install-tip-text"><strong>' + content.title + '</strong><span id="installTipBody">' + content.body + '</span></div>' +
+      '<div class="install-tip-buttons">' +
+        '<button type="button" id="installTipLater" class="install-tip-secondary">Not now</button>' +
+        (content.canInstall
+          ? '<button type="button" id="installTipInstall" class="install-tip-primary">Install</button>'
+          : '<button type="button" id="installTipDone" class="install-tip-primary">Already added</button>') +
+      '</div>';
+    document.getElementById('installTipLater').addEventListener('click', function() {
+      installStateUpdate({ until: Date.now() + INSTALL_SNOOZE_MS });
+      hideInstallTip();
+    });
+    const doneBtn = document.getElementById('installTipDone');
+    if (doneBtn) doneBtn.addEventListener('click', function() {
+      installStateUpdate({ done: true });
+      hideInstallTip();
+    });
+    const installBtn = document.getElementById('installTipInstall');
+    if (installBtn) installBtn.addEventListener('click', async function() {
+      const promptEvent = deferredInstallPrompt;
+      deferredInstallPrompt = null; // an install prompt can only be used once
+      hideInstallTip();
+      if (!promptEvent) return;
+      try {
+        promptEvent.prompt();
+        const choice = await promptEvent.userChoice;
+        if (choice && choice.outcome === 'accepted') installStateUpdate({ done: true });
+        else installStateUpdate({ until: Date.now() + INSTALL_SNOOZE_MS });
+      } catch (err) {}
+    });
+    el.style.display = 'flex';
+  }
+
+  // Android: Chrome fires this when the site is installable. Keep the event
+  // so our own Install button can use it (preventDefault stops Chrome's
+  // automatic mini-bar; the console note about that is expected).
+  window.addEventListener('beforeinstallprompt', function(e) {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    const el = document.getElementById('installTip');
+    if (el && el.style.display === 'flex') showInstallTip(); // swap in the real Install button
+  });
+  window.addEventListener('appinstalled', function() {
+    deferredInstallPrompt = null;
+    installStateUpdate({ done: true });
+    hideInstallTip();
+    const row = document.getElementById('menuInstallItem');
+    if (row) row.style.display = 'none';
+  });
+
+  (function setupInstallTip() {
+    const p = installPlatform();
+    if (!p.isIOS && !p.isAndroid) return; // desktop: nothing to show
+    if (runningAsInstalledApp()) { installStateUpdate({ done: true }); return; }
+
+    // Android needs the tiny service worker before Chrome offers Install.
+    if (p.isAndroid && 'serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js').catch(function() {});
+      });
+    }
+
+    // ☰ row: always available as the manual way, even after "Not now".
+    const row = document.getElementById('menuInstallItem');
+    if (row) {
+      row.style.display = '';
+      row.addEventListener('click', function() {
+        closeHamburgerMenu();
+        showInstallTip();
+      });
+    }
+
+    // Automatic card: from the 2nd counted visit, unless snoozed / done.
+    const state = installStateRead();
+    if (!state) return;
+    const now = Date.now();
+    if (!state.lastVisitAt || now - state.lastVisitAt > INSTALL_VISIT_GAP_MS) {
+      state.visits = (state.visits || 0) + 1;
+      state.lastVisitAt = now;
+      installStateWrite(state);
+    }
+    if (state.done) return;
+    if (state.until && now < state.until) return;
+    if ((state.visits || 0) < 2) return;
+
+    let attempts = 0;
+    function tryShow() {
+      attempts++;
+      const updateBanner = document.getElementById('appUpdateBanner');
+      const busy = document.visibilityState !== 'visible' ||
+        (updateBanner && updateBanner.style.display === 'flex');
+      if (busy) {
+        if (attempts < INSTALL_SHOW_RETRIES) setTimeout(tryShow, INSTALL_SHOW_DELAY_MS);
+        return;
+      }
+      showInstallTip();
+    }
+    setTimeout(tryShow, INSTALL_SHOW_DELAY_MS);
+  })();
   // Admin-only rows - hidden unless setAdminUiState(true) has run (see
   // below), so only an already-signed-in admin can ever reach these.
   // Same delegate-to-the-desktop-control pattern as the three rows above,

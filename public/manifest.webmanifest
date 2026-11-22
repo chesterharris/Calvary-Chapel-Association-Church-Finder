@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Find Calvary Chapel Churches, Live Streams & Radio",
+  "short_name": "Calvary Finder",
+  "description": "Find Calvary Chapel churches on a map, see who is streaming live right now, and listen to Christian radio stations.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2f4b3c",
+  "theme_color": "#2f4b3c",
+  "icons": [
+    { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/android-maskable-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
