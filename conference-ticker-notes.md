@@ -22,10 +22,22 @@ with manual conferences (built 2026-10-09).
 merges them. The merged response is `Cache-Control: no-store`, so a conference the
 admin just added or deleted shows on the next ticker load. Each manual one goes in
 start-date order: just before the first scraped entry that starts later, or at the
-end. The scraped entries are never reordered. A manual entry whose title already
-appears in the scraped list (apostrophes and punctuation ignored) is left out of
-the ticker; it stays stored until it expires. If the scrape fails, the manual
-conferences are still returned.
+end. A manual entry whose title already appears in the scraped list (apostrophes
+and punctuation ignored) is left out of the ticker; it stays stored until it
+expires. If the scrape fails, the manual conferences are still returned.
+
+**Final display order (added 2026-11-23):** after merging, `sortConferencesByDate`
+sorts the whole list chronologically by `startDate` (undated entries sink to the
+end, keeping their relative order; same-date entries also keep their relative
+order, via `Array.prototype.sort`'s stability). Before this, `mergeManualConferences`
+left the *scraped* entries in whatever order calvarycca.org's own page listed
+them - which turned out to be grouped by conference type, not by date (e.g. the
+2027 "South Conference" in March was listed ahead of the 2027 "Youth Workers
+Conference" in January). That meant both the header ticker and the mobile ☰
+Conferences pane could show conferences out of chronological order even though
+nothing was mis-entered - the source page itself isn't date-ordered. Larry
+reported this 2026-11-23; see `handleConferences` for the one-line fix
+(`sortConferencesByDate(mergeManualConferences(...))`).
 
 ## Ticker wording
 

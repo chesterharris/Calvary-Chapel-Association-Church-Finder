@@ -3687,6 +3687,28 @@ function mergeManualConferences(scraped, manualEntries) {
   return list;
 }
 
+// Final chronological sort applied to the merged (scraped + manual) list
+// right before it's returned - see handleConferences. Needed because
+// nothing upstream sorts by date: parseConferences() keeps calvarycca.org's
+// own page order (grouped by conference type, NOT by date - e.g. "2027
+// South Conference" (March) is listed on the source page ahead of "2027
+// Youth Workers Conference" (January)), and mergeManualConferences()
+// deliberately leaves that scraped order untouched, only slotting manual
+// entries in relative to it. A dated entry always sorts before an undated
+// one (startDate/endDate null - see parseConferences) since there's no
+// date to sort an undated entry by; undated entries keep their relative
+// order via Array.prototype.sort's guaranteed stability, same as same-date
+// entries.
+function sortConferencesByDate(list) {
+  return (list || []).slice().sort(function(a, b) {
+    const aHas = !!(a && a.startDate);
+    const bHas = !!(b && b.startDate);
+    if (aHas && bHas) return a.startDate < b.startDate ? -1 : (a.startDate > b.startDate ? 1 : 0);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return 0;
+  });
+}
+
 // Scraped (calvarycca.org) conferences, edge-cached for CACHE_SECONDS.
 // Returns { conferences, source, fetchedAt, error? }.
 async function getScrapedConferences(request, ctx) {
@@ -3748,7 +3770,7 @@ async function handleConferences(request, ctx, env) {
     manualEntries = []; // a KV hiccup must never take the ticker down
   }
   const body = Object.assign({}, scraped, {
-    conferences: mergeManualConferences(scrapedKept, manualEntries)
+    conferences: sortConferencesByDate(mergeManualConferences(scrapedKept, manualEntries))
   });
   return new Response(JSON.stringify(body), {
     headers: {
