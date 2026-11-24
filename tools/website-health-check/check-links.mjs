@@ -376,7 +376,7 @@ export async function checkChurch(church, opts) {
   const raw = (church.website || '').trim();
 
   if (!raw) {
-    return { category: 'noWebsite', row: { ...base, originalUrl: '', checkedUrl: null, detail: 'No website on file' }, deepCheckUrl: null };
+    return { category: 'noWebsite', row: { ...base, originalUrl: '', checkedUrl: null, detail: 'No website on file' }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   const hadMarker = /\(404\)\s*$/i.test(raw);
@@ -387,8 +387,8 @@ export async function checkChurch(church, opts) {
   if (!originalHost) {
     const detail = 'Could not parse "' + raw + '" as a URL';
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...base, originalUrl: raw, checkedUrl: null, detail }, deepCheckUrl: null }
-      : { category: 'unreachable', row: { ...base, originalUrl: raw, checkedUrl: null, detail }, deepCheckUrl: null };
+      ? { category: 'markerStillBroken', row: { ...base, originalUrl: raw, checkedUrl: null, detail }, deepCheckUrl: null, needsManualCheck: false }
+      : { category: 'unreachable', row: { ...base, originalUrl: raw, checkedUrl: null, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   // Every row from here on actually has a URL that was (or would be) hit,
@@ -401,15 +401,17 @@ export async function checkChurch(church, opts) {
 
   if (!result.ok) {
     const detail = describeFetchError(result.error);
-    if (isFb) return { category: 'facebook', row: { ...row, detail: 'Unreachable — ' + detail }, deepCheckUrl: null };
+    if (isFb) return { category: 'facebook', row: { ...row, detail: 'Unreachable — ' + detail }, deepCheckUrl: null, needsManualCheck: true };
     // A real DNS failure stays a DNS failure for a browser too - not worth
     // a slower recheck. Anything else (a dropped connection, "other side
     // closed", a timeout, most TLS errors) might just be bot/firewall
-    // protection reacting to a non-browser client, so it's a candidate.
+    // protection reacting to a non-browser client, so it's a candidate -
+    // and, same reasoning, worth a manual look too unless/until the deep
+    // check (if it runs) resolves it one way or the other.
     const eligible = !isDnsFailure(result.error);
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: eligible ? testUrl : null }
-      : { category: 'unreachable', row: { ...row, detail }, deepCheckUrl: eligible ? testUrl : null };
+      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: eligible ? testUrl : null, needsManualCheck: eligible }
+      : { category: 'unreachable', row: { ...row, detail }, deepCheckUrl: eligible ? testUrl : null, needsManualCheck: eligible };
   }
 
   const res = result.response;
@@ -429,7 +431,7 @@ export async function checkChurch(church, opts) {
     } catch {
       /* ignore */
     }
-    return { category: 'facebook', row: { ...row, detail }, deepCheckUrl: null };
+    return { category: 'facebook', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: true };
   }
 
   if (LIKELY_BLOCKED_STATUSES.has(status)) {
@@ -438,30 +440,31 @@ export async function checkChurch(church, opts) {
       ? {
           category: 'markerStillBroken',
           row: { ...row, detail: describeStatus(status) + ' (may just be bot-blocking an automated check — open manually to confirm before trusting this)' },
-          deepCheckUrl: row.checkedUrl
+          deepCheckUrl: row.checkedUrl,
+          needsManualCheck: true
         }
-      : { category: 'likelyBlocked', row: { ...row, detail }, deepCheckUrl: row.checkedUrl };
+      : { category: 'likelyBlocked', row: { ...row, detail }, deepCheckUrl: row.checkedUrl, needsManualCheck: true };
   }
 
   if (status >= 500) {
     const detail = describeStatus(status);
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null }
-      : { category: 'server5xx', row: { ...row, detail }, deepCheckUrl: null };
+      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false }
+      : { category: 'server5xx', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   if (status >= 400) {
     const detail = describeStatus(status);
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null }
-      : { category: 'client4xx', row: { ...row, detail }, deepCheckUrl: null };
+      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false }
+      : { category: 'client4xx', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   if (finalHost !== originalHost) {
     const detail = cleaned + '  →  ' + res.url;
     return hadMarker
-      ? { category: 'markerNowResolves', row: { ...row, detail: 'Now resolves, but redirects to a different domain: ' + detail }, deepCheckUrl: null }
-      : { category: 'redirectedDifferentDomain', row: { ...row, detail }, deepCheckUrl: null };
+      ? { category: 'markerNowResolves', row: { ...row, detail: 'Now resolves, but redirects to a different domain: ' + detail }, deepCheckUrl: null, needsManualCheck: false }
+      : { category: 'redirectedDifferentDomain', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   // Same domain, 2xx/3xx final response. Sniff the body for a bot/human
@@ -497,24 +500,24 @@ export async function checkChurch(church, opts) {
     // into the very same challenge rather than resolving it.
     const detail = describeStatus(status) + ' — served an interactive security check (' + botChallenge + ') instead of the real page; open it yourself to confirm it loads';
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: row.checkedUrl }
-      : { category: 'likelyBlocked', row: { ...row, detail }, deepCheckUrl: row.checkedUrl };
+      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: row.checkedUrl, needsManualCheck: true }
+      : { category: 'likelyBlocked', row: { ...row, detail }, deepCheckUrl: row.checkedUrl, needsManualCheck: true };
   }
 
   if (signature) {
     const detail = describeStatus(status) + ' — page text matches ' + signature;
     return hadMarker
-      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null }
-      : { category: 'parked', row: { ...row, detail }, deepCheckUrl: null };
+      ? { category: 'markerStillBroken', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false }
+      : { category: 'parked', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
   if (hadMarker) {
     const detail =
       'Now resolves fine (' + describeStatus(status) + (res.redirected ? ', redirected to ' + res.url : '') + ') — the (404) tag looks stale, consider removing it';
-    return { category: 'markerNowResolves', row: { ...row, detail }, deepCheckUrl: null };
+    return { category: 'markerNowResolves', row: { ...row, detail }, deepCheckUrl: null, needsManualCheck: false };
   }
 
-  return { category: 'passed', row: null, deepCheckUrl: null };
+  return { category: 'passed', row: null, deepCheckUrl: null, needsManualCheck: false };
 }
 
 // ---- Deep-check: re-verify a likely false positive with a real browser ----
@@ -546,7 +549,7 @@ export function applyDeepCheckResult(outcome, deepResult) {
       ' — a real browser also ran into an interactive security check (' +
       (deepResult.challengeLabel || 'a bot-detection challenge') +
       ') instead of the real page; this looks like bot-protection, not a dead link — open it yourself in your own browser to confirm it loads fine for you';
-    return { ...outcome, row: { ...outcome.row, detail: outcome.row.detail + note } };
+    return { ...outcome, needsManualCheck: true, row: { ...outcome.row, detail: outcome.row.detail + note } };
   }
 
   if (!deepResult.ok) {
@@ -571,7 +574,7 @@ export function applyDeepCheckResult(outcome, deepResult) {
         describeStatus(deepResult.status) +
         '. That does NOT confirm this is a genuine problem: some sites specifically detect automated/headless browsers (regardless of engine) and block them the same way, so this result is still consistent with bot-detection, not a dead link. If you\'ve opened it yourself in your own regular browser and it loaded fine, trust that over this automated recheck.'
       : ' — confirmed via a real browser too (' + (deepResult.error || 'still failed') + '); this isn\'t the kind of failure automated-browser detection typically produces, so it\'s more likely a genuine problem';
-    return { ...outcome, row: { ...outcome.row, detail: outcome.row.detail + note } };
+    return { ...outcome, needsManualCheck: !!stillAmbiguous, row: { ...outcome.row, detail: outcome.row.detail + note } };
   }
 
   const finalUrl = deepResult.finalUrl || outcome.deepCheckUrl;
@@ -580,21 +583,21 @@ export function applyDeepCheckResult(outcome, deepResult) {
     const detail =
       describeStatus(deepResult.status) + ' — a real browser also shows this is a parked/placeholder page (matches ' + deepResult.signature + ')';
     if (outcome.category === 'markerStillBroken') {
-      return { ...outcome, row: { ...outcome.row, checkedUrl: finalUrl, detail } };
+      return { ...outcome, needsManualCheck: false, row: { ...outcome.row, checkedUrl: finalUrl, detail } };
     }
-    return { ...outcome, category: 'parked', row: { ...outcome.row, checkedUrl: finalUrl, detail } };
+    return { ...outcome, category: 'parked', needsManualCheck: false, row: { ...outcome.row, checkedUrl: finalUrl, detail } };
   }
 
   const redirectNote = finalUrl !== outcome.deepCheckUrl ? ', redirected to ' + finalUrl : '';
 
   if (outcome.category === 'markerStillBroken') {
     const detail = 'Confirmed via a real browser: now resolves fine (' + describeStatus(deepResult.status) + redirectNote + ') — the (404) tag looks stale, consider removing it';
-    return { ...outcome, category: 'markerNowResolves', row: { ...outcome.row, checkedUrl: finalUrl, detail } };
+    return { ...outcome, category: 'markerNowResolves', needsManualCheck: false, row: { ...outcome.row, checkedUrl: finalUrl, detail } };
   }
 
   const detail =
     'Confirmed via a real browser: opens fine (' + describeStatus(deepResult.status) + redirectNote + ') — the fast check flagged this, but it is not actually broken';
-  return { ...outcome, category: 'confirmedByBrowser', row: { ...outcome.row, checkedUrl: finalUrl, detail } };
+  return { ...outcome, category: 'confirmedByBrowser', needsManualCheck: false, row: { ...outcome.row, checkedUrl: finalUrl, detail } };
 }
 
 // ---- Concurrency pool ----
@@ -920,12 +923,28 @@ async function main() {
 
   const categories = Object.fromEntries(CATEGORY_META.map((m) => [m.key, []]));
   let passedCount = 0;
+  // Entries worth a human glance (see checkChurch/applyDeepCheckResult's
+  // needsManualCheck field) - written out alongside the HTML report as a
+  // small sidecar file that review-flagged.mjs reads, so Larry can open
+  // just these, one at a time, instead of hunting through the full report
+  // by hand. See README.md "Reviewing what's left - review-flagged.mjs".
+  const needsReview = [];
   for (const outcome of outcomes) {
     if (!outcome) continue;
     if (outcome.category === 'passed') {
       passedCount++;
     } else {
       categories[outcome.category].push(outcome.row);
+      if (outcome.needsManualCheck && outcome.row && outcome.row.checkedUrl) {
+        needsReview.push({
+          id: outcome.row.id,
+          name: outcome.row.name,
+          city: outcome.row.city,
+          url: outcome.row.checkedUrl,
+          category: outcome.category,
+          detail: outcome.row.detail
+        });
+      }
     }
   }
 
@@ -933,6 +952,7 @@ async function main() {
   for (const key of Object.keys(categories)) {
     categories[key].sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
+  needsReview.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   const generatedAt = new Date().toLocaleString();
   const html = renderReport({
@@ -945,8 +965,12 @@ async function main() {
 
   const reportsDir = path.join(__dirname, 'reports');
   if (!existsSync(reportsDir)) await mkdir(reportsDir, { recursive: true });
-  const outPath = path.join(reportsDir, 'Church_Website_Link_Report_' + todayStamp() + '.html');
+  const stamp = todayStamp();
+  const outPath = path.join(reportsDir, 'Church_Website_Link_Report_' + stamp + '.html');
   await writeFile(outPath, html, 'utf8');
+
+  const reviewPath = path.join(reportsDir, 'Church_Website_Link_Report_' + stamp + '.review.json');
+  await writeFile(reviewPath, JSON.stringify({ generatedAt, sourceUrl, entries: needsReview }, null, 2), 'utf8');
 
   console.log('');
   console.log('Done. ' + passedCount + ' / ' + churches.length + ' passed.');
@@ -955,6 +979,11 @@ async function main() {
   }
   console.log('');
   console.log('Report written to: ' + outPath);
+  if (needsReview.length) {
+    console.log(needsReview.length + ' of those are worth a quick manual look (see above for which categories).');
+    console.log('Run "node review-flagged.mjs" (or double-click review.bat) to open them one at a time -');
+    console.log('just close each browser window after you glance at it, and the next one opens automatically.');
+  }
 
   if (process.platform === 'win32') {
     exec('start "" "' + outPath + '"', () => {});

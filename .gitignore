@@ -2,6 +2,7 @@ node_modules/
 .wrangler/
 .dev.vars
 tools/website-health-check/reports/*.html
+tools/website-health-check/reports/*.review.json
 Claude outputs/
 src/index0old.js
 public/No_Dupes.txt

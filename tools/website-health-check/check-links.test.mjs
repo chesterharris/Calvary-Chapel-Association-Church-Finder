@@ -399,6 +399,85 @@ async function run() {
     }
   );
 
+  // ---- needsManualCheck (added 2026-11-24, for the review-flagged.mjs
+  // auto-open-in-browser workflow) - true only for outcomes where the
+  // report explicitly tells Larry to go look for himself; false for
+  // anything the checks are already confident about either way.
+
+  await withMockFetch(
+    async (url) => mockResponse({ status: 403, url }),
+    async () => {
+      const r = await checkChurch({ id: 27, name: 'Manual-Check 403 Church', website: 'https://manualcheck403.example.org' }, opts);
+      check('a 403 (likelyBlocked) needs a manual check', r.needsManualCheck === true);
+    }
+  );
+
+  await withMockFetch(
+    async (url) => mockResponse({ status: 200, url, text: '<html><body>needs a human look</body></html>' }),
+    async () => {
+      const r = await checkChurch({ id: 28, name: 'Manual-Check FB Church', website: 'https://www.facebook.com/manualcheck' }, opts);
+      check('a facebook outcome always needs a manual check', r.needsManualCheck === true);
+    }
+  );
+
+  await withMockFetch(
+    async () => {
+      const err = new Error('getaddrinfo ENOTFOUND manualcheckdns.example');
+      err.cause = { code: 'ENOTFOUND' };
+      throw err;
+    },
+    async () => {
+      const r = await checkChurch({ id: 29, name: 'Manual-Check DNS Church', website: 'https://manualcheckdns.example' }, opts);
+      check('a confirmed DNS failure does NOT need a manual check', r.needsManualCheck === false);
+    }
+  );
+
+  await withMockFetch(
+    async () => {
+      const err = new Error('other side closed');
+      err.cause = { code: 'ECONNRESET' };
+      throw err;
+    },
+    async () => {
+      const r = await checkChurch({ id: 30, name: 'Manual-Check Reset Church', website: 'https://manualcheckreset.example.org' }, opts);
+      check('a non-DNS connection error (ambiguous - could be bot-blocking) needs a manual check', r.needsManualCheck === true);
+    }
+  );
+
+  await withMockFetch(
+    async (url) => mockResponse({ status: 404, url }),
+    async () => {
+      const r = await checkChurch({ id: 31, name: 'Manual-Check 404 Church', website: 'https://manualcheck404.example.org' }, opts);
+      check('a plain confirmed 404 does NOT need a manual check', r.needsManualCheck === false);
+    }
+  );
+
+  await withMockFetch(
+    async (url) => mockResponse({ status: 200, url, text: 'ok, ordinary church copy' }),
+    async () => {
+      const r = await checkChurch({ id: 32, name: 'Manual-Check Pass Church', website: 'https://manualcheckpass.example.org' }, opts);
+      check('a clean pass does NOT need a manual check', r.needsManualCheck === false);
+    }
+  );
+
+  {
+    const outcome = { category: 'likelyBlocked', deepCheckUrl: 'https://x.example.org', row: { checkedUrl: 'https://x.example.org', detail: 'HTTP 403 (Forbidden)' }, needsManualCheck: true };
+    const challenged = applyDeepCheckResult(outcome, { ok: false, challenged: true, challengeLabel: 'Cloudflare "Verify you are human" challenge' });
+    check('applyDeepCheckResult: still-challenged keeps needsManualCheck true', challenged.needsManualCheck === true);
+
+    const stillBlocked = applyDeepCheckResult(outcome, { ok: false, status: 403, error: 'HTTP 403 (Forbidden)' });
+    check('applyDeepCheckResult: same-status-ambiguous keeps needsManualCheck true', stillBlocked.needsManualCheck === true);
+
+    const confirmedBroken = applyDeepCheckResult(outcome, { ok: false, error: 'domain does not resolve' });
+    check('applyDeepCheckResult: a genuinely different/unambiguous failure clears needsManualCheck', confirmedBroken.needsManualCheck === false);
+
+    const confirmedFine = applyDeepCheckResult(outcome, { ok: true, status: 200, finalUrl: 'https://x.example.org' });
+    check('applyDeepCheckResult: confirmed fine clears needsManualCheck', confirmedFine.needsManualCheck === false);
+
+    const revealedParked = applyDeepCheckResult(outcome, { ok: true, status: 200, finalUrl: 'https://x.example.org', signature: 'GoDaddy placeholder' });
+    check('applyDeepCheckResult: revealed-as-parked clears needsManualCheck', revealedParked.needsManualCheck === false);
+  }
+
   // ---- applyDeepCheckResult (pure decision logic, no real browser) ----
 
   {
