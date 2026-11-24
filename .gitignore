@@ -1,6 +1,7 @@
 node_modules/
 .wrangler/
 .dev.vars
+tools/website-health-check/reports/*.html
 Claude outputs/
 src/index0old.js
 public/No_Dupes.txt

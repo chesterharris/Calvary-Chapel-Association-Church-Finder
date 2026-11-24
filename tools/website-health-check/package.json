@@ -1,0 +1,14 @@
+{
+  "name": "cca-website-health-check",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Manual, on-demand checker for CCA Finder church website/Facebook links. See README.md.",
+  "type": "module",
+  "scripts": {
+    "check": "node check-links.mjs",
+    "test": "node check-links.test.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}
