@@ -111,9 +111,7 @@ async function main() {
 
     // A fresh, visible (headless: false) browser instance per entry, not a
     // new tab in a shared one - that's what lets us tell "this specific
-    // window closed" apart from "some other window closed", by just
-    // waiting for THIS browser process to end (browser.on('disconnected')
-    // fires when its last window closes).
+    // window closed" apart from "some other window closed".
     let browser;
     try {
       browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
@@ -121,28 +119,65 @@ async function main() {
       try {
         await page.goto(entry.url, { timeout: 20000 });
       } catch (err) {
-        console.log('    (page did not finish loading: ' + (err && err.message ? err.message.split('\n')[0] : err) + ' - the window is still open for you to look at whatever did load)');
-      }
-      await new Promise((resolve) => {
-        // Whichever happens first - the window closing normally, or
-        // Ctrl+C - must clear the polling interval before resolving, or
-        // it's left running forever and the process never exits on its
-        // own once the review is done.
-        let settled = false;
-        const check = setInterval(() => {
-          if (stopped) settle();
-        }, 300);
-        function settle() {
-          if (settled) return;
-          settled = true;
-          clearInterval(check);
-          resolve();
+        // You don't have to wait for the page to finish loading before
+        // closing it - closing early (seen in practice, 2026-11-24: Larry
+        // closed one before it had fully rendered, already satisfied it
+        // was the real church site) makes page.goto() itself reject,
+        // since the thing it was loading into no longer exists. That's
+        // not a real error - say so plainly instead of the generic
+        // "window is still open" message, which would be wrong here.
+        if (page.isClosed()) {
+          console.log('    (you closed the window before it finished loading - that\'s fine, moving right along)');
+        } else {
+          console.log('    (page did not finish loading: ' + (err && err.message ? err.message.split('\n')[0] : err) + ' - the window is still open for you to look at whatever did load)');
         }
-        browser.once('disconnected', settle);
-      });
+      }
+      // If you closed the window WHILE it was still loading (the case
+      // above), the page (and often the whole browser, since it's the
+      // only window) is already closed by this point - its 'close'/
+      // 'disconnected' events already fired, before the listeners below
+      // could possibly have been attached to hear them. Waiting on those
+      // events here would then hang forever on an already-closed window
+      // (the bug behind this fix, 2026-11-24) - so check for that first
+      // and skip straight past the wait when it's already happened.
+      if (!page.isClosed() && browser.isConnected()) {
+        await new Promise((resolve) => {
+          // page 'close' fires the instant the user closes THIS window -
+          // the signal we actually want. browser 'disconnected' (the whole
+          // Chromium process exiting) is kept only as a backup: on
+          // Windows, closing the last window doesn't always make the
+          // process exit right away (a background/GPU/network-service
+          // process can keep it alive a while, or indefinitely), so
+          // waiting on 'disconnected' alone - what this used to do - could
+          // hang here even after you'd already closed the window (seen in
+          // practice, 2026-11-24: Larry closed window 1 of 83 and nothing
+          // else happened). The periodic check also re-tests isClosed/
+          // isConnected, not just `stopped`, as a safety net for the same
+          // already-closed race described above. Whichever fires first
+          // must clear the polling interval before resolving, or it's left
+          // running forever and the process never exits on its own once
+          // the review is done.
+          let settled = false;
+          const check = setInterval(() => {
+            if (stopped || page.isClosed() || !browser.isConnected()) settle();
+          }, 300);
+          function settle() {
+            if (settled) return;
+            settled = true;
+            clearInterval(check);
+            resolve();
+          }
+          page.once('close', settle);
+          browser.once('disconnected', settle);
+        });
+      }
     } catch (err) {
       console.log('    (could not open a browser window for this one: ' + (err && err.message ? err.message : err) + ' - skipping to the next)');
     } finally {
+      // Force the whole browser instance closed here regardless of why we
+      // got this far - this is what actually cleans up a lingering
+      // background process after the page itself closes, rather than
+      // hoping the OS already did it.
       if (browser) await browser.close().catch(() => {});
     }
     if (!stopped) reviewedCount++;

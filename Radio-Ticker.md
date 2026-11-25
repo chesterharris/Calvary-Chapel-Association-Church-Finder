@@ -307,3 +307,49 @@ is promoted. No page errors.
 **Not tested:** a real phone (iPhone Safari / Android Chrome). Worth trying on
 a real device after deploying: pull down from the top of the Station Picker
 while some station is playing a Chuck Smith program.
+
+
+## Phones: Radio is a plain button; tap the player bar to open the Picker (2026-11-25)
+
+Larry's observation: on phones nobody uses the scrolling ticker text - people
+tap the "Radio" link beside it to open the Station Picker (which he uses all the
+time and wants untouched). Changes, phones only:
+
+- **Radio link is a bigger button.** In the phone header row
+  (`.mobile-primary-row`, widths up to 720px) the marquee is parked and the
+  Radio link becomes an outlined button that fills the rest of the row next to
+  the Live Now button (same height, 15px text, bigger tower icon). Tap behavior
+  is unchanged: opens the Station Picker at 600px and under, the Radio Stations
+  pane at 601-720px.
+- **The marquee still runs, invisibly.** `.ticker-track-wrap` is zero-size and
+  `visibility: hidden` there, NOT `display: none`: the ticker's script measures
+  the track's width to pick the scroll speed, so a `display: none` track would
+  measure 0 and leave the speed wrong if a phone is turned wide later. Hidden
+  this way it measures correctly (tested: 22.9s on a phone, same after
+  widening) and its items can't be reached by keyboard or screen reader.
+  Desktop and wide layouts are untouched.
+- **Bottom player bar opens the Picker (<= 600px only).** Tapping the station
+  name / program text (`.radio-player-info`) opens the Station Picker. The
+  play/pause, sleep timer and close buttons keep their own jobs (tested). It is
+  given `role="button"`, tabindex and an aria-label only while the phone layout
+  applies, plus a pointer cursor; Enter/Space also work. On wider screens it
+  does nothing, as before. The picker hides the bar while it is open and shows
+  the playing station in its Now Playing dock.
+- **Not changed:** the Station Picker, the hidden pull-down, the ☰ Radio
+  Stations pane, the star/"ticker" wording, favorites storage, the desktop
+  ticker, and the admin spotlight steps ('radio' and 'radio-ticker' still point
+  at the same elements; on a phone 'radio-ticker' now highlights the Radio
+  button).
+- **Ideas offered but not chosen:** resume-last-station button; "favorites"
+  wording instead of "ticker" on the star tooltip; merging the two phone radio
+  screens.
+- Code: `public/index.html` only - CSS next to the other
+  `.mobile-primary-row #radioTicker` rules, a `cursor` rule beside
+  `.radio-player-info`, and `setupMiniPlayerOpensPicker` right after the picker's
+  breakpoint listener.
+- Tested (scratch Playwright, 390/360/650/1280 wide, real touch tap): layout,
+  Radio button opens the Picker, bar text tap and Enter open it, play/pause and
+  timer don't, dock shows the playing station, bar hidden while the picker is
+  open, no role/tap action at 650 and 1280, marquee speed correct with
+  favorites, resize phone -> wide -> phone. No page errors. Not tested on a real
+  phone.

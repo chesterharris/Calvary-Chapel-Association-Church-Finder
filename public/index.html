@@ -682,6 +682,37 @@
        mobile visitor needs, per the doc's priorities), so the × is
        dropped here even though it stays on desktop. */
     .mobile-primary-row #radioTickerDismissBtn { display: none; }
+    /* Phones: the scrolling now-playing text is parked and the Radio link
+       becomes a plain, bigger button that fills the rest of the row (Larry:
+       nobody reads the marquee, everyone taps Radio to open the Station
+       Picker). The marquee markup keeps running, just invisible and
+       zero-size - NOT display:none, because the ticker's script measures
+       its width to set the scroll speed, and a hidden element would measure
+       0 and leave the speed wrong if the phone is turned wide later. It is
+       also visibility:hidden so its items can't be reached by keyboard or
+       screen reader. Desktop and wide layouts are unchanged. */
+    .mobile-primary-row #radioTicker .ticker-track-wrap {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+      visibility: hidden;
+    }
+    .mobile-primary-row #radioTicker { align-self: stretch; align-items: stretch; }
+    .mobile-primary-row #radioTicker .ticker-label {
+      flex: 1;
+      height: auto;
+      min-height: 32px;
+      justify-content: center;
+      padding: 0 14px;
+      color: var(--paper);
+      border: 1px solid var(--paper);
+      border-radius: 3px;
+      font-size: 15px;
+    }
+    .mobile-primary-row #radioTicker .ticker-label:hover { text-decoration: none; }
+    .mobile-primary-row #radioTicker .ticker-label-short { font-size: 15px; gap: 8px; }
+    .mobile-primary-row #radioTicker .ticker-label-short .tower-img { height: 18px; }
   }
 
   .modal-overlay {
@@ -2676,6 +2707,10 @@
     flex: 1;
     min-width: 0;
     font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  @media (max-width: 600px) {
+    /* Tapping the station / program text opens the Radio Station Picker. */
+    .radio-player-info { cursor: pointer; }
   }
   .radio-player-station {
     font-size: 11px;
@@ -11326,6 +11361,39 @@
   window.matchMedia(MOBILE_PICKER_BREAKPOINT).addEventListener('change', function(e) {
     if (!e.matches) closeMobileRadioPicker();
   });
+
+  // Phones: tapping the station / program text in the bottom player bar
+  // opens the Radio Station Picker (the play/pause, timer and close buttons
+  // keep their own jobs). On wider screens the bar is unchanged - no tap
+  // action, no button role. The picker is the same screen the Radio link
+  // opens, and it hides this bar while it is open, so this is just a second
+  // way in from where the listener's thumb already is.
+  (function setupMiniPlayerOpensPicker() {
+    const info = document.querySelector('#radioPlayerBar .radio-player-info');
+    if (!info) return;
+    function sync() {
+      if (isMobilePickerBreakpoint()) {
+        info.setAttribute('role', 'button');
+        info.setAttribute('tabindex', '0');
+        info.setAttribute('aria-label', 'Open the radio station picker');
+      } else {
+        info.removeAttribute('role');
+        info.removeAttribute('tabindex');
+        info.removeAttribute('aria-label');
+      }
+    }
+    sync();
+    window.matchMedia(MOBILE_PICKER_BREAKPOINT).addEventListener('change', sync);
+    info.addEventListener('click', function() {
+      if (isMobilePickerBreakpoint()) openMobileRadioPicker();
+    });
+    info.addEventListener('keydown', function(e) {
+      if ((e.key === 'Enter' || e.key === ' ') && isMobilePickerBreakpoint()) {
+        e.preventDefault();
+        openMobileRadioPicker();
+      }
+    });
+  })();
 
   // ---- Mobile hamburger (☰) menu - Concept A, see Mobile-First-Design.md ----
   //
