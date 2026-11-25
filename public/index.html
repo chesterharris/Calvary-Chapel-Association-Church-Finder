@@ -655,16 +655,27 @@
       padding: 8px 14px;
       background: var(--evergreen);
     }
+    /* Live Now and Radio split the row 50/50 (each is half the row minus
+       half the 8px gap; the Radio side is #radioTicker, further down). The longest Live Now text
+       ("Starting any moment now") can be wider than half a narrow phone, so
+       it is allowed to wrap onto a second line rather than being cut off;
+       the Radio button stretches to match. */
     .mobile-primary-row #btnLiveNow {
-      flex-shrink: 0;
-      white-space: nowrap;
+      flex: 0 0 calc(50% - 4px);
+      box-sizing: border-box;
+      min-width: 0;
+      white-space: normal;
+      text-align: center;
+      line-height: 1.2;
+      padding: 6px 8px;
     }
     /* Condensed: no border/box chrome, just text - see "Radio gets a
        condensed ticker, not an icon" in Mobile-First-Design.md. The
        scrolling marquee content itself is unchanged (still real
        now-playing text, not a static icon). */
     .mobile-primary-row #radioTicker {
-      flex: 1;
+      flex: 0 0 calc(50% - 4px);
+      box-sizing: border-box;
       min-width: 0;
       height: auto;
       background: none;
@@ -2438,6 +2449,58 @@
     .fv-badge { font-size: 9.5px; }
     .fv-link { font-size: 12px; }
   }
+  /* The card wrapper and the play icon only matter on phones. */
+  .fv-card { display: contents; }
+  .fv-play { display: none; }
+  /* Phones (same breakpoint as the header's phone layout): the banner lines
+     up with the search box above it - same left and right edges - and
+     stops looking like a second search field. It is an inset, rounded
+     cream-gold card with a brass outline and an orange play button, so it
+     reads as "a video to watch" rather than "a box to type in" (Larry
+     picked this look from three mock-ups: dark, ember, cream). The full-
+     width strip behind it is the header's own green so the card floats on
+     it. The word "video" is dropped from the badge here (the play button
+     already says it) to give the title more room. Only the live banner has
+     .fv-card; the admin preview copies keep the old look. */
+  @media (max-width: 720px) {
+    #featuredVideoBanner {
+      height: auto;
+      padding: 6px 20px; /* same side margins as the search box (header padding) */
+      gap: 0;
+      background: var(--evergreen);
+      border-left: none;
+      border-bottom: none;
+    }
+    #featuredVideoBanner .fv-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      height: 38px;
+      box-sizing: border-box;
+      padding: 0 10px 0 6px;
+      background: #efe2bd;
+      border: 1px solid var(--brass);
+      border-radius: 8px;
+    }
+    #featuredVideoBanner .fv-play {
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--ember);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #featuredVideoBanner .fv-play svg { width: 14px; height: 14px; fill: var(--paper); margin-left: 1px; }
+    #featuredVideoBanner .fv-badge { color: #6f5316; }
+    #featuredVideoBanner .fv-badge-video { display: none; }
+    #featuredVideoBanner .fv-link { color: var(--ink); font-weight: 600; }
+    #featuredVideoBanner .fv-external { color: var(--ember); }
+    #featuredVideoBanner .fv-dismiss { color: var(--ink); }
+  }
   /* Preview copy inside the Manage Featured Video form - same look as
      the live banner but never reads dismissal state and never writes
      to it, so an admin can check appearance/click-through repeatedly
@@ -3723,12 +3786,18 @@
        not-yet-dismissed entry (see featuredVideoDismissedVersion logic
        near the other ticker init code). -->
   <div id="featuredVideoBanner" class="featured-video-banner" style="display:none;">
-    <span class="fv-badge">Featured video</span>
-    <a id="featuredVideoLink" class="fv-link" href="#" target="_blank" rel="noopener">
-      <span id="featuredVideoText" class="fv-link-text"></span>
-      <span class="fv-external" aria-hidden="true">&#8599;</span>
-    </a>
-    <button type="button" id="featuredVideoDismissBtn" class="fv-dismiss" aria-label="Dismiss featured video">&times;</button>
+    <!-- .fv-card is invisible layout-wise on desktop (display: contents);
+         on phones it becomes the inset, rounded card - see the phone
+         block under .featured-video-banner in <style>. -->
+    <div class="fv-card">
+      <span class="fv-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
+      <span class="fv-badge">Featured<span class="fv-badge-video"> video</span></span>
+      <a id="featuredVideoLink" class="fv-link" href="#" target="_blank" rel="noopener">
+        <span id="featuredVideoText" class="fv-link-text"></span>
+        <span class="fv-external" aria-hidden="true">&#8599;</span>
+      </a>
+      <button type="button" id="featuredVideoDismissBtn" class="fv-dismiss" aria-label="Dismiss featured video">&times;</button>
+    </div>
   </div>
   <div id="conferenceTicker" class="ticker-bar ticker-loading">
     <a class="ticker-label" href="https://calvarycca.org/conferences/" target="_blank" rel="noopener noreferrer">Conferences</a>

@@ -71,3 +71,34 @@ One thing worth a look on a real phone: I widened the back button's spacer (52px
 
 ## Testing
 `loadtest.js` (jsdom) in this folder exercises: DOM relocation both directions, hamburger open/close, badge dot/number/hidden states, and the countdown text/fallback logic. Not part of the deliverable — it's local test scaffolding (along with its `node_modules`), safe to delete or ignore.
+
+
+## Phone header polish: Featured Video card + equal Live/Radio buttons (2026-11-25)
+
+Phones only (widths up to 720px); desktop is unchanged (tested at 1280).
+
+- **Featured Video banner = inset cream card.** It now lines up with the search
+  box (same left/right edges: the header's 20px side padding) instead of running
+  edge to edge, so it no longer looks like a second search field. Cream-gold
+  background (`#efe2bd`), brass outline, 8px rounded corners, an orange play
+  button, and the badge reads "FEATURED" (the word "video" is hidden on phones -
+  the play button says it - which gives the title more room). Larry picked this
+  from three mock-ups (dark, ember, cream). The strip behind the card is the
+  header green. The banner markup gained an inner `.fv-card` wrapper
+  (`display: contents` on desktop, so desktop layout is untouched) and a play
+  icon (`.fv-play`, hidden on desktop). JS ids/behaviour are unchanged (title tap
+  opens the video lightbox, x dismisses). The admin preview copies in the
+  Manage Featured Video form keep the old look. The feature-spotlight step that
+  points at the featured video still targets `#featuredVideoBanner`, which on a
+  phone is now the green strip around the card, a little larger than the card.
+- **Live Now and Radio split the row 50/50.** Each is `calc(50% - 4px)` of the
+  row (8px gap), border-box. "Starting any moment now" is wider than half a
+  narrow phone, so the Live Now text may wrap to two lines (Radio stretches to
+  match) instead of being cut off.
+- **Known, left alone:** the Live/Radio row's side margin is 14px while the
+  search box and the new card use 20px, so the buttons stick out 6px each side
+  past them. Offered to line them up; not requested yet.
+- Tested (scratch Playwright, 390/360/320/650/1280): card and search box
+  identical x and width at every phone width, Live and Radio identical widths,
+  long Live text wraps cleanly at 320, title tap opens the lightbox, x dismisses,
+  desktop banner still reads "FEATURED VIDEO" at the same size.
