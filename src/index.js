@@ -2727,6 +2727,11 @@ async function checkAllChurchesLive(env) {
           checkMs: churchCheckMs,
           lastCheckedAt: new Date().toISOString(),
           error: null,
+          // Admin link-problem alert bookkeeping (see computeLinkAlerts):
+          // a good check wipes the failure streak.
+          consecutiveErrors: 0,
+          errorSince: null,
+          errorUrl: null,
           usedStaleData: false,
           stale: false,
           notChecked: false
@@ -2755,10 +2760,19 @@ async function checkAllChurchesLive(env) {
           });
         } else {
           erroredCount++;
+          // Failure streak for the admin link-problem alert: counts checks
+          // in a row that failed for THIS address. If the saved YouTube
+          // address was edited since the last failure (errorUrl differs),
+          // the streak starts over - an edit is a fresh start.
+          const failUrl = buildLiveCheckUrl(c.youtubeUrl);
+          const continuing = !!(prior && prior.error && prior.errorUrl === failUrl && prior.consecutiveErrors > 0);
           mergedResults[c.id] = carryForward(prior, {
             churchId: c.id,
             name: c.name,
             error: err.message,
+            consecutiveErrors: continuing ? prior.consecutiveErrors + 1 : 1,
+            errorSince: continuing && prior.errorSince ? prior.errorSince : new Date().toISOString(),
+            errorUrl: failUrl,
             usedStaleData: !!prior,
             stale: !!prior,
             notChecked: false,
@@ -3154,6 +3168,152 @@ async function handleDebugLiveCheckStatus(request, env) {
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
+}
+
+// ---- Admin link-problem alert (added 2026-11-26) ----
+//
+// The page shows a banner to a signed-in admin when a church's YouTube
+// address looks broken, so it doesn't depend on someone opening Live Debug.
+// This builds the list. A church is a "link problem" when its latest check
+// failed AND either:
+//   - YouTube said the page doesn't exist (status 404 or 410) - that is a
+//     broken address, no need to wait, or
+//   - any other error has now happened on 2+ checks in a row (checks for a
+//     church are ~36 minutes apart, so that is a real pattern, not a blip).
+// An error is ignored if the church's saved address was edited after it
+// happened (errorUrl no longer matches), so a fix clears the alert at once.
+// If MANY churches fail with non-404 errors at the same moment that is not
+// broken links, it is YouTube refusing requests - reported as ONE system
+// notice instead of a pile of per-church alerts.
+// "System" notices: the cycle ran out of its request budget, or the
+// background check itself threw an error.
+
+const LINK_ALERT_REPEAT_THRESHOLD = 2;
+const LINK_ALERT_WIDESPREAD_THRESHOLD = 6;
+
+// Display name without a trailing "(frml ...)" / "(formerly ...)" note.
+function cleanChurchDisplayName(name) {
+  return String(name || '').replace(/\s*\((?:frml|formerly|fka|f\/k\/a)[^)]*\)\s*$/i, '').trim();
+}
+
+function describeLinkError(message) {
+  const m = /status (\d{3})/i.exec(message || '');
+  if (m) {
+    const code = Number(m[1]);
+    if (code === 404 || code === 410) return 'page not found (' + code + ')';
+    if (code === 429) return 'YouTube refused the request (429)';
+    if (code >= 500) return 'YouTube had a server error (' + code + ')';
+    return 'YouTube answered with status ' + code;
+  }
+  if (/timed out/i.test(message || '')) return 'the page timed out';
+  return 'the check failed';
+}
+
+function youtubeHandleLabel(url) {
+  const m = /youtube\.com\/(@[^\/?#\s]+)/i.exec(String(url || ''));
+  if (m) return m[1];
+  const c = /youtube\.com\/(channel\/[^\/?#\s]+)/i.exec(String(url || ''));
+  return c ? c[1] : String(url || '').replace(/^https?:\/\/(www\.|m\.)?/i, '');
+}
+
+async function computeLinkAlerts(env) {
+  const churches = await loadChurches(env);
+  const mergedRaw = await env.CHURCHES_KV.get(LIVE_CHECK_MERGED_RESULTS_KV_KEY);
+  let merged = {};
+  try { merged = mergedRaw ? (JSON.parse(mergedRaw) || {}) : {}; } catch (err) { merged = {}; }
+
+  const failing = [];
+  churches.forEach(function(c) {
+    if (!c || !c.livestreamsEnabled || !c.youtubeUrl) return;
+    const entry = merged[c.id];
+    if (!entry || !entry.error || entry.notChecked) return;
+    if (entry.errorUrl && entry.errorUrl !== buildLiveCheckUrl(c.youtubeUrl)) return; // edited since
+    const is404 = /status (404|410)\b/.test(entry.error);
+    const streak = entry.consecutiveErrors || 1;
+    failing.push({ church: c, entry: entry, is404: is404, streak: streak });
+  });
+
+  const other = failing.filter(function(f) { return !f.is404 && f.streak >= LINK_ALERT_REPEAT_THRESHOLD; });
+  const widespread = other.length >= LINK_ALERT_WIDESPREAD_THRESHOLD;
+
+  const problems = failing.filter(function(f) {
+    if (f.is404) return true;
+    return !widespread && f.streak >= LINK_ALERT_REPEAT_THRESHOLD;
+  }).map(function(f) {
+    return {
+      churchId: f.church.id,
+      name: f.church.name,
+      cleanName: cleanChurchDisplayName(f.church.name),
+      youtubeUrl: f.church.youtubeUrl,
+      handle: youtubeHandleLabel(f.church.youtubeUrl),
+      error: f.entry.error,
+      reason: describeLinkError(f.entry.error),
+      is404: f.is404,
+      consecutiveErrors: f.streak,
+      since: f.entry.errorSince || f.entry.lastCheckedAt || null,
+      lastCheckedAt: f.entry.lastCheckedAt || null
+    };
+  }).sort(function(a, b) {
+    if (a.is404 !== b.is404) return a.is404 ? -1 : 1;
+    return (b.consecutiveErrors - a.consecutiveErrors) || (a.churchId - b.churchId);
+  });
+
+  const system = [];
+  if (widespread) {
+    system.push({ kind: 'widespread', message: other.length + ' churches are failing to load from YouTube right now. That usually means YouTube is limiting requests, not that those links are broken.' });
+  }
+  try {
+    const debugRaw = await env.CHURCHES_KV.get(LIVE_CHECK_DEBUG_KV_KEY);
+    const debug = debugRaw ? JSON.parse(debugRaw) : null;
+    if (debug && debug.latestCycle && debug.latestCycle.hitSubrequestLimit) {
+      system.push({ kind: 'budget', message: 'The last live check ran out of its request budget, so some churches were not checked.' });
+    }
+  } catch (err) { /* ignore - alert is best-effort */ }
+  try {
+    const lastErrRaw = await env.CHURCHES_KV.get(LIVE_CHECK_LAST_ERROR_KV_KEY);
+    if (lastErrRaw) {
+      const lastErr = JSON.parse(lastErrRaw);
+      system.push({ kind: 'cron', message: 'The background live check hit an error: ' + String((lastErr && lastErr.message) || 'unknown').slice(0, 160) });
+    }
+  } catch (err) { /* ignore */ }
+
+  return { problems: problems, system: system, checkedAt: new Date().toISOString() };
+}
+
+async function handleGetLinkAlerts(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  return jsonResponse(await computeLinkAlerts(env));
+}
+
+// POST /api/admin/test-youtube-link  { url }
+// Tries one YouTube address the same way the live check would (one fetch,
+// no retry, nothing saved) so the admin can confirm a pasted link works
+// BEFORE saving it. Only youtube.com addresses are accepted.
+async function handleTestYoutubeLink(request, env) {
+  if (!(await isAdminRequest(request, env))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  let body;
+  try { body = await request.json(); } catch (err) { return jsonResponse({ error: 'Bad request body' }, 400); }
+  const raw = String((body && body.url) || '').trim();
+  if (!raw) return jsonResponse({ ok: false, message: 'Paste a YouTube link first.' });
+  let liveUrl;
+  try {
+    liveUrl = buildLiveCheckUrl(raw);
+    const host = new URL(liveUrl).hostname.toLowerCase();
+    if (!/^(www\.|m\.)?youtube\.com$/.test(host)) {
+      return jsonResponse({ ok: false, message: 'That does not look like a youtube.com link.' });
+    }
+  } catch (err) {
+    return jsonResponse({ ok: false, message: 'That does not look like a valid link.' });
+  }
+  try {
+    const html = await fetchLivePage(liveUrl);
+    let title = null;
+    const t = /<meta property="og:title" content="([^"]{1,200})"/i.exec(html) || /<title>([^<]{1,200})<\/title>/i.exec(html);
+    if (t) title = t[1].replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ - YouTube$/i, '').trim();
+    return jsonResponse({ ok: true, title: title, message: 'YouTube found this channel' + (title ? ': ' + title : '.') });
+  } catch (err) {
+    return jsonResponse({ ok: false, message: 'YouTube could not load that link (' + describeLinkError(err.message) + ').' });
+  }
 }
 
 // Admin-only, read-only DIAGNOSTIC (added 2026-10-14). Churches saved with a
@@ -7001,6 +7161,12 @@ export default {
     }
     if (url.pathname === '/api/admin/visitor-stats' && request.method === 'GET') {
       return handleGetVisitorStats(request, env);
+    }
+    if (url.pathname === '/api/admin/link-alerts' && request.method === 'GET') {
+      return handleGetLinkAlerts(request, env);
+    }
+    if (url.pathname === '/api/admin/test-youtube-link' && request.method === 'POST') {
+      return handleTestYoutubeLink(request, env);
     }
     if (url.pathname === '/api/verify-admin' && request.method === 'POST') {
       return handleVerifyAdmin(request, env);

@@ -3284,6 +3284,139 @@
     .app-update-banner { animation: none; }
   }
 
+  /* ---- Admin-only "YouTube link problem" alert (see the Admin link alerts
+     block in the script) ----
+     A dark card along the bottom edge with an ember border, one problem at a
+     time, plus a red dot on the ☰ button / Live Debug button / Live Debug
+     menu row while any problem is unresolved. Never rendered for non-admins. */
+  .admin-alert-banner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    max-width: 520px;
+    margin: 0 auto;
+    z-index: 2805;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--ink);
+    color: var(--paper);
+    border: 2px solid var(--ember);
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    animation: appUpdateBannerIn 260ms ease-out;
+  }
+  body:has(#radioPlayerBar[style*="display: flex"]) .admin-alert-banner {
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  }
+  body:has(#appUpdateBanner[style*="display: flex"]) .admin-alert-banner {
+    bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  }
+  body:has(#appUpdateBanner[style*="display: flex"]):has(#radioPlayerBar[style*="display: flex"]) .admin-alert-banner {
+    bottom: calc(166px + env(safe-area-inset-bottom, 0px));
+  }
+  .admin-alert-icon { flex-shrink: 0; font-size: 20px; line-height: 1; }
+  .admin-alert-text { flex: 1; min-width: 0; font-size: 14px; line-height: 1.3; }
+  .admin-alert-text strong { display: block; font-size: 15px; }
+  .admin-alert-note { display: block; color: #f2c9b3; font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+  .admin-alert-banner button {
+    flex-shrink: 0;
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .admin-alert-later { background: transparent; color: var(--paper); border: 2px solid rgba(246, 244, 238, 0.45); }
+  .admin-alert-go { background: var(--ember); color: var(--paper); border: 2px solid var(--ember); }
+  @media (max-width: 380px) {
+    .admin-alert-banner { flex-wrap: wrap; }
+    .admin-alert-text { flex: 1 1 calc(100% - 34px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .admin-alert-banner { animation: none; }
+  }
+  /* Red dots - bottom-right of ☰ so they never collide with the Conferences
+     count badge (top-right), and trailing the label on the two Live Debug
+     controls. */
+  .hamburger-btn.admin-alert-on::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #e11d1d;
+    border: 2px solid var(--evergreen);
+  }
+  #btnLiveDebug.admin-alert-on::after,
+  #menuLiveDebugItem.admin-alert-on .hamburger-menu-label::after {
+    content: '';
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-left: 8px;
+    border-radius: 50%;
+    background: #e11d1d;
+    vertical-align: middle;
+  }
+  /* Details panel: centered card on desktop, bottom sheet on phones. */
+  .admin-alert-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2850;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(28, 43, 36, 0.55);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .admin-alert-sheet {
+    width: 100%;
+    max-width: 460px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    background: var(--paper);
+    color: var(--ink);
+    border: 2px solid var(--ember);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    padding: 16px 16px 14px;
+  }
+  .admin-alert-sheet-head { display: flex; align-items: flex-start; gap: 10px; }
+  .admin-alert-sheet-head h3 { flex: 1; margin: 0; font-size: 17px; line-height: 1.25; }
+  .admin-alert-close { background: none; border: none; font-size: 26px; line-height: 1; cursor: pointer; color: var(--ink); padding: 0 4px; }
+  .admin-alert-reason { margin: 6px 0 12px; font-size: 13.5px; color: #7a2e12; line-height: 1.35; }
+  .admin-alert-step { border-top: 1px solid var(--line); padding: 10px 0; }
+  .admin-alert-step-label { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--evergreen); margin-bottom: 6px; }
+  .admin-alert-step a.admin-alert-current { font-size: 15px; font-weight: 700; color: var(--evergreen); overflow-wrap: anywhere; }
+  .admin-alert-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .admin-alert-sheet .aa-btn {
+    border-radius: 6px; padding: 9px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
+    font-family: inherit; border: 2px solid var(--evergreen); background: var(--evergreen); color: var(--paper);
+  }
+  .admin-alert-sheet .aa-btn.secondary { background: transparent; color: var(--evergreen); }
+  .admin-alert-sheet .aa-btn:disabled { opacity: 0.45; cursor: default; }
+  .admin-alert-sheet input.aa-input {
+    width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; border: 1px solid var(--line);
+    border-radius: 6px; background: #fff; color: var(--ink); margin-bottom: 8px;
+  }
+  .admin-alert-result { min-height: 18px; margin-top: 8px; font-size: 13.5px; line-height: 1.35; }
+  .admin-alert-result.ok { color: #1f6b3a; }
+  .admin-alert-result.bad { color: #a12a12; }
+  .admin-alert-more { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .admin-alert-more button { background: none; border: none; padding: 0; color: var(--evergreen); text-decoration: underline; font-size: 13.5px; cursor: pointer; font-family: inherit; }
+  @media (max-width: 720px) {
+    .admin-alert-overlay { align-items: flex-end; padding: 0; }
+    .admin-alert-sheet { max-width: none; border-radius: 14px 14px 0 0; max-height: 88vh; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  }
+
   /* ---- "Add to Home Screen" tip (see the install tip block in the script) ----
      Same card look as the update banner, one layer below it, with the
      buttons on their own row because the how-to text is longer. */
@@ -12285,6 +12418,7 @@
     if (typeof window.ccaStartAnalytics === 'function') window.ccaStartAnalytics(window.isAdmin);
     applyContentGating(window.isAdmin);
     setAdminUiState(window.isAdmin);
+    startAdminLinkAlerts();
     loadPublicScheduleStatus(); // not awaited: it only decides whether visitors get the 📅 button
     await loadChurchesFromServer();
     updateSyncStatus();
@@ -12292,6 +12426,335 @@
     setInterval(loadLiveStatus, LIVE_STATUS_POLL_MS);
     await loadLiveStreamStats();
     setInterval(loadLiveStreamStats, LIVE_STREAM_STATS_POLL_MS);
+  }
+
+  // ---- Admin link alerts (admin only) ----
+  //
+  // A signed-in admin gets a banner when a church's YouTube address looks
+  // broken (the Worker decides what counts - see computeLinkAlerts in
+  // index.js: a 404/410, or the same error on 2+ checks in a row), so a dead
+  // link doesn't wait for someone to open Live Debug. One church at a time:
+  // "Later" hides that church for 24 hours (per browser) and the next one
+  // shows; the red dots stay on until every problem is actually fixed.
+  // "View Details" opens a panel with the three steps that fix it: look at
+  // the current link, search YouTube for the church, paste + test + save
+  // the new link. Whole-checker problems (request budget exhausted, the
+  // background check erroring, YouTube limiting many churches at once) show
+  // the same way with a "View" button that opens Live Debug.
+  const ADMIN_ALERT_POLL_MS = 5 * 60 * 1000;
+  const ADMIN_ALERT_MIN_GAP_MS = 60 * 1000;
+  const ADMIN_ALERT_SNOOZE_MS = 24 * 60 * 60 * 1000;
+  const ADMIN_ALERT_SNOOZE_KEY = 'cfAdminAlertSnooze';
+  let adminAlertData = { problems: [], system: [] };
+  let adminAlertLastFetchAt = 0;
+  let adminAlertInFlight = false;
+  let adminAlertStarted = false;
+  let adminAlertSheetOpen = false;
+
+  function adminAlertLoadSnooze() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ADMIN_ALERT_SNOOZE_KEY) || '{}') || {};
+      const now = Date.now();
+      Object.keys(raw).forEach(function(k) { if (!(raw[k] > now)) delete raw[k]; });
+      return raw;
+    } catch (err) { return {}; }
+  }
+  function adminAlertSnooze(key) {
+    const all = adminAlertLoadSnooze();
+    all[key] = Date.now() + ADMIN_ALERT_SNOOZE_MS;
+    try { localStorage.setItem(ADMIN_ALERT_SNOOZE_KEY, JSON.stringify(all)); } catch (err) { /* it just comes back sooner */ }
+  }
+  // Tied to the saved address, so editing the link makes a fresh alert possible.
+  function adminAlertItemKey(item) {
+    return item.kind === 'church' ? 'c:' + item.problem.churchId + ':' + item.problem.youtubeUrl : 's:' + item.system.kind;
+  }
+
+  function adminAlertItems() {
+    const out = [];
+    (adminAlertData.problems || []).forEach(function(p) { out.push({ kind: 'church', problem: p }); });
+    (adminAlertData.system || []).forEach(function(sy) { out.push({ kind: 'system', system: sy }); });
+    return out;
+  }
+
+  function adminAlertSetDots(on) {
+    ['hamburgerBtn', 'btnLiveDebug', 'menuLiveDebugItem'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('admin-alert-on', !!on);
+    });
+  }
+
+  function adminAlertEnsureBanner() {
+    let el = document.getElementById('adminAlertBanner');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'adminAlertBanner';
+    el.className = 'admin-alert-banner';
+    el.setAttribute('role', 'alert');
+    const icon = document.createElement('span');
+    icon.className = 'admin-alert-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '⚠️';
+    const text = document.createElement('div');
+    text.className = 'admin-alert-text';
+    const title = document.createElement('strong');
+    title.id = 'adminAlertTitle';
+    const note = document.createElement('span');
+    note.id = 'adminAlertNote';
+    note.className = 'admin-alert-note';
+    text.appendChild(title);
+    text.appendChild(note);
+    const later = document.createElement('button');
+    later.type = 'button';
+    later.id = 'adminAlertLater';
+    later.className = 'admin-alert-later';
+    later.textContent = 'Later';
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.id = 'adminAlertGo';
+    go.className = 'admin-alert-go';
+    el.appendChild(icon);
+    el.appendChild(text);
+    el.appendChild(later);
+    el.appendChild(go);
+    document.body.appendChild(el);
+    later.addEventListener('click', function() {
+      const item = el._item;
+      if (item) adminAlertSnooze(adminAlertItemKey(item));
+      renderAdminAlerts();
+    });
+    go.addEventListener('click', function() {
+      const item = el._item;
+      if (!item) return;
+      if (item.kind === 'church') openAdminAlertSheet(item.problem);
+      else { el.style.display = 'none'; document.getElementById('btnLiveDebug').click(); }
+    });
+    return el;
+  }
+
+  function renderAdminAlerts() {
+    if (!window.isAdmin) return;
+    const items = adminAlertItems();
+    adminAlertSetDots(items.length > 0);
+    const banner = adminAlertEnsureBanner();
+    const snoozed = adminAlertLoadSnooze();
+    const next = items.find(function(it) { return !snoozed[adminAlertItemKey(it)]; });
+    banner._item = next || null;
+    if (!next || adminAlertSheetOpen) { banner.style.display = 'none'; return; }
+    const title = document.getElementById('adminAlertTitle');
+    const note = document.getElementById('adminAlertNote');
+    const go = document.getElementById('adminAlertGo');
+    if (next.kind === 'church') {
+      title.textContent = 'YouTube link problem';
+      note.textContent = next.problem.cleanName + ': ' + next.problem.reason;
+      go.textContent = 'View Details';
+    } else {
+      title.textContent = 'Live check problem';
+      note.textContent = next.system.message;
+      go.textContent = 'View';
+    }
+    banner.style.display = 'flex';
+  }
+
+  async function refreshAdminAlerts(force) {
+    if (!window.isAdmin || adminAlertInFlight) return;
+    const now = Date.now();
+    if (!force && now - adminAlertLastFetchAt < ADMIN_ALERT_MIN_GAP_MS) return;
+    adminAlertLastFetchAt = now;
+    adminAlertInFlight = true;
+    try {
+      const res = await fetch('/api/admin/link-alerts', { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !Array.isArray(data.problems)) return;
+      adminAlertData = { problems: data.problems, system: Array.isArray(data.system) ? data.system : [] };
+      renderAdminAlerts();
+    } catch (err) {
+      // Offline / hiccup: leave whatever is showing and try again next time.
+    } finally {
+      adminAlertInFlight = false;
+    }
+  }
+
+  function startAdminLinkAlerts() {
+    if (!window.isAdmin || adminAlertStarted) return;
+    adminAlertStarted = true;
+    refreshAdminAlerts(true);
+    setInterval(function() { refreshAdminAlerts(false); }, ADMIN_ALERT_POLL_MS);
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') refreshAdminAlerts(false);
+    });
+  }
+
+  function adminAlertSearchUrl(name) {
+    return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name).replace(/%20/g, '+');
+  }
+
+  function closeAdminAlertSheet() {
+    const ov = document.getElementById('adminAlertOverlay');
+    if (ov) ov.style.display = 'none';
+    adminAlertSheetOpen = false;
+    renderAdminAlerts();
+  }
+
+  function openAdminAlertSheet(problem) {
+    adminAlertSheetOpen = true;
+    renderAdminAlerts(); // hides the banner while the panel is up
+    let ov = document.getElementById('adminAlertOverlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'adminAlertOverlay';
+      ov.className = 'admin-alert-overlay';
+      ov.addEventListener('click', function(e) { if (e.target === ov) closeAdminAlertSheet(); });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && adminAlertSheetOpen) closeAdminAlertSheet();
+      });
+      document.body.appendChild(ov);
+    }
+    while (ov.firstChild) ov.removeChild(ov.firstChild);
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    const sheet = el('div', 'admin-alert-sheet');
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+
+    const head = el('div', 'admin-alert-sheet-head');
+    head.appendChild(el('h3', null, problem.cleanName));
+    const closeBtn = el('button', 'admin-alert-close', '×');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.addEventListener('click', closeAdminAlertSheet);
+    head.appendChild(closeBtn);
+    sheet.appendChild(head);
+
+    let reasonText = 'YouTube link problem: ' + problem.reason;
+    if (problem.consecutiveErrors > 1) reasonText += '. Failed ' + problem.consecutiveErrors + ' checks in a row';
+    if (problem.since) {
+      const d = new Date(problem.since);
+      if (!isNaN(d.getTime())) reasonText += ', since ' + d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+    sheet.appendChild(el('div', 'admin-alert-reason', reasonText + '.'));
+
+    // Step 1 - current link
+    const s1 = el('div', 'admin-alert-step');
+    s1.appendChild(el('div', 'admin-alert-step-label', '1. Current link'));
+    const cur = el('a', 'admin-alert-current', problem.handle || problem.youtubeUrl);
+    cur.href = problem.youtubeUrl;
+    cur.target = '_blank';
+    cur.rel = 'noopener';
+    s1.appendChild(cur);
+    sheet.appendChild(s1);
+
+    // Step 2 - search YouTube
+    const s2 = el('div', 'admin-alert-step');
+    s2.appendChild(el('div', 'admin-alert-step-label', '2. Find the new link'));
+    const searchBtn = el('button', 'aa-btn', 'Search YouTube');
+    searchBtn.type = 'button';
+    searchBtn.addEventListener('click', function() {
+      window.open(adminAlertSearchUrl(problem.cleanName), '_blank', 'noopener');
+    });
+    const actions2 = el('div', 'admin-alert-actions');
+    actions2.appendChild(searchBtn);
+    s2.appendChild(actions2);
+    sheet.appendChild(s2);
+
+    // Step 3 - paste, test, save
+    const s3 = el('div', 'admin-alert-step');
+    s3.appendChild(el('div', 'admin-alert-step-label', '3. Paste the new link'));
+    const input = el('input', 'aa-input');
+    input.type = 'url';
+    input.placeholder = 'https://www.youtube.com/@ChurchName';
+    input.setAttribute('inputmode', 'url');
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'off');
+    s3.appendChild(input);
+    const testBtn = el('button', 'aa-btn secondary', 'Test link');
+    testBtn.type = 'button';
+    const saveBtn = el('button', 'aa-btn', 'Save');
+    saveBtn.type = 'button';
+    saveBtn.disabled = true;
+    const actions3 = el('div', 'admin-alert-actions');
+    actions3.appendChild(testBtn);
+    actions3.appendChild(saveBtn);
+    s3.appendChild(actions3);
+    const result = el('div', 'admin-alert-result');
+    result.setAttribute('aria-live', 'polite');
+    s3.appendChild(result);
+    sheet.appendChild(s3);
+
+    let testedValue = null;
+    function setResult(kind, msg) { result.className = 'admin-alert-result' + (kind ? ' ' + kind : ''); result.textContent = msg || ''; }
+    input.addEventListener('input', function() {
+      testedValue = null;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Save';
+      setResult('', '');
+    });
+    testBtn.addEventListener('click', async function() {
+      const value = input.value.trim();
+      if (!value) { setResult('bad', 'Paste a YouTube link first.'); return; }
+      testBtn.disabled = true;
+      setResult('', 'Testing…');
+      try {
+        const res = await fetch('/api/admin/test-youtube-link', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: value })
+        });
+        const data = await res.json();
+        testedValue = value;
+        saveBtn.disabled = false;
+        if (data && data.ok) {
+          setResult('ok', '✓ ' + data.message);
+          saveBtn.textContent = 'Save';
+        } else {
+          setResult('bad', (data && data.message) || 'That link did not work.');
+          saveBtn.textContent = 'Save anyway';
+        }
+      } catch (err) {
+        setResult('bad', 'Could not run the test. Check your connection.');
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+    saveBtn.addEventListener('click', async function() {
+      const value = input.value.trim();
+      if (!value || value !== testedValue) return;
+      saveBtn.disabled = true;
+      testBtn.disabled = true;
+      setResult('', 'Saving…');
+      try {
+        await saveChurchToServer({ id: problem.churchId, name: problem.name, youtubeUrl: value });
+        setResult('ok', '✓ Saved. This church’s live status refreshes on its next check (within about 36 minutes).');
+        // The server ignores an error recorded against the old address, so
+        // the alert clears now; refetch and move on to the next one.
+        setTimeout(function() { closeAdminAlertSheet(); refreshAdminAlerts(true); }, 1400);
+      } catch (err) {
+        saveBtn.disabled = false;
+        testBtn.disabled = false;
+        setResult('bad', 'Saving failed. Please check your connection and try again.');
+      }
+    });
+
+    // Fallback - the full Edit Location form
+    const more = el('div', 'admin-alert-more');
+    const fullBtn = el('button', null, 'Open full edit form');
+    fullBtn.type = 'button';
+    fullBtn.addEventListener('click', function() {
+      const c = findChurchById(problem.churchId);
+      closeAdminAlertSheet();
+      if (c) openEditModal(c);
+    });
+    more.appendChild(fullBtn);
+    sheet.appendChild(more);
+
+    ov.appendChild(sheet);
+    ov.style.display = 'flex';
+    setTimeout(function() { try { input.focus({ preventScroll: true }); } catch (err) { /* ignore */ } }, 50);
   }
 
   function updateSyncStatus() {
