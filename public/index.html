@@ -7620,8 +7620,15 @@
   let ytApiReady = false;
   let pendingLightboxVideoId = null;
   let pendingLightboxPlaylistId = null;
+  let pendingLightboxStart = null;
   let currentLightboxVideoId = null;
   let currentLightboxPlaylistId = null;
+  let currentLightboxStart = null;
+
+  // "&t=1512" for a plain YouTube link when the video has a start time.
+  function lightboxStartSuffix() {
+    return currentLightboxStart ? '&t=' + encodeURIComponent(String(currentLightboxStart)) : '';
+  }
 
   // Safety net for a church we thought allowed embedding (embedAllowed
   // true, or not checked yet) but genuinely doesn't - error 101/150 is
@@ -7633,11 +7640,12 @@
     if (event.data === 101 || event.data === 150 || event.data === 100) {
       const videoId = currentLightboxVideoId;
       const playlistId = currentLightboxPlaylistId;
+      const startSuffix = lightboxStartSuffix();
       closeVideoLightbox();
       if (playlistId) {
         window.open('https://www.youtube.com/playlist?list=' + encodeURIComponent(playlistId), '_blank', 'noopener');
       } else if (videoId) {
-        window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId), '_blank', 'noopener');
+        window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId) + startSuffix, '_blank', 'noopener');
       }
     }
   }
@@ -7670,7 +7678,7 @@
     if (currentLightboxPlaylistId) {
       link.href = 'https://www.youtube.com/playlist?list=' + encodeURIComponent(currentLightboxPlaylistId);
     } else if (currentLightboxVideoId) {
-      link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentLightboxVideoId);
+      link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentLightboxVideoId) + lightboxStartSuffix();
     } else {
       link.href = 'https://www.youtube.com/';
     }
@@ -7738,10 +7746,13 @@
   // videoId - and YouTube renders its own playlist rail alongside the
   // video inside the same iframe; no other change to this lightbox's
   // chrome is needed for that.
-  function createLightboxPlayer(videoId, playlistId) {
+  function createLightboxPlayer(videoId, playlistId, startSeconds) {
     currentLightboxVideoId = videoId || null;
     currentLightboxPlaylistId = playlistId || null;
+    currentLightboxStart = (!playlistId && startSeconds > 0) ? startSeconds : null;
     const playerVars = { autoplay: 1, playsinline: 1, rel: 0 };
+    // Start time (e.g. a message that begins after announcements) - single videos only.
+    if (currentLightboxStart) playerVars.start = currentLightboxStart;
     const opts = {
       host: 'https://www.youtube-nocookie.com',
       width: '640',
@@ -7768,9 +7779,11 @@
     if (pendingLightboxVideoId || pendingLightboxPlaylistId) {
       const videoId = pendingLightboxVideoId;
       const playlistId = pendingLightboxPlaylistId;
+      const startSeconds = pendingLightboxStart;
       pendingLightboxVideoId = null;
       pendingLightboxPlaylistId = null;
-      createLightboxPlayer(videoId, playlistId);
+      pendingLightboxStart = null;
+      createLightboxPlayer(videoId, playlistId, startSeconds);
     }
   }
   // Assigned onto window explicitly - the IFrame API looks up this exact
@@ -7788,7 +7801,8 @@
     return church ? churchNameWithTag(church, '') : '';
   }
 
-  function openLiveVideoLightbox(videoId, playlistId, churchId) {
+  // startSeconds (optional, single videos only): begin playing at that time.
+  function openLiveVideoLightbox(videoId, playlistId, churchId, startSeconds) {
     // Made visible BEFORE any player work below - createLightboxPlayer's
     // first-ever call depends on the container already being visible at
     // that point (see the comment on createLightboxPlayer above).
@@ -7799,6 +7813,7 @@
     lightboxTitleEl.textContent = lightboxTitleForChurch(churchId);
     currentLightboxVideoId = videoId || null;
     currentLightboxPlaylistId = playlistId || null;
+    currentLightboxStart = (!playlistId && startSeconds > 0) ? startSeconds : null;
     startLightboxReadyWatchdog();
     if (!ytApiReady) {
       // IFrame API script hasn't finished loading yet (unusual, but
@@ -7806,17 +7821,20 @@
       // this up and builds the player once it fires.
       pendingLightboxVideoId = videoId || null;
       pendingLightboxPlaylistId = playlistId || null;
+      pendingLightboxStart = currentLightboxStart;
       return;
     }
     if (!ytLightboxPlayer) {
-      createLightboxPlayer(videoId, playlistId);
+      createLightboxPlayer(videoId, playlistId, startSeconds);
     } else if (playlistId && typeof ytLightboxPlayer.loadPlaylist === 'function') {
       ytLightboxPlayer.loadPlaylist({ list: playlistId, listType: 'playlist' });
     } else if (!playlistId && typeof ytLightboxPlayer.loadVideoById === 'function') {
-      ytLightboxPlayer.loadVideoById(videoId);
+      if (currentLightboxStart) ytLightboxPlayer.loadVideoById({ videoId: videoId, startSeconds: currentLightboxStart });
+      else ytLightboxPlayer.loadVideoById(videoId);
     } else {
       pendingLightboxVideoId = videoId || null;
       pendingLightboxPlaylistId = playlistId || null;
+      pendingLightboxStart = currentLightboxStart;
     }
   }
 
@@ -7827,8 +7845,10 @@
     hideLightboxFallback();
     pendingLightboxVideoId = null;
     pendingLightboxPlaylistId = null;
+    pendingLightboxStart = null;
     currentLightboxVideoId = null;
     currentLightboxPlaylistId = null;
+    currentLightboxStart = null;
     // stopVideo(), not pauseVideo() - these are live broadcasts, not
     // on-demand video, and pausing a live stream can leave the player
     // holding an awkward buffered position rather than cleanly ending
@@ -8777,6 +8797,7 @@
         // below decide whether to open the lightbox, and in which mode.
         linkEl.dataset.mediaType = data.mediaType || 'other';
         linkEl.dataset.mediaId = data.mediaId || '';
+        linkEl.dataset.mediaStart = data.mediaStart ? String(data.mediaStart) : '';
         banner.dataset.version = String(data.version);
         banner.style.display = 'flex';
       })
@@ -8798,7 +8819,7 @@
       var mediaId = linkEl.dataset.mediaId;
       if (mediaType === 'video' && mediaId) {
         e.preventDefault();
-        openLiveVideoLightbox(mediaId);
+        openLiveVideoLightbox(mediaId, null, null, Number(linkEl.dataset.mediaStart) || null);
       } else if (mediaType === 'playlist' && mediaId) {
         e.preventDefault();
         openLiveVideoLightbox(null, mediaId);
@@ -9102,6 +9123,12 @@
       return n;
     }
     function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+    // 1512 -> "25:12", 3725 -> "1:02:05"
+    function fmtClock(total) {
+      var h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+      var two = function(n) { return (n < 10 ? '0' : '') + n; };
+      return h > 0 ? h + ':' + two(m) + ':' + two(sec) : m + ':' + two(sec);
+    }
 
     // Dates + labels for the current list, mirroring the Worker's rules.
     function computeSchedule() {
@@ -9229,16 +9256,17 @@
         if (it.url.trim() !== url) return;
         if (data.ok && data.title) {
           var canFill = !it.linkText.trim() || it.linkText === it.autoTitle;
+          var startNote = data.startSeconds ? ' Starts at ' + fmtClock(data.startSeconds) + '.' : '';
           if (canFill) {
             it.linkText = data.title;
             it.autoTitle = data.title;
             titleInput.value = data.title;
-            it.hint = { kind: 'ok', text: '✓ Title filled in from YouTube. Edit it if you like.' };
+            it.hint = { kind: 'ok', text: '✓ Title filled in from YouTube. Edit it if you like.' + startNote };
           } else {
-            it.hint = { kind: 'ok', text: '✓ YouTube found this video.' };
+            it.hint = { kind: 'ok', text: '✓ YouTube found this video.' + startNote };
           }
         } else if (data.kind === 'no-embed') {
-          it.hint = { kind: 'warn', text: '⚠️ This video may not play inside the site. It will open on YouTube instead.' };
+          it.hint = { kind: 'warn', text: '⚠️ This video may not play inside the site. It will open on YouTube instead.' + (data.startSeconds ? ' (It will still open at ' + fmtClock(data.startSeconds) + '.)' : '') };
         } else if (data.kind === 'not-found') {
           it.hint = { kind: 'warn', text: '⚠️ YouTube could not find that video. Check the link.' };
         } else if (data.kind === 'not-youtube') {

@@ -819,8 +819,10 @@ async function handleDeleteChurch(request, env) {
 // Stored in KV under FEATURED_VIDEO_KV_KEY as:
 //   { nextVersion, entries: [entry, ...], history: [{linkText, url, lastShown}, ...] }
 // Each entry:
-//   { id, linkText, url, mediaType, mediaId, onlineDate, offlineDate,
+//   { id, linkText, url, mediaType, mediaId, mediaStart, onlineDate, offlineDate,
 //     days, gapDays, version, updatedAt }
+// mediaStart is the start time in seconds taken from the address (?t=1512),
+// or null - the lightbox begins playing there instead of at 0:00.
 // onlineDate/offlineDate are stored (YYYY-MM-DD), so later entries keep
 // their dates when the first one expires and drops off the admin list.
 // OLDER stored data (the two-slot version: no id/days/gapDays, Up Next
@@ -877,13 +879,43 @@ function fvDaysBetween(fromStr, toStr) {
 // (see createLightboxPlayer/openLiveVideoLightbox in the frontend).
 // Anything that isn't a recognizable YouTube video/playlist URL falls
 // back to 'other', which the frontend just treats as a plain link.
+//
+// Recognized video forms: youtube.com/watch?v=ID, youtu.be/ID,
+// youtube.com/embed/ID, /shorts/ID and /live/ID (a finished live stream's
+// address, e.g. https://www.youtube.com/live/UEwCNQctiwU?t=1512).
+//
+// startSeconds: when the address carries a start time (?t=1512, ?t=1512s,
+// ?t=25m12s, ?t=1h2m3s, ?start=1512, or #t=1512) the video should begin
+// there - useful when a message starts after a long run of announcements.
+// Only meaningful for a single video (null for playlists / other links).
+function parseYouTubeStartSeconds(url) {
+  let raw = url.searchParams.get('t') || url.searchParams.get('start');
+  if (!raw && url.hash) {
+    const h = /[#&]t=([^&]+)/.exec(url.hash);
+    if (h) raw = h[1];
+  }
+  if (!raw) return null;
+  raw = String(raw).trim().toLowerCase();
+  let seconds = null;
+  if (/^\d+$/.test(raw)) {
+    seconds = parseInt(raw, 10);
+  } else {
+    const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/.exec(raw);
+    if (m && (m[1] || m[2] || m[3])) {
+      seconds = (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2] || '0', 10) * 60) + parseInt(m[3] || '0', 10);
+    }
+  }
+  if (seconds === null || !(seconds > 0) || seconds > 172800) return null;
+  return seconds;
+}
+
 function parseYouTubeMedia(rawUrl) {
-  if (!rawUrl) return { mediaType: 'other', mediaId: null };
+  if (!rawUrl) return { mediaType: 'other', mediaId: null, startSeconds: null };
   let url;
   try {
     url = new URL(rawUrl);
   } catch (err) {
-    return { mediaType: 'other', mediaId: null };
+    return { mediaType: 'other', mediaId: null, startSeconds: null };
   }
   const host = url.hostname.replace(/^www\./, '').toLowerCase();
   let videoId = null;
@@ -895,19 +927,21 @@ function parseYouTubeMedia(rawUrl) {
     } else {
       const embedMatch = url.pathname.match(/^\/embed\/([a-zA-Z0-9_-]{11})/);
       const shortsMatch = url.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})/);
+      const liveMatch = url.pathname.match(/^\/live\/([a-zA-Z0-9_-]{11})/);
       if (embedMatch) videoId = embedMatch[1];
       else if (shortsMatch) videoId = shortsMatch[1];
+      else if (liveMatch) videoId = liveMatch[1];
     }
   }
   // A single-video URL wins over a list= param when both are present
   // (e.g. a video played from within a playlist) - the admin almost
   // always means to link to the video itself in that case.
-  if (videoId) return { mediaType: 'video', mediaId: videoId };
+  if (videoId) return { mediaType: 'video', mediaId: videoId, startSeconds: parseYouTubeStartSeconds(url) };
   const listId = (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com')
     ? url.searchParams.get('list')
     : null;
-  if (listId) return { mediaType: 'playlist', mediaId: listId };
-  return { mediaType: 'other', mediaId: null };
+  if (listId) return { mediaType: 'playlist', mediaId: listId, startSeconds: null };
+  return { mediaType: 'other', mediaId: null, startSeconds: null };
 }
 
 async function loadFeaturedVideoStore(env) {
@@ -939,6 +973,7 @@ async function loadFeaturedVideoStore(env) {
         url: parsed.url,
         mediaType: media.mediaType,
         mediaId: media.mediaId,
+        mediaStart: media.startSeconds || null,
         onlineDate: parsed.onlineDate || null,
         offlineDate: parsed.offlineDate,
         version: oldVersion,
@@ -977,13 +1012,16 @@ function normalizeFeaturedEntries(stored, today) {
       online = e.autoStart === false ? (e.onlineDate || prev.offlineDate) : prev.offlineDate;
     }
     const startForMath = online || today;
-    const media = (e.mediaType && e.mediaId !== undefined) ? { mediaType: e.mediaType, mediaId: e.mediaId } : parseYouTubeMedia(e.url);
+    // Always re-read the address (rows saved before /live/ links and start
+    // times were understood stored those as plain links).
+    const media = parseYouTubeMedia(e.url);
     out.push({
       id: e.id || ('v' + (e.version != null ? e.version : out.length + 1)),
       linkText: e.linkText,
       url: e.url,
       mediaType: media.mediaType || 'other',
       mediaId: media.mediaId || null,
+      mediaStart: media.startSeconds || null,
       onlineDate: online,
       offlineDate: e.offlineDate,
       days: isNewShape ? e.days : Math.max(1, fvDaysBetween(startForMath, e.offlineDate)),
@@ -1007,7 +1045,7 @@ async function handleGetFeaturedVideo(request, env) {
   const today = featuredToday();
   const current = normalizeFeaturedEntries(store.entries, today).find(function(e) { return fvIsVisible(e, today); }) || null;
   const visible = current
-    ? { linkText: current.linkText, url: current.url, mediaType: current.mediaType || 'other', mediaId: current.mediaId || null, version: current.version }
+    ? { linkText: current.linkText, url: current.url, mediaType: current.mediaType || 'other', mediaId: current.mediaId || null, mediaStart: current.mediaStart || null, version: current.version }
     : null;
   return new Response(JSON.stringify(visible), {
     headers: {
@@ -1146,7 +1184,7 @@ async function handleSaveFeaturedVideo(request, env) {
     cursor = offline;
     const media = parseYouTubeMedia(r.url);
     return {
-      id: id, linkText: r.linkText, url: r.url, mediaType: media.mediaType, mediaId: media.mediaId,
+      id: id, linkText: r.linkText, url: r.url, mediaType: media.mediaType, mediaId: media.mediaId, mediaStart: media.startSeconds || null,
       onlineDate: start, offlineDate: offline, days: r.days, gapDays: r.gapDays,
       version: version, updatedAt: new Date().toISOString()
     };
@@ -1179,16 +1217,21 @@ async function handleYoutubeOembed(request, env) {
   const controller = new AbortController();
   const timer = setTimeout(function() { controller.abort(); }, 8000);
   try {
-    const res = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(target), { signal: controller.signal });
+    // Ask about the plain watch/playlist address - oEmbed is happiest with
+    // those, and the start time does not matter for the title lookup.
+    const lookupUrl = media.mediaType === 'video'
+      ? 'https://www.youtube.com/watch?v=' + media.mediaId
+      : target;
+    const res = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(lookupUrl), { signal: controller.signal });
     if (res.ok) {
       const data = await res.json();
-      return jsonResponse({ ok: true, kind: 'found', title: typeof data.title === 'string' ? data.title : null });
+      return jsonResponse({ ok: true, kind: 'found', title: typeof data.title === 'string' ? data.title : null, startSeconds: media.startSeconds || null });
     }
-    if (res.status === 404) return jsonResponse({ ok: false, kind: 'not-found' });
-    if (res.status === 401 || res.status === 403) return jsonResponse({ ok: false, kind: 'no-embed' });
-    return jsonResponse({ ok: false, kind: 'unknown' });
+    if (res.status === 404) return jsonResponse({ ok: false, kind: 'not-found', startSeconds: media.startSeconds || null });
+    if (res.status === 401 || res.status === 403) return jsonResponse({ ok: false, kind: 'no-embed', startSeconds: media.startSeconds || null });
+    return jsonResponse({ ok: false, kind: 'unknown', startSeconds: media.startSeconds || null });
   } catch (err) {
-    return jsonResponse({ ok: false, kind: 'unknown' });
+    return jsonResponse({ ok: false, kind: 'unknown', startSeconds: media.startSeconds || null });
   } finally {
     clearTimeout(timer);
   }
