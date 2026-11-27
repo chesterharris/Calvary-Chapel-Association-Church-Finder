@@ -1042,6 +1042,47 @@
     font-size: 11px;
     color: #888;
   }
+  /* ---- Manage Featured Video: the ordered queue of videos ---- */
+  .modal.fvq-modal { max-width: 760px; }
+  .fvq-intro { font-size: 13px; color: #4a4a42; line-height: 1.4; margin: 2px 0 12px; }
+  .fvq-card { border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-bottom: 8px; overflow: hidden; }
+  .fvq-card.now { border-color: var(--evergreen); border-width: 2px; }
+  .fvq-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; width: 100%; box-sizing: border-box; background: none; border: none; text-align: left; font-family: inherit; color: inherit; }
+  .fvq-num { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--brass); color: var(--paper); font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .fvq-card.now .fvq-num { background: var(--evergreen); }
+  .fvq-main { flex: 1; min-width: 0; }
+  .fvq-title { font-weight: 700; font-size: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fvq-meta { font-size: 12px; color: #5b5b50; margin-top: 2px; }
+  .fvq-chip { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 999px; padding: 2px 7px; margin-right: 6px; background: #e4ece6; color: var(--evergreen); }
+  .fvq-chip.up { background: #efe2bd; color: #6f5316; }
+  .fvq-chip.q { background: #e8e6de; color: #55554a; }
+  .fvq-chev { color: #777; font-size: 14px; }
+  .fvq-body { padding: 2px 12px 12px; border-top: 1px solid var(--line); }
+  .fvq-body .form-row { margin-top: 10px; }
+  .fvq-hint { font-size: 12.5px; margin-top: 5px; line-height: 1.35; color: #5b5b50; }
+  .fvq-hint.ok { color: #1f6b3a; }
+  .fvq-hint.warn { color: #8a5a00; }
+  .fvq-days { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; flex-wrap: wrap; }
+  .fvq-days input { width: 72px !important; }
+  .fvq-end { font-size: 12.5px; color: #5b5b50; }
+  .fvq-grid { display: grid; grid-template-columns: 1.2fr 1.4fr 90px; gap: 10px; }
+  .fvq-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .fvq-tools button { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 7px 10px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; color: var(--ink); }
+  .fvq-tools button:disabled { opacity: 0.4; cursor: default; }
+  .fvq-tools button.danger { color: #a12a12; margin-left: auto; }
+  .fvq-more { margin-top: 10px; font-size: 13px; }
+  .fvq-more summary { cursor: pointer; color: var(--evergreen); font-weight: 700; }
+  .fvq-gap { border: 1px dashed var(--brass); border-radius: 8px; text-align: center; font-size: 12.5px; color: #6f5316; padding: 6px 8px; margin: 0 0 8px; background: #fbf6e6; }
+  .fvq-add { width: 100%; border: 2px dashed var(--evergreen); background: transparent; color: var(--evergreen); border-radius: 10px; padding: 11px; font-weight: 800; font-size: 14px; cursor: pointer; margin: 4px 0 10px; font-family: inherit; }
+  .fvq-add:disabled { opacity: 0.45; cursor: default; }
+  .fvq-warn { background: #fff3d6; border: 1px solid #e6c36a; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #6b4a00; margin-bottom: 10px; line-height: 1.35; }
+  .fvq-note { font-size: 12.5px; color: #5b5b50; margin-bottom: 10px; }
+  .fvq-recent { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; font-size: 13px; }
+  .fvq-recent h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--evergreen); }
+  .fvq-recent .r { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #eee; }
+  .fvq-recent .r span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fvq-recent .r button { border: 1px solid var(--evergreen); background: transparent; color: var(--evergreen); border-radius: 6px; padding: 4px 9px; font-weight: 700; font-size: 12.5px; cursor: pointer; font-family: inherit; }
+  @media (max-width: 560px) { .fvq-grid { grid-template-columns: 1fr; } }
   .legacy-admin-btn { display: none !important; }
   .sm-cards { display: grid; gap: 10px; margin-top: 8px; }
   .sm-card {
@@ -4174,81 +4215,18 @@
 </div>
 
 <div id="featuredVideoModal" class="modal-overlay" style="display: none;">
-  <div class="modal admin-modal">
+  <div class="modal admin-modal fvq-modal">
     <h2>Manage Featured Video</h2>
-    <form id="featuredVideoForm">
-      <div class="fv-slot-heading">Now Showing</div>
-      <div class="form-row">
-        <label for="fv_linktext">Link text *</label>
-        <input id="fv_linktext" required maxlength="200" placeholder="e.g. Deep South Conference on demand videos">
-      </div>
-      <div class="form-row">
-        <label for="fv_url">Target URL *</label>
-        <input id="fv_url" required inputmode="url" placeholder="https://...">
-      </div>
-      <div class="form-row-split">
-        <div class="form-row">
-          <label for="fv_online">Online date (optional)</label>
-          <input id="fv_online" type="date">
-        </div>
-        <div class="form-row">
-          <label for="fv_offline">Offline date *</label>
-          <input id="fv_offline" type="date" required>
-        </div>
-      </div>
-      <div id="featuredVideoDateError" class="form-error" style="display:none;">Offline date must be after the online date.</div>
-      <div class="form-row">
-        <label>Preview</label>
-        <!-- Reads only the form fields above, live - never touches the
-             real visitor-facing dismissal storage, so an admin can
-             recheck this repeatedly without affecting what the public
-             banner shows or hides. See handleFeaturedVideoFormInput. -->
-        <div id="featuredVideoPreview" class="featured-video-banner featured-video-preview" style="display:none;">
-          <span class="fv-badge">Featured video</span>
-          <span class="fv-link"><span id="featuredVideoPreviewText" class="fv-link-text"></span><span class="fv-external" aria-hidden="true">&#8599;</span></span>
-        </div>
-      </div>
-
-      <!-- Optional second slot - queued to take over automatically once
-           Now Showing goes offline (see fv2_autostart), unless the admin
-           unchecks that and gives it its own online date instead (a
-           deliberate gap, or a fixed start date). Left blank, nothing is
-           queued and Now Showing going offline just leaves the banner
-           empty, same as today. -->
-      <div class="fv-slot-heading fv-slot-heading-upnext">Up Next <span class="fv-slot-optional">(optional)</span></div>
-      <div class="form-row">
-        <label for="fv2_linktext">Link text</label>
-        <input id="fv2_linktext" maxlength="200" placeholder="e.g. Heartlands Conference Sessions">
-      </div>
-      <div class="form-row">
-        <label for="fv2_url">Target URL</label>
-        <input id="fv2_url" inputmode="url" placeholder="https://...">
-      </div>
-      <div class="form-row form-row-checkbox">
-        <label for="fv2_autostart">
-          <input id="fv2_autostart" type="checkbox" checked>
-          Start automatically when the video above goes offline
-        </label>
-      </div>
-      <div class="form-row-split">
-        <div class="form-row" id="fv2OnlineRow" style="display:none;">
-          <label for="fv2_online">Online date</label>
-          <input id="fv2_online" type="date">
-        </div>
-        <div class="form-row">
-          <label for="fv2_offline">Offline date</label>
-          <input id="fv2_offline" type="date">
-        </div>
-      </div>
-      <div id="featuredVideoUpNextDateError" class="form-error" style="display:none;">Check the Up Next dates above - offline must be after online, and (if not starting automatically) online can't be before Now Showing's offline date.</div>
-      <div class="form-row">
-        <label>Up Next preview</label>
-        <div id="featuredVideoUpNextPreview" class="featured-video-banner featured-video-preview" style="display:none;">
-          <span class="fv-badge">Featured video</span>
-          <span class="fv-link"><span id="featuredVideoUpNextPreviewText" class="fv-link-text"></span><span class="fv-external" aria-hidden="true">&#8599;</span></span>
-        </div>
-      </div>
-
+    <form id="featuredVideoForm" novalidate>
+      <!-- An ordered queue (see the block comment above FEATURED_VIDEO_KV_KEY
+           in index.js). Cards are built by the Manage Featured Video script;
+           the Worker works out the calendar dates from "days to show" and
+           the optional "wait" before each video. -->
+      <div class="fvq-intro">Videos show in order, top to bottom. Each one starts when the one above it ends. Dates are worked out for you.</div>
+      <div id="fvqList"></div>
+      <button type="button" id="fvqAddBtn" class="fvq-add">&#65291; Add a video</button>
+      <div id="fvqNote"></div>
+      <div id="fvqRecent" class="fvq-recent" style="display:none;"></div>
       <div id="featuredVideoStatus" class="side-panel-sync-status"></div>
       <div class="form-actions">
         <button type="button" id="cancelFeaturedVideoBtn" class="btn btn-outline">Cancel</button>
@@ -9074,136 +9052,390 @@
   })();
 
   // ---- Manage Featured Video (admin) ----
-  // Two slots: "Now Showing" (fv_*, required - same fields the form has
-  // always had) and "Up Next" (fv2_*, entirely optional). Up Next either
-  // chains off Now Showing's offline date (fv2_autostart checked, the
-  // default) or carries its own explicit online date once unchecked -
-  // see the comment above FEATURED_VIDEO_KV_KEY in index.js for how the
-  // server resolves and re-anchors these on every save.
+  // An ordered queue of videos. The admin gives each one link text, a URL,
+  // "days to show" and (optionally, under "More options") a wait before it
+  // starts; the Worker works out the calendar dates and the page mirrors
+  // that arithmetic here only to show them live while editing (see the
+  // block comment above FEATURED_VIDEO_KV_KEY in index.js for the rules:
+  // the first video starts on save unless it was already first, each later
+  // one starts when the one above ends plus its wait, midnight Pacific).
   (function() {
     var modal = document.getElementById('featuredVideoModal');
     var form = document.getElementById('featuredVideoForm');
-    var linkTextInput = document.getElementById('fv_linktext');
-    var urlInput = document.getElementById('fv_url');
-    var onlineInput = document.getElementById('fv_online');
-    var offlineInput = document.getElementById('fv_offline');
-    var dateError = document.getElementById('featuredVideoDateError');
-    var preview = document.getElementById('featuredVideoPreview');
-    var previewText = document.getElementById('featuredVideoPreviewText');
-
-    var linkTextInput2 = document.getElementById('fv2_linktext');
-    var urlInput2 = document.getElementById('fv2_url');
-    var autoStartInput = document.getElementById('fv2_autostart');
-    var onlineRow2 = document.getElementById('fv2OnlineRow');
-    var onlineInput2 = document.getElementById('fv2_online');
-    var offlineInput2 = document.getElementById('fv2_offline');
-    var dateError2 = document.getElementById('featuredVideoUpNextDateError');
-    var preview2 = document.getElementById('featuredVideoUpNextPreview');
-    var previewText2 = document.getElementById('featuredVideoUpNextPreviewText');
-
+    var listEl = document.getElementById('fvqList');
+    var addBtn = document.getElementById('fvqAddBtn');
+    var noteEl = document.getElementById('fvqNote');
+    var recentEl = document.getElementById('fvqRecent');
     var statusEl = document.getElementById('featuredVideoStatus');
     var saveBtn = document.getElementById('saveFeaturedVideoBtn');
 
-    function updatePreview() {
-      var text = linkTextInput.value.trim();
-      if (text) {
-        previewText.textContent = text;
-        preview.style.display = 'flex';
+    var MAX_ENTRIES = 10;
+    var DEFAULT_DAYS = 7;
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var items = [];
+    var history = [];
+    var serverToday = null;
+    var origHeadId = null;
+    var origHeadStart = null;
+    var loaded = false;
+    var uid = 0;
+    var refs = [];
+
+    function addDays(dateStr, n) {
+      var p = dateStr.split('-').map(Number);
+      return new Date(Date.UTC(p[0], p[1] - 1, p[2] + n)).toISOString().slice(0, 10);
+    }
+    function daysBetween(a, b) {
+      var x = a.split('-').map(Number), y = b.split('-').map(Number);
+      return Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / 86400000);
+    }
+    function fmt(dateStr) {
+      var p = dateStr.split('-').map(Number);
+      var label = MONTHS[p[1] - 1] + ' ' + p[2];
+      if (serverToday && String(p[0]) !== serverToday.slice(0, 4)) label += ', ' + p[0];
+      return label;
+    }
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+    // Dates + labels for the current list, mirroring the Worker's rules.
+    function computeSchedule() {
+      var out = [];
+      var cursor = null;
+      items.forEach(function(it, i) {
+        var d = parseInt(it.days, 10);
+        var validDays = d >= 1 && d <= 365;
+        var g = i === 0 ? 0 : Math.max(0, parseInt(it.gapDays, 10) || 0);
+        var start;
+        if (i === 0) start = (it.id && it.id === origHeadId && origHeadStart) ? origHeadStart : serverToday;
+        else start = addDays(cursor, g);
+        var offline = addDays(start, validDays ? d : 1);
+        cursor = offline;
+        out.push({ start: start, offline: offline, gap: g, validDays: validDays });
+      });
+      var showing = -1;
+      out.forEach(function(o, i) { if (showing === -1 && o.start <= serverToday && o.offline > serverToday) showing = i; });
+      var upNext = showing === -1 ? 0 : showing + 1;
+      out.forEach(function(o, i) { o.status = i === showing ? 'showing' : (i === upNext ? 'upnext' : 'queued'); });
+      return out;
+    }
+
+    function applySchedule() {
+      var sch = computeSchedule();
+      sch.forEach(function(o, i) {
+        var r = refs[i];
+        if (!r) return;
+        var chipText = o.status === 'showing' ? 'Showing now' : (o.status === 'upnext' ? 'Up next' : 'Queued');
+        r.chip.textContent = chipText;
+        r.chip.className = 'fvq-chip' + (o.status === 'upnext' ? ' up' : (o.status === 'queued' ? ' q' : ''));
+        r.card.className = 'fvq-card' + (o.status === 'showing' ? ' now' : '');
+        var meta = fmt(o.start) + ' – ' + fmt(o.offline) + ' · ';
+        meta += o.status === 'showing' ? plural(Math.max(0, daysBetween(serverToday, o.offline)), 'day') + ' left' : plural(daysBetween(o.start, o.offline), 'day');
+        r.meta.textContent = meta;
+        r.title.textContent = items[i].linkText.trim() || 'New video';
+        r.num.textContent = String(i + 1);
+        r.endText.textContent = fmt(o.start) + ' – ' + fmt(o.offline);
+        if (r.gapStrip) {
+          if (o.gap > 0) {
+            r.gapStrip.style.display = '';
+            r.gapStrip.textContent = '⏸ ' + o.gap + '-day gap · nothing featured ' + fmt(sch[i - 1].offline) + ' – ' + fmt(o.start);
+          } else r.gapStrip.style.display = 'none';
+        }
+      });
+      // Queue-end note
+      while (noteEl.firstChild) noteEl.removeChild(noteEl.firstChild);
+      if (!items.length) {
+        noteEl.appendChild(el('div', 'fvq-note', 'Nothing is featured right now. Add a video to show one on the site.'));
       } else {
-        preview.style.display = 'none';
+        var last = sch[sch.length - 1];
+        var left = daysBetween(serverToday, last.offline);
+        if (left <= 14) noteEl.appendChild(el('div', 'fvq-warn', '⚠️ The queue ends ' + fmt(last.offline) + '. Nothing is lined up after that.'));
+        else noteEl.appendChild(el('div', 'fvq-note', 'The queue runs until ' + fmt(last.offline) + '.'));
       }
+      addBtn.disabled = items.length >= MAX_ENTRIES;
+      renderRecent();
     }
-    [linkTextInput, urlInput].forEach(function(el) {
-      el.addEventListener('input', updatePreview);
-    });
 
-    function updateUpNextPreview() {
-      var text = linkTextInput2.value.trim();
-      if (text) {
-        previewText2.textContent = text;
-        preview2.style.display = 'flex';
-      } else {
-        preview2.style.display = 'none';
-      }
+    function renderRecent() {
+      while (recentEl.firstChild) recentEl.removeChild(recentEl.firstChild);
+      var inQueue = {};
+      items.forEach(function(it) { inQueue[it.url.trim()] = true; });
+      var rows = history.filter(function(h) { return !inQueue[h.url]; });
+      if (!rows.length) { recentEl.style.display = 'none'; return; }
+      recentEl.style.display = '';
+      recentEl.appendChild(el('h4', null, 'Recently shown'));
+      rows.forEach(function(h) {
+        var r = el('div', 'r');
+        r.appendChild(el('span', null, h.linkText));
+        var b = el('button', null, 'Show again');
+        b.type = 'button';
+        b.disabled = items.length >= MAX_ENTRIES;
+        b.addEventListener('click', function() {
+          if (items.length >= MAX_ENTRIES) return;
+          items.push(newItem({ linkText: h.linkText, url: h.url, open: true }));
+          render();
+          var last = refs[refs.length - 1];
+          if (last && last.card.scrollIntoView) last.card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+        r.appendChild(b);
+        recentEl.appendChild(r);
+      });
     }
-    [linkTextInput2, urlInput2].forEach(function(el) {
-      el.addEventListener('input', updateUpNextPreview);
-    });
 
-    function syncAutoStartUi() {
-      onlineRow2.style.display = autoStartInput.checked ? 'none' : '';
-      if (autoStartInput.checked) onlineInput2.value = '';
+    function newItem(o) {
+      uid++;
+      return {
+        key: uid,
+        id: o.id || null,
+        linkText: o.linkText || '',
+        url: o.url || '',
+        days: o.days != null ? o.days : DEFAULT_DAYS,
+        gapDays: o.gapDays || 0,
+        open: !!o.open,
+        hint: null,
+        autoTitle: null
+      };
     }
-    autoStartInput.addEventListener('change', function() {
-      syncAutoStartUi();
-      validateUpNextDates();
-    });
 
-    function validateDates() {
-      var online = onlineInput.value;
-      var offline = offlineInput.value;
-      var invalid = !!(online && offline && online >= offline);
-      dateError.style.display = invalid ? 'block' : 'none';
-      return !invalid;
+    function move(i, delta) {
+      var j = i + delta;
+      if (j < 0 || j >= items.length) return;
+      var t = items[i]; items[i] = items[j]; items[j] = t;
+      render();
     }
-    onlineInput.addEventListener('change', validateDates);
-    offlineInput.addEventListener('change', validateDates);
 
-    function validateUpNextDates() {
-      var online = autoStartInput.checked ? '' : onlineInput2.value;
-      var offline = offlineInput2.value;
-      var nowShowingOffline = offlineInput.value;
-      var invalid = !!(
-        (online && offline && online >= offline) ||
-        (online && nowShowingOffline && online < nowShowingOffline)
-      );
-      dateError2.style.display = invalid ? 'block' : 'none';
-      return !invalid;
+    function setHint(it, hintEl) {
+      if (!it.hint) { hintEl.textContent = ''; hintEl.className = 'fvq-hint'; hintEl.style.display = 'none'; return; }
+      hintEl.style.display = '';
+      hintEl.className = 'fvq-hint ' + (it.hint.kind || '');
+      hintEl.textContent = it.hint.text;
     }
-    onlineInput2.addEventListener('change', validateUpNextDates);
-    offlineInput2.addEventListener('change', validateUpNextDates);
-    offlineInput.addEventListener('change', validateUpNextDates);
+
+    // Looks the pasted address up (title + "will it play here?").
+    var lookupSeq = 0;
+    async function lookupUrl(it, titleInput, hintEl) {
+      var url = it.url.trim();
+      if (!url) { it.hint = null; setHint(it, hintEl); return; }
+      var seq = ++lookupSeq;
+      try {
+        var res = await fetch('/api/admin/youtube-oembed?url=' + encodeURIComponent(url), { credentials: 'include', cache: 'no-store' });
+        if (!res.ok || seq !== lookupSeq && it.url.trim() !== url) return;
+        var data = await res.json();
+        if (it.url.trim() !== url) return;
+        if (data.ok && data.title) {
+          var canFill = !it.linkText.trim() || it.linkText === it.autoTitle;
+          if (canFill) {
+            it.linkText = data.title;
+            it.autoTitle = data.title;
+            titleInput.value = data.title;
+            it.hint = { kind: 'ok', text: '✓ Title filled in from YouTube. Edit it if you like.' };
+          } else {
+            it.hint = { kind: 'ok', text: '✓ YouTube found this video.' };
+          }
+        } else if (data.kind === 'no-embed') {
+          it.hint = { kind: 'warn', text: '⚠️ This video may not play inside the site. It will open on YouTube instead.' };
+        } else if (data.kind === 'not-found') {
+          it.hint = { kind: 'warn', text: '⚠️ YouTube could not find that video. Check the link.' };
+        } else if (data.kind === 'not-youtube') {
+          it.hint = { kind: '', text: 'Not a YouTube link. It will open as a normal link.' };
+        } else {
+          it.hint = null;
+        }
+        setHint(it, hintEl);
+        applySchedule();
+      } catch (err) { /* no lookup is fine - the admin can still type the title */ }
+    }
+
+    function render() {
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+      refs = [];
+      items.forEach(function(it, i) {
+        var r = {};
+        if (i > 0) {
+          r.gapStrip = el('div', 'fvq-gap');
+          r.gapStrip.style.display = 'none';
+          listEl.appendChild(r.gapStrip);
+        }
+        var card = el('div', 'fvq-card');
+        var head = el('button', 'fvq-head');
+        head.type = 'button';
+        head.setAttribute('aria-expanded', it.open ? 'true' : 'false');
+        r.num = el('span', 'fvq-num');
+        var main = el('div', 'fvq-main');
+        r.title = el('div', 'fvq-title');
+        var metaRow = el('div', 'fvq-meta');
+        r.chip = el('span', 'fvq-chip');
+        r.meta = el('span');
+        metaRow.appendChild(r.chip);
+        metaRow.appendChild(r.meta);
+        main.appendChild(r.title);
+        main.appendChild(metaRow);
+        var chev = el('span', 'fvq-chev', it.open ? '▲' : '▼');
+        head.appendChild(r.num);
+        head.appendChild(main);
+        head.appendChild(chev);
+        head.addEventListener('click', function() { it.open = !it.open; render(); });
+        card.appendChild(head);
+
+        if (it.open) {
+          var body = el('div', 'fvq-body');
+          var grid = el('div', 'fvq-grid');
+          var rowText = el('div', 'form-row');
+          rowText.appendChild(el('label', null, 'Link text *'));
+          var textInput = el('input');
+          textInput.maxLength = 200;
+          textInput.value = it.linkText;
+          textInput.placeholder = 'e.g. Deep South Conference on demand videos';
+          textInput.addEventListener('input', function() { it.linkText = textInput.value; applySchedule(); });
+          rowText.appendChild(textInput);
+          var rowUrl = el('div', 'form-row');
+          rowUrl.appendChild(el('label', null, 'Target URL *'));
+          var urlInput = el('input');
+          urlInput.value = it.url;
+          urlInput.placeholder = 'https://...';
+          urlInput.setAttribute('inputmode', 'url');
+          var hintEl = el('div', 'fvq-hint');
+          setHint(it, hintEl);
+          urlInput.addEventListener('input', function() { it.url = urlInput.value; it.hint = null; setHint(it, hintEl); });
+          urlInput.addEventListener('change', function() { lookupUrl(it, textInput, hintEl); });
+          urlInput.addEventListener('paste', function() { setTimeout(function() { it.url = urlInput.value; lookupUrl(it, textInput, hintEl); }, 0); });
+          rowUrl.appendChild(urlInput);
+          rowUrl.appendChild(hintEl);
+          var daysRow = el('div', 'form-row');
+          daysRow.appendChild(el('label', null, 'Days to show'));
+          var daysInput = el('input');
+          daysInput.type = 'number';
+          daysInput.min = '1';
+          daysInput.max = '365';
+          daysInput.value = String(it.days);
+          daysInput.addEventListener('input', function() { it.days = daysInput.value; applySchedule(); });
+          daysRow.appendChild(daysInput);
+
+          if (window.matchMedia('(min-width: 561px)').matches) {
+            grid.appendChild(rowText);
+            grid.appendChild(rowUrl);
+            grid.appendChild(daysRow);
+            body.appendChild(grid);
+          } else {
+            body.appendChild(rowText);
+            body.appendChild(rowUrl);
+            var dd = el('div', 'fvq-days');
+            dd.appendChild(el('label', null, 'Days to show'));
+            dd.style.marginTop = '10px';
+            dd.appendChild(daysInput);
+            r.endText = el('span', 'fvq-end');
+            dd.appendChild(r.endText);
+            body.appendChild(dd);
+          }
+          if (!r.endText) r.endText = el('span', 'fvq-end'); // desktop: dates are in the card header
+
+          if (i > 0) {
+            var more = el('details', 'fvq-more');
+            if (it.gapDays > 0) more.open = true;
+            more.appendChild(el('summary', null, 'More options'));
+            var gd = el('div', 'fvq-days');
+            gd.appendChild(el('label', null, 'Wait'));
+            gd.style.marginTop = '10px';
+            var gapInput = el('input');
+            gapInput.type = 'number';
+            gapInput.min = '0';
+            gapInput.max = '365';
+            gapInput.value = String(it.gapDays || 0);
+            gapInput.addEventListener('input', function() { it.gapDays = gapInput.value; applySchedule(); });
+            gd.appendChild(gapInput);
+            gd.appendChild(el('span', 'fvq-end', 'days before this one starts (nothing is featured while waiting)'));
+            more.appendChild(gd);
+            body.appendChild(more);
+          }
+
+          var tools = el('div', 'fvq-tools');
+          var up = el('button', null, '▲ Move up'); up.type = 'button'; up.disabled = i === 0;
+          var down = el('button', null, '▼ Move down'); down.type = 'button'; down.disabled = i === items.length - 1;
+          up.addEventListener('click', function() { move(i, -1); });
+          down.addEventListener('click', function() { move(i, 1); });
+          tools.appendChild(up);
+          tools.appendChild(down);
+          if (i > 0) {
+            var now = el('button', null, 'Show this one now'); now.type = 'button';
+            now.addEventListener('click', function() {
+              var t = items.splice(i, 1)[0];
+              t.gapDays = 0;
+              items.unshift(t);
+              render();
+            });
+            tools.appendChild(now);
+          }
+          var rm = el('button', 'danger', 'Remove'); rm.type = 'button';
+          rm.addEventListener('click', function() { items.splice(i, 1); render(); });
+          tools.appendChild(rm);
+          body.appendChild(tools);
+          card.appendChild(body);
+        } else {
+          r.endText = el('span');
+        }
+        r.card = card;
+        refs.push(r);
+        listEl.appendChild(card);
+      });
+      applySchedule();
+    }
 
     async function openFeaturedVideoModal() {
       statusEl.textContent = '';
-      dateError.style.display = 'none';
-      dateError2.style.display = 'none';
-      form.reset();
-      preview.style.display = 'none';
-      preview2.style.display = 'none';
-      syncAutoStartUi();
+      items = [];
+      history = [];
+      loaded = false;
+      saveBtn.disabled = true;
+      refs = [];
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+      noteEl.textContent = 'Loading…';
       modal.style.display = 'flex';
       try {
         var res = await fetch('/api/featured-video/admin', { credentials: 'include', cache: 'no-store' });
-        if (res.ok) {
-          var data = await res.json();
-          var current = data && data.current;
-          var upNext = data && data.upNext;
-          if (current) {
-            linkTextInput.value = current.linkText || '';
-            urlInput.value = current.url || '';
-            onlineInput.value = current.onlineDate || '';
-            offlineInput.value = current.offlineDate || '';
-            updatePreview();
-          }
-          if (upNext) {
-            linkTextInput2.value = upNext.linkText || '';
-            urlInput2.value = upNext.url || '';
-            autoStartInput.checked = upNext.autoStart !== false;
-            onlineInput2.value = upNext.onlineDate || '';
-            offlineInput2.value = upNext.offlineDate || '';
-            syncAutoStartUi();
-            updateUpNextPreview();
-          }
-        }
+        if (!res.ok) throw new Error('load failed');
+        var data = await res.json();
+        serverToday = data.today;
+        var entries = Array.isArray(data.entries) ? data.entries : [];
+        history = Array.isArray(data.history) ? data.history : [];
+        origHeadId = entries.length ? entries[0].id : null;
+        origHeadStart = entries.length ? entries[0].onlineDate : null;
+        items = entries.map(function(e) {
+          return newItem({ id: e.id, linkText: e.linkText, url: e.url, days: e.days, gapDays: e.gapDays });
+        });
+        loaded = true;
+        saveBtn.disabled = false;
+        noteEl.textContent = '';
+        render();
       } catch (err) {
-        // Blank form is a safe fallback - admin can still enter a fresh entry.
+        // Never offer Save without the current list - it would replace it with nothing.
+        noteEl.textContent = '';
+        statusEl.textContent = 'Could not load the current featured videos. Close this and try again.';
       }
     }
 
     function closeFeaturedVideoModal() {
       modal.style.display = 'none';
     }
+
+    addBtn.addEventListener('click', function() {
+      if (!loaded || items.length >= MAX_ENTRIES) return;
+      items.push(newItem({ open: true }));
+      render();
+      var last = refs[refs.length - 1];
+      if (last && last.card.scrollIntoView) last.card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      var inputs = last && last.card.querySelectorAll('input');
+      if (inputs && inputs.length) {
+        // On a wide screen the first input is link text; paste a URL first
+        // is the natural flow, so focus the URL box (second input).
+        var target = inputs.length > 1 ? inputs[1] : inputs[0];
+        try { target.focus({ preventScroll: true }); } catch (err) { /* ignore */ }
+      }
+    });
 
     document.getElementById('btnManageFeaturedVideo').addEventListener('click', openFeaturedVideoModal);
     document.getElementById('cancelFeaturedVideoBtn').addEventListener('click', closeFeaturedVideoModal);
@@ -9213,22 +9445,36 @@
 
     form.addEventListener('submit', async function(e) {
       e.preventDefault();
-      if (!validateDates() || !validateUpNextDates()) return;
+      if (!loaded) return;
+      // Check every row before sending, and open the first one with a problem.
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var d = Number(it.days);
+        var g = i === 0 ? 0 : Number(it.gapDays || 0);
+        var problem = null;
+        if (!it.linkText.trim()) problem = 'needs link text';
+        else if (!it.url.trim()) problem = 'needs a target URL';
+        else if (!/^https?:\/\//i.test(it.url.trim())) problem = 'URL must start with http:// or https://';
+        else if (!(Number.isInteger(d) && d >= 1 && d <= 365)) problem = 'days to show must be a whole number from 1 to 365';
+        else if (!(Number.isInteger(g) && g >= 0 && g <= 365)) problem = 'the wait must be a whole number of days (0 or more)';
+        if (problem) {
+          it.open = true;
+          render();
+          statusEl.textContent = 'Video ' + (i + 1) + ' ' + problem + '.';
+          return;
+        }
+      }
 
       var payload = {
-        current: {
-          linkText: linkTextInput.value.trim(),
-          url: urlInput.value.trim(),
-          onlineDate: onlineInput.value || null,
-          offlineDate: offlineInput.value
-        },
-        upNext: {
-          linkText: linkTextInput2.value.trim(),
-          url: urlInput2.value.trim(),
-          autoStart: autoStartInput.checked,
-          onlineDate: autoStartInput.checked ? null : (onlineInput2.value || null),
-          offlineDate: offlineInput2.value
-        }
+        entries: items.map(function(it, i) {
+          return {
+            id: it.id,
+            linkText: it.linkText.trim(),
+            url: it.url.trim(),
+            days: Number(it.days),
+            gapDays: i === 0 ? 0 : Number(it.gapDays || 0)
+          };
+        })
       };
 
       var originalBtnText = saveBtn.textContent;
@@ -9244,7 +9490,7 @@
         });
         var data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || 'Save failed');
-        saveBtn.textContent = 'Saved \u2713';
+        saveBtn.textContent = 'Saved ✓';
         setTimeout(function() {
           saveBtn.disabled = false;
           saveBtn.textContent = originalBtnText;
