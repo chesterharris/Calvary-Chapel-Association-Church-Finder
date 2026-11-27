@@ -9467,9 +9467,7 @@
 
     document.getElementById('btnManageFeaturedVideo').addEventListener('click', openFeaturedVideoModal);
     document.getElementById('cancelFeaturedVideoBtn').addEventListener('click', closeFeaturedVideoModal);
-    modal.addEventListener('click', function(e) {
-      if (e.target === modal) closeFeaturedVideoModal();
-    });
+    // Closes only with Save or Cancel, not by clicking outside it (an outside click used to throw away the queue edits).
 
     form.addEventListener('submit', async function(e) {
       e.preventDefault();
@@ -9864,7 +9862,7 @@
   function closeSiteMgmt() { siteMgmtModal.style.display = 'none'; }
   document.getElementById('btnSiteManagement').addEventListener('click', openSiteMgmt);
   document.getElementById('smCloseBtn').addEventListener('click', closeSiteMgmt);
-  siteMgmtModal.addEventListener('click', function(e) { if (e.target === siteMgmtModal) closeSiteMgmt(); });
+  // Site Management closes only with its Close button or by opening a pane - not by clicking outside it.
   document.getElementById('smCardLocations').addEventListener('click', function() {
     closeSiteMgmt();
     document.getElementById('btnManageLocations').click();
@@ -9930,7 +9928,7 @@
     closeScheduleVis();
     document.getElementById('btnProgramSchedule').click();
   });
-  scheduleVisModal.addEventListener('click', function(e) { if (e.target === scheduleVisModal) closeScheduleVis(); });
+  // Closes only with its buttons, not by clicking outside it.
 
   // ---- Manage Feature Spotlights (admin) ----
   // List view (existing spotlights) + form view (one spotlight with up to
@@ -10113,7 +10111,7 @@
     document.getElementById('spNewBtn').addEventListener('click', function() { openForm(null); });
     document.getElementById('spCancelBtn').addEventListener('click', function() { setStatus(''); showList(); });
     document.getElementById('spPreviewBtn').addEventListener('click', function() { setStatus(''); runPreview(collectSteps()); });
-    modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+    // Closes only with its buttons, not by clicking outside it.
 
     listEl.addEventListener('click', async function(e) {
       var btn = e.target.closest('button[data-id]');
@@ -10286,7 +10284,7 @@
   });
   document.getElementById('cmBackBtn').addEventListener('click', function() { closeConferenceMgmt(); openSiteMgmt(); });
   document.getElementById('cmCancelEditBtn').addEventListener('click', function() { cmSetStatus(''); cmResetForm(); });
-  cmModal.addEventListener('click', function(e) { if (e.target === cmModal) closeConferenceMgmt(); });
+  // Closes only with its buttons, not by clicking outside it.
 
   cmListEl.addEventListener('click', async function(e) {
     const editBtn = e.target.closest('.cm-act-edit');
