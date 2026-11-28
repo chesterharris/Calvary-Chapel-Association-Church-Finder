@@ -5441,6 +5441,29 @@ const RADIO_STATIONS = [
     provider: 'publishedschedule',
     schedule: KRTM_SCHEDULE,
     streamUrl: 'https://streaming.live365.com/a28002'
+  },
+  {
+    // Added 2026-11-28. KCZN 105.9 LPFM, an outreach of Calvary Chapel
+    // McAllen Metro. The stream is a SHOUTcast v2 server on MyRadioStream
+    // (s27, port 15446). Larry checked the station's own played.html page
+    // (http://s27.myradiostream.com:15446/played.html?sid=1, the feed its
+    // website player reads) and it lists real program and song titles, e.g.
+    // "<Host> - Chapter & Verse 11-27-2026", so the live feed is the data
+    // source; no published schedule was needed. (The site's schedule page
+    // exists but its weekend table stops at 4:30 am.) The stream also plays
+    // over HTTPS at the /15446/ path, so host + '/stats?json=1' is assumed
+    // to work through the same path the way shoutcheap's /proxy/ ones do -
+    // Larry to confirm https://s27.myradiostream.com/15446/stats?json=1
+    // returns JSON with a "songtitle" field. Known feed quirks: some entries
+    // are file labels or repeat themselves ("ACTO2 - ACTO2"), and talk
+    // entries end in a date; shown as the station sends them.
+    id: 'kczn',
+    displayName: 'KCZN',
+    cityState: 'McAllen, TX',
+    homePage: 'https://kczncitizenradio.org/',
+    provider: 'shoutcast',
+    host: 's27.myradiostream.com/15446',
+    streamUrl: 'https://s27.myradiostream.com/15446/listen.mp3'
   }
   // KYYR "The Bridge of Hope" (Yakima, WA) was added here 2026-09-23, then
   // REMOVED the same day - the stream itself doesn't reliably play over

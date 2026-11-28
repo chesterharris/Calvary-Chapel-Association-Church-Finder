@@ -1026,7 +1026,25 @@ config with an `icehls` entry (this mechanism, not gated).
   path on a Shoutcast proxy just serves the raw audio stream back, not an
   error, which can be misleading (it "works" in a browser, just not usefully).
 
-**Stations currently configured:** WLEB, WLXM.
+**Stations currently configured:** WLEB, WLXM, KCZN.
+**KCZN (McAllen, TX / Calvary Chapel McAllen Metro)** - added 2026-11-28 with
+`host: 's27.myradiostream.com/15446'`, stream
+`https://s27.myradiostream.com/15446/listen.mp3`. A third hosting pattern:
+MyRadioStream runs SHOUTcast v2 on port 15446, and the same server is
+reachable over HTTPS through the `/15446/` path (the stream plays that way).
+The station's own website player reads
+`http://s27.myradiostream.com:15446/played.html?sid=1`; Larry opened it and
+it lists real titles (talk shows as "Host - Program MM-DD-YYYY", plus songs).
+That was the deciding check - the site's own "now playing" box is only
+placeholder text. Assumes `https://s27.myradiostream.com/15446/stats?json=1`
+returns the usual `songtitle` JSON - confirm after deploy; if it does not,
+the ticker just shows the plain "Live" label. Feed quirks, shown as sent: some
+entries are file labels or repeat themselves ("ACTO2 - ACTO2"), and talk
+entries end in a date. The site also publishes a weekly schedule
+(kczncitizenradio.org/show-schedule/, Central time, no host names kept here)
+but its weekend table stops at 4:30 am - not needed while the live feed works,
+but a fallback if the feed ever goes stale.
+
 
 **WLXM (Lexington, SC / Calvary Chapel Lexington)** confirms the shared-
 hosting-with-path-prefix pattern (documented under Icecast above) also
