@@ -50,6 +50,17 @@ station.streamUrl`) - so `streamUrl` must always be a **direct, continuous
 audio stream** (MP3/AAC-over-HTTP, Shoutcast/Icecast-style), never an HLS
 `.m3u8` playlist, which a bare `<audio>` tag can't play in most browsers.
 
+**Per-station time limit (added 2026-11-28).** `handleRadio` asks every
+station at once and waits for all of them, so one dead feed used to hold the
+whole station list back: visitors sat on "Loading stations..." for several
+minutes (measured ~90 s) because Renew FM's server stopped answering and
+Cloudflare only reported a 522 after that long. Each station now gets
+`RADIO_STATION_TIMEOUT_MS` (5 s); one that runs out is returned like any failed
+station (blank title, `error: "... timed out"`) and the rest load normally.
+To find a slow or dead station, open `/radio-now-playing` in a browser and look
+for entries with an `error` field. A station that keeps timing out is down on
+its end - consider removing it or checking its feed.
+
 **`displayName` naming convention (as of the Browse Panel/favoriting
 update):** early on, `displayName` needed a `(state)` suffix on almost
 every station, since the ticker's name was the ONLY context a visitor

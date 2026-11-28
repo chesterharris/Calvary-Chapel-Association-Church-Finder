@@ -4107,6 +4107,15 @@ async function handleDeleteManualConference(request, env) {
 const RADIO_CACHE_SECONDS = 60;
 const RADIO_CACHE_VERSION = 1;
 
+// Longest any ONE station's now-playing lookup may take before it is given
+// up on (added 2026-11-28). handleRadio waits for every station at once, so
+// without this a single dead feed held the whole station list back: Renew
+// FM's server stopped answering and Cloudflare reported it as a 522 only
+// after ~90 seconds, which is how long visitors saw "Loading stations...".
+// A station that times out is returned like any other failed station
+// (blank title) and the rest load normally.
+const RADIO_STATION_TIMEOUT_MS = 5000;
+
 // Config-driven station list. Adding a new station is just adding one entry
 // here (assuming it's on a provider already handled by RADIO_PROVIDERS below;
 // see the note there for what's involved in adding a new provider).
@@ -7011,7 +7020,20 @@ async function handleRadio(request, ctx) {
   // live-status checker above.
   const stations = await Promise.all(RADIO_STATIONS.map(async function(station) {
     try {
-      return await fetchStationNowPlaying(station);
+      // Race the lookup against a timer so a hung feed cannot hold up the
+      // whole list (see RADIO_STATION_TIMEOUT_MS). Covers every provider,
+      // including the ones that make several calls or use a WebSocket.
+      let timer;
+      const timeout = new Promise(function(resolve, reject) {
+        timer = setTimeout(function() {
+          reject(new Error('Station ' + station.displayName + ' timed out after ' + (RADIO_STATION_TIMEOUT_MS / 1000) + 's'));
+        }, RADIO_STATION_TIMEOUT_MS);
+      });
+      try {
+        return await Promise.race([fetchStationNowPlaying(station), timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
     } catch (err) {
       return {
         id: station.id,
